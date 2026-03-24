@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.py[cod]
+.DS_Store
+
+# Local runtime artifacts
+data/*.log
+data/*.db
+*.db
+*.sqlite

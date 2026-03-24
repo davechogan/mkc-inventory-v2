@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MKC — Master list &amp; descriptors</title>
+  <link rel="icon" type="image/png" href="/static/logo.png" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body data-page="master">
+  <nav class="app-nav">
+    <a href="/" class="nav-logo" aria-label="MKC Inventory home">
+      <img src="/static/logo.png" alt="MKC" class="nav-logo-img" />
+    </a>
+    <a href="/">Collection</a>
+    <a href="/identify">Identify</a>
+    <a href="/master" class="active" aria-current="page">Catalog</a>
+    <a href="/reporting">Reporting</a>
+  </nav>
+
+  <header class="app-header">
+    <div>
+      <h1>Master catalog</h1>
+      <p>Edit models, defaults, and descriptor pick-lists. Use CSV to round-trip with a spreadsheet.</p>
+    </div>
+    <div class="header-actions">
+      <a class="button-link" href="/api/v2/export/catalog.csv" download>Download CSV</a>
+      <button id="refreshBtn" type="button" class="secondary">Refresh</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="card">
+      <div class="section-header">
+        <div>
+          <h2>Spreadsheet sync</h2>
+          <div class="muted">Export edits the live database snapshot. Import upserts rows by <strong>name</strong> (adds new models or updates existing).</div>
+        </div>
+      </div>
+      <form id="csvImportForm" class="csv-import-row" enctype="multipart/form-data">
+        <label class="file-label">
+          <span>Import UTF-8 CSV</span>
+          <input type="file" name="file" accept=".csv,text/csv" required />
+        </label>
+        <button type="submit">Import</button>
+      </form>
+      <p id="csvImportMessage" class="muted hidden"></p>
+    </section>
+
+    <section class="card">
+      <div class="section-header">
+        <h2>Silhouette (Hu) admin</h2>
+        <div>
+          <button id="checkHuStatusBtn" type="button" class="secondary">Check Hu status</button>
+          <button id="recomputeHuBtn" type="button" class="secondary">Recompute missing Hu</button>
+        </div>
+      </div>
+      <p class="muted small">Verify which masters have Hu values in the DB and recompute from stored images for those missing or degenerate.</p>
+      <div id="huStatusReport" class="hidden"></div>
+    </section>
+
+    <section class="card">
+      <div class="section-header">
+        <h2>Distinguishing features (vision LLM)</h2>
+        <div class="dist-actions-row">
+          <button id="checkDistStatusBtn" type="button" class="secondary">Check status</button>
+          <button id="recomputeDistMissingBtn" type="button" class="secondary">Recompute missing</button>
+          <button id="recomputeDistAllBtn" type="button" class="secondary">Recompute all</button>
+          <button id="recomputeDistSelectedBtn" type="button" class="secondary hidden">Recompute selected</button>
+          <span id="distRecomputeIndicator" class="dist-recompute-indicator hidden" aria-live="polite"></span>
+        </div>
+      </div>
+      <p class="muted small">Extract lanyard hole, handle type, ring guard, etc. from reference images. Select rows below and use "Recompute selected", or run for missing only / all.</p>
+      <div id="distStatusReport" class="hidden"></div>
+    </section>
+
+    <section class="card">
+      <div class="section-header">
+        <h2>Master knife list</h2>
+        <button id="showMasterFormBtn" type="button">Add model</button>
+      </div>
+      <div class="inventory-toolbar">
+        <label class="inventory-search-label">
+          <span class="muted">Search</span>
+          <input type="search" id="masterSearch" placeholder="Name, family, slug, notes…" />
+        </label>
+        <label class="inventory-filter-select">
+          <span class="muted">Category</span>
+          <select id="masterFilterCategory">
+            <option value="">— All —</option>
+          </select>
+        </label>
+        <label class="inventory-filter-select">
+          <span class="muted">Blade family</span>
+          <select id="masterFilterFamily">
+            <option value="">— All —</option>
+          </select>
+        </label>
+        <label class="inventory-filter-select">
+          <span class="muted">Steel</span>
+          <select id="masterFilterSteel">
+            <option value="">— All —</option>
+          </select>
+        </label>
+        <label class="inventory-filter-select">
+          <span class="muted">Finish</span>
+          <select id="masterFilterFinish">
+            <option value="">— All —</option>
+          </select>
+        </label>
+        <label class="inventory-filter-select">
+          <span class="muted">Record type</span>
+          <select id="masterFilterRecordType">
+            <option value="">— All —</option>
+            <option value="Base model">Base model</option>
+            <option value="Major revision">Major revision</option>
+            <option value="Collaboration">Collaboration</option>
+          </select>
+        </label>
+        <label class="inventory-filter-select">
+          <span class="muted">Status</span>
+          <select id="masterFilterStatus">
+            <option value="">— All —</option>
+            <option value="active">active</option>
+            <option value="archived">archived</option>
+          </select>
+        </label>
+        <label class="inventory-filter-select">
+          <span class="muted">Catalog line</span>
+          <select id="masterFilterCatalogLine">
+            <option value="">— All —</option>
+            <option value="VIP">VIP</option>
+            <option value="Traditions">Traditions</option>
+          </select>
+        </label>
+        <div class="column-picker-wrap">
+          <button type="button" id="masterColumnPickerBtn" class="secondary">Columns</button>
+          <div id="masterColumnPickerDropdown" class="column-picker-dropdown hidden">
+            <div class="column-picker-title">Show columns</div>
+            <div id="masterColumnPickerCheckboxes"></div>
+          </div>
+        </div>
+      </div>
+      <p class="muted small master-table-hint">Click a row to open the full record, edit fields, upload a reference image, or delete the model.</p>
+      <div class="table-wrap">
+        <table id="masterTable">
+          <thead><tr id="masterTableHead"></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="section-header">
+        <h2>Identity option lists</h2>
+        <div class="muted">Controlled values used by canonical identity fields in the v2 model editor.</div>
+      </div>
+      <div class="option-grid">
+        <div>
+          <h3>Categories</h3>
+          <div class="inline-form">
+            <input id="newCategory" placeholder="Add category" />
+            <button type="button" data-option-type="categories" class="addOptionBtn">Add</button>
+          </div>
+          <ul id="categoriesList" class="pill-list"></ul>
+        </div>
+        <div>
+          <h3>Blade families</h3>
+          <div class="inline-form">
+            <input id="newBladeFamily" placeholder="Add blade family" />
+            <button type="button" data-option-type="blade-families" class="addOptionBtn">Add</button>
+          </div>
+          <ul id="bladeFamiliesList" class="pill-list"></ul>
+        </div>
+        <div>
+          <h3>Collaborators</h3>
+          <div class="inline-form">
+            <input id="newCollaborator" placeholder="Add collaborator" />
+            <button type="button" data-option-type="collaborators" class="addOptionBtn">Add</button>
+          </div>
+          <ul id="collaboratorsList" class="pill-list"></ul>
+        </div>
+        <div>
+          <h3>Generations</h3>
+          <div class="inline-form">
+            <input id="newGeneration" placeholder="Add generation" />
+            <button type="button" data-option-type="generations" class="addOptionBtn">Add</button>
+          </div>
+          <ul id="generationsList" class="pill-list"></ul>
+        </div>
+        <div>
+          <h3>Size Modifiers</h3>
+          <div class="inline-form">
+            <input id="newSizeModifier" placeholder="Add size modifier" />
+            <button type="button" data-option-type="size-modifiers" class="addOptionBtn">Add</button>
+          </div>
+          <ul id="sizeModifiersList" class="pill-list"></ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="section-header">
+        <h2>Descriptors</h2>
+        <div class="muted">Values available in dropdowns when you record inventory or set master defaults.</div>
+      </div>
+      <div class="option-grid">
+        <div>
+          <h3>Handle Colors</h3>
+          <div class="inline-form">
+            <input id="newHandleColor" placeholder="Add handle color" />
+            <button type="button" data-option-type="handle-colors" class="addOptionBtn">Add</button>
+          </div>
+          <ul id="handleColorsList" class="pill-list"></ul>
+        </div>
+        <div>
+          <h3>Blade Steels</h3>
+          <div class="inline-form">
+            <input id="newBladeSteel" placeholder="Add blade steel" />
+            <button type="button" data-option-type="blade-steels" class="addOptionBtn">Add</button>
+          </div>
+          <ul id="bladeSteelsList" class="pill-list"></ul>
+        </div>
+        <div>
+          <h3>Blade Finishes / Coatings</h3>
+          <div class="inline-form">
+            <input id="newBladeFinish" placeholder="Add finish/coating" />
+            <button type="button" data-option-type="blade-finishes" class="addOptionBtn">Add</button>
+          </div>
+          <ul id="bladeFinishesList" class="pill-list"></ul>
+        </div>
+        <div>
+          <h3>Blade Colors</h3>
+          <div class="inline-form">
+            <input id="newBladeColor" placeholder="Add blade color" />
+            <button type="button" data-option-type="blade-colors" class="addOptionBtn">Add</button>
+          </div>
+          <ul id="bladeColorsList" class="pill-list"></ul>
+        </div>
+        <div>
+          <h3>Blade Types</h3>
+          <div class="inline-form">
+            <input id="newBladeType" placeholder="Add blade type" />
+            <button type="button" data-option-type="blade-types" class="addOptionBtn">Add</button>
+          </div>
+          <ul id="bladeTypesList" class="pill-list"></ul>
+        </div>
+        <div>
+          <h3>Handle Types</h3>
+          <div class="inline-form">
+            <input id="newHandleType" placeholder="Add handle type" />
+            <button type="button" data-option-type="handle-types" class="addOptionBtn">Add</button>
+          </div>
+          <ul id="handleTypesList" class="pill-list"></ul>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="masterDetailBackdrop" class="modal-backdrop hidden" aria-hidden="true"></div>
+  <div id="masterDetailPanel" class="master-detail-panel hidden" role="dialog" aria-modal="true" aria-labelledby="masterDetailTitle">
+    <div class="master-detail-toolbar">
+      <h2 id="masterDetailTitle">Model</h2>
+      <button type="button" id="masterDetailCloseBtn" class="secondary">Close</button>
+    </div>
+    <div class="master-detail-scroll">
+      <div id="masterDetailSummary" class="master-detail-summary hidden"></div>
+      <div id="masterDetailFormHost"></div>
+    </div>
+  </div>
+
+  <template id="masterFormTemplate">
+    <form class="grid-form" id="masterForm">
+      <input type="hidden" name="id" />
+      <div class="full card-inset identity-card">
+        <h3>Canonical identity (v2)</h3>
+        <p class="muted small">These fields define the model identity used everywhere in v2 (catalog, inventory, identify, and filters).</p>
+        <div class="grid-form">
+          <label>Official name<input name="official_name" required maxlength="200" /></label>
+          <label>Canonical slug<input name="canonical_slug" placeholder="Auto-generated from official name, editable" /></label>
+          <label>Type
+            <select name="knife_type" required>
+              <option value="">— Select —</option>
+            </select>
+          </label>
+          <label>Form
+            <select name="form_name" required>
+              <option value="">— Select —</option>
+            </select>
+          </label>
+          <label>Family
+            <select name="family_name" required>
+              <option value="">— Select —</option>
+            </select>
+          </label>
+          <label>Series
+            <select name="series_name">
+              <option value="">— None —</option>
+            </select>
+          </label>
+          <label>Collaborator
+            <div class="select-add-row">
+              <select name="collaborator_name">
+                <option value="">— None —</option>
+              </select>
+              <button type="button" class="secondary add-inline-option-btn" data-option-type="collaborators" data-select-name="collaborator_name">Add</button>
+            </div>
+          </label>
+          <label>Generation
+            <select name="generation_label">
+              <option value="">— None —</option>
+            </select>
+          </label>
+          <label>Size modifier
+            <div class="select-add-row">
+              <select name="size_modifier">
+                <option value="">— None —</option>
+              </select>
+              <button type="button" class="secondary add-inline-option-btn" data-option-type="size-modifiers" data-select-name="size_modifier">Add</button>
+            </div>
+          </label>
+        </div>
+      </div>
+      <div class="full card-inset">
+        <h3>Descriptor characteristics</h3>
+        <div class="grid-form">
+          <label>Blade Steel<select name="default_steel"></select></label>
+          <label>Blade Finish<select name="default_blade_finish"></select></label>
+          <label>Blade Color<select name="default_blade_color"></select></label>
+          <label>Handle Color<select name="default_handle_color"></select></label>
+          <label>Handle Type<select name="handle_type"></select></label>
+          <label>Blade Length (in)<input type="number" step="0.01" name="default_blade_length" /></label>
+        </div>
+      </div>
+      <label>MSRP ($)<input type="number" step="0.01" name="msrp" placeholder="99.99" /></label>
+      <div class="full master-ref-block card-inset">
+        <h3 class="master-ref-heading">Reference image (identification)</h3>
+        <p class="muted small">Stored in the database for thumbnails and silhouette matching. Upload JPEG/PNG/WebP (max 15MB).</p>
+        <div class="master-ref-preview-row">
+          <img id="masterRefPreview" class="master-ref-preview hidden" alt="Reference preview" width="160" height="160" />
+          <span id="masterRefPlaceholder" class="muted">No image stored yet.</span>
+        </div>
+        <label class="file-label master-ref-file-label">
+          <span>Upload reference image</span>
+          <input type="file" name="identifier_image_file" accept="image/jpeg,image/png,image/webp,image/gif" />
+        </label>
+        <p id="masterRefSilhouetteNote" class="muted small hidden"></p>
+        <button type="button" class="secondary danger-outline" id="removeMasterRefImageBtn" hidden>Remove stored image</button>
+      </div>
+      <label>App list status
+        <select name="status">
+          <option value="active">active (shown in add-to-inventory)</option>
+          <option value="archived">archived (hidden from add dropdown)</option>
+        </select>
+      </label>
+      <label class="full">Notes<textarea name="notes" rows="3"></textarea></label>
+      <div class="form-actions full">
+        <button type="submit">Save</button>
+        <button type="button" class="danger" id="deleteMasterModelBtn" hidden>Delete model</button>
+        <button type="button" class="secondary cancelFormBtn">Cancel</button>
+      </div>
+    </form>
+  </template>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

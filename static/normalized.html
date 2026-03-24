@@ -1,0 +1,53 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>MKC Inventory - Normalized Catalog</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+  <style>
+    body { max-width: 1400px; margin: 0 auto; padding: 24px; }
+    .grid { display:grid; grid-template-columns: repeat(4, minmax(140px,1fr)); gap: 12px; margin-bottom: 20px; }
+    .card { border:1px solid #ddd; border-radius:10px; padding:12px; background:#fff; }
+    table { width:100%; border-collapse: collapse; font-size: 14px; }
+    th, td { border-bottom:1px solid #eee; padding: 8px; text-align:left; }
+    th { position: sticky; top: 0; background:#fafafa; }
+    .muted { color:#666; }
+  </style>
+</head>
+<body>
+  <h1>Normalized Catalog</h1>
+  <p class="muted">Read-only view of the new normalized data model layered over your legacy app data.</p>
+  <div class="grid" id="summary"></div>
+  <p>
+    <a href="/api/normalized/export/models.csv">Download normalized models CSV</a>
+  </p>
+  <table id="models">
+    <thead>
+      <tr>
+        <th>Official</th><th>Normalized</th><th>Type</th><th>Family</th><th>Form</th><th>Series</th><th>Collaborator</th><th>Steel</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+<script>
+async function load() {
+  const summary = await fetch('/api/normalized/summary').then(r => r.json());
+  const grid = document.getElementById('summary');
+  for (const [k,v] of Object.entries(summary)) {
+    if (k === 'last_migration') continue;
+    const d = document.createElement('div'); d.className='card';
+    d.innerHTML = `<strong>${k.replaceAll('_',' ')}</strong><div>${v}</div>`;
+    grid.appendChild(d);
+  }
+  const models = await fetch('/api/normalized/models').then(r => r.json());
+  const tbody = document.querySelector('#models tbody');
+  for (const m of models) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${m.official_name||''}</td><td>${m.normalized_name||''}</td><td>${m.knife_type||''}</td><td>${m.family_name||''}</td><td>${m.form_name||''}</td><td>${m.series_name||''}</td><td>${m.collaborator_name||''}</td><td>${m.steel||''}</td>`;
+    tbody.appendChild(tr);
+  }
+}
+load();
+</script>
+</body>
+</html>

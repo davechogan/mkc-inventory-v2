@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#eea040"/>
+      <stop offset="100%" stop-color="#d47c1c"/>
+    </linearGradient>
+  </defs>
+  <!-- Fixed-blade silhouette: blade widens at spine, handle at bottom -->
+  <path d="M5 3 L27 3 L19 14 L19 29 L13 29 L13 14 Z" fill="url(#g)"/>
+</svg>

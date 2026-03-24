@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MKC Inventory — Collection</title>
+  <link rel="icon" type="image/png" href="/static/logo.png" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body data-page="inventory">
+  <nav class="app-nav">
+    <a href="/" class="nav-logo" aria-label="MKC Inventory home">
+      <img src="/static/logo.png" alt="MKC" class="nav-logo-img" />
+    </a>
+    <a href="/" class="active" aria-current="page">Collection</a>
+    <a href="/identify">Identify</a>
+    <a href="/master">Catalog</a>
+    <a href="/reporting">Reporting</a>
+  </nav>
+
+  <header class="app-header">
+    <div>
+      <h1>MKC Inventory</h1>
+      <p>Your knives, quantities, and values.</p>
+    </div>
+    <div class="header-actions">
+      <a class="button-link secondary" href="/api/v2/export/inventory.csv" download>Export CSV</a>
+      <button id="refreshBtn" type="button" class="secondary">Refresh</button>
+    </div>
+  </header>
+
+  <section class="collection-cta">
+    <a href="/identify" class="cta-link">Don't know the model? Identify it →</a>
+  </section>
+
+  <section class="summary-grid" id="summaryGrid">
+    <article class="card stat-card">
+      <h3>Inventory Rows</h3>
+      <div class="stat" id="inventoryRows">0</div>
+    </article>
+    <article class="card stat-card">
+      <h3>Total Quantity</h3>
+      <div class="stat" id="totalQuantity">0</div>
+    </article>
+    <article class="card stat-card">
+      <h3>Total Spend</h3>
+      <div class="stat" id="totalSpend">$0</div>
+    </article>
+    <article class="card stat-card">
+      <h3>Est. Value</h3>
+      <div class="stat" id="estimatedValue">$0</div>
+    </article>
+    <article class="card stat-card">
+      <h3>Master Models</h3>
+      <div class="stat" id="masterCount">0</div>
+    </article>
+  </section>
+
+  <section class="card family-strip" id="familyStripWrap">
+    <h3 class="family-strip-title">By family</h3>
+    <div id="familyStrip" class="family-chips"></div>
+  </section>
+
+  <main class="layout">
+    <section class="card">
+      <div class="section-header">
+        <h2>Inventory</h2>
+        <button id="showInventoryFormBtn" type="button" class="button-link">Add knife</button>
+      </div>
+      <div class="inventory-toolbar">
+        <label class="inventory-search-label">
+          <span class="muted">Search</span>
+          <input type="search" id="inventorySearch" placeholder="Model, nickname, serial…" />
+        </label>
+        <label class="inventory-filter-select">
+          <span class="muted">Type</span>
+          <select id="inventoryFilterType">
+            <option value="">— All —</option>
+          </select>
+        </label>
+        <label class="inventory-filter-select">
+          <span class="muted">Family</span>
+          <select id="inventoryFilterFamily">
+            <option value="">— All —</option>
+          </select>
+        </label>
+        <label class="inventory-filter-select">
+          <span class="muted">Form</span>
+          <select id="inventoryFilterForm">
+            <option value="">— All —</option>
+          </select>
+        </label>
+        <label class="inventory-filter-select">
+          <span class="muted">Series</span>
+          <select id="inventoryFilterSeries">
+            <option value="">— All —</option>
+          </select>
+        </label>
+        <label class="inventory-filter-select">
+          <span class="muted">Steel</span>
+          <select id="inventoryFilterSteel">
+            <option value="">— All —</option>
+          </select>
+        </label>
+        <label class="inventory-filter-select">
+          <span class="muted">Finish</span>
+          <select id="inventoryFilterFinish">
+            <option value="">— All —</option>
+          </select>
+        </label>
+        <label class="inventory-filter-select">
+          <span class="muted">Handle</span>
+          <select id="inventoryFilterHandleColor">
+            <option value="">— All —</option>
+          </select>
+        </label>
+        <label class="inventory-filter-select">
+          <span class="muted">Condition</span>
+          <select id="inventoryFilterCondition">
+            <option value="">— All —</option>
+            <option>New</option>
+            <option>Like New</option>
+            <option>Very Good</option>
+            <option>Good</option>
+            <option>User</option>
+          </select>
+        </label>
+        <label class="inventory-filter-select">
+          <span class="muted">Location</span>
+          <input type="text" id="inventoryFilterLocation" placeholder="Any" />
+        </label>
+        <div class="column-picker-wrap">
+          <button type="button" id="columnPickerBtn" class="secondary">Columns</button>
+          <div id="columnPickerDropdown" class="column-picker-dropdown hidden">
+            <div class="column-picker-title">Show columns</div>
+            <div id="columnPickerCheckboxes"></div>
+          </div>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table id="inventoryTable">
+          <thead><tr id="inventoryTableHead"></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <div id="inventoryModalBackdrop" class="modal-backdrop hidden" aria-hidden="true"></div>
+  <div id="inventoryModalPanel" class="master-detail-panel hidden" role="dialog" aria-modal="true" aria-labelledby="inventoryModalTitle">
+    <div class="master-detail-toolbar">
+      <h2 id="inventoryModalTitle">Edit knife</h2>
+      <button type="button" id="inventoryModalCloseBtn" class="secondary">Close</button>
+    </div>
+    <div class="master-detail-scroll">
+      <div id="inventoryFormHost"></div>
+    </div>
+  </div>
+
+  <template id="inventoryFormTemplate">
+    <form class="grid-form" id="inventoryForm">
+      <input type="hidden" name="id" />
+      <input type="hidden" name="knife_model_id" />
+      <label class="full">Knife model
+        <input type="search" name="model_search" placeholder="Search models…" id="inventoryModelSearch" autocomplete="off" />
+        <span id="inventoryModelSelected" class="muted small hidden"></span>
+      </label>
+      <div id="masterSpecSnapshot" class="master-snapshot full" aria-live="polite"></div>
+      <label>Nickname<input name="nickname" placeholder="Optional label for this piece" /></label>
+      <label>Quantity<input type="number" name="quantity" value="1" min="1" required /></label>
+      <label>Blade length (this piece, in)<input type="number" step="0.01" name="blade_length" placeholder="From master by default" /></label>
+      <label>Acquired Date<input type="date" name="acquired_date" /></label>
+      <label>Purchase Price<input type="number" step="0.01" name="purchase_price" /></label>
+      <label>Estimated Value<input type="number" step="0.01" name="estimated_value" /></label>
+      <label>Condition
+        <select name="condition">
+          <option>New</option>
+          <option selected>Like New</option>
+          <option>Very Good</option>
+          <option>Good</option>
+          <option>User</option>
+        </select>
+      </label>
+      <div class="inventory-variant-header full">
+        <span id="inventoryFilteredLabel" class="muted small hidden">Filtered by selected knife</span>
+        <label class="inventory-show-all-toggle">
+          <input type="checkbox" id="inventoryShowAllValues" />
+          <span>Show all values</span>
+        </label>
+      </div>
+      <label>Handle Color<select name="handle_color"></select></label>
+      <label>Blade Steel<select name="blade_steel"></select></label>
+      <label>Blade Finish / Coating<select name="blade_finish"></select></label>
+      <label>Blade Color<select name="blade_color"></select></label>
+      <label class="checkbox-label"><input type="checkbox" name="is_collab" /> Is Collab</label>
+      <label>Collaboration Name<input name="collaboration_name" /></label>
+      <label>Location<input name="location" placeholder="Safe, pack, display…" /></label>
+      <label>Purchase source<input name="purchase_source" placeholder="MKC drop, dealer, trade…" /></label>
+      <label>Last sharpened<input type="date" name="last_sharpened" /></label>
+      <label class="full">Notes<textarea name="notes" rows="3"></textarea></label>
+      <div class="form-actions full">
+        <button type="submit">Save</button>
+        <button type="button" id="duplicateInventoryBtn" class="secondary">Duplicate</button>
+        <button type="button" id="deleteInventoryBtn" class="danger">Delete</button>
+        <button type="button" id="applyMasterDefaultsBtn" class="secondary">Reset to master defaults</button>
+        <button type="button" class="cancelFormBtn secondary">Cancel</button>
+      </div>
+    </form>
+  </template>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
