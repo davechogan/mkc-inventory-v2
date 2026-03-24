@@ -33,7 +33,24 @@ jobs:
           python -m py_compile app.py
           python -m py_compile tools/reporting_eval_harness.py
 
-      - name: Reporting smoke gate (optional external endpoint)
+  reporting-smoke-local:
+    runs-on: self-hosted
+    # Local-only by design: this runs on your self-hosted runner, not GitHub-hosted runners.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Reporting smoke gate (local endpoint)
         env:
           REPORTING_EVAL_BASE_URL: ${{ secrets.REPORTING_EVAL_BASE_URL }}
         run: |
@@ -41,5 +58,5 @@ jobs:
             echo "Running reporting smoke suite against $REPORTING_EVAL_BASE_URL"
             python tools/reporting_eval_harness.py "$REPORTING_EVAL_BASE_URL" --suite smoke
           else
-            echo "REPORTING_EVAL_BASE_URL secret not set; skipping external smoke harness run."
+            echo "REPORTING_EVAL_BASE_URL secret not set; skipping local smoke harness run."
           fi
