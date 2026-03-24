@@ -84,6 +84,18 @@ This question set validates semantic planning, SQL compilation safety, follow-up
     - A: `How many knives do I have by series?`
     - B: `Show series breakdown for my collection.`
 
+## Follow-up continuity checks
+
+These are multi-turn checks run in one reporting session:
+
+1. **Scoped carryover (goat -> list them)**
+   - Turn 1: `how many "goat" knives do I have?`
+   - Turn 2: `list them`
+   - Expectation:
+     - turn 1 uses aggregate count intent
+     - turn 2 switches to list intent
+     - turn 2 keeps prior scope and returns non-empty rows
+
 ## Golden checks for critical metrics
 
 The harness enforces additional pair-consistency checks for high-value intents:
@@ -132,3 +144,17 @@ Successful responses may include `execution_ms` (SQL execution time). The harnes
   `python3 tools/reporting_eval_harness.py http://localhost:8008 --suite core --with-security --latency-gate`
 
 If no successful responses include `execution_ms`, the latency gate is skipped (no failure from missing metadata).
+
+### Robustness suite (multi-turn)
+
+The harness also supports a conversation-level robustness suite for context carryover and scope control:
+
+- Run robustness scenarios only:
+
+  `python3 tools/reporting_eval_harness.py http://localhost:8008 --suite robustness`
+
+Current robustness scenarios include:
+
+- **Scope switch scenario:** inventory-scoped question, then explicit catalog question, then scope-status confirmation.
+- **Ambiguity scenario:** ambiguous catalog-vs-inventory question must trigger clarification, then explicit follow-up resolves scope.
+- **Negation scenario:** exclusion phrasing (`except Speedgoat`) must carry into follow-up listing and exclude matching rows.

@@ -128,6 +128,80 @@ ADVERSARIAL_CASES = [
     },
 ]
 
+# Follow-up continuity checks: run as two-step chat turns in one session.
+FOLLOWUP_CASES = [
+    {
+        "id": "f01",
+        "name": "Scoped follow-up list carryover (goat -> list them)",
+        "first_question": 'how many "goat" knives do I have?',
+        "followup_question": "list them",
+        "expect_first_mode": "semantic_compiled_aggregate",
+        "expect_followup_mode": "semantic_compiled_list_inventory",
+        "expect_followup_min_rows": 1,
+    },
+]
+
+# Robustness scenarios: multi-turn conversations to validate scope control,
+# clarification behavior, and context carryover.
+ROBUSTNESS_SCENARIOS = [
+    {
+        "id": "r01",
+        "name": "Scope switches inventory to catalog",
+        "turns": [
+            {
+                "question": "How many Blood Brothers knives do I have?",
+                "expect_mode": "semantic_compiled_aggregate",
+                "expect_min_rows": 1,
+            },
+            {
+                "question": "How many has MKC made in Blood Brothers?",
+                "expect_mode": "semantic_compiled_aggregate",
+                "expect_min_rows": 1,
+            },
+            {
+                "question": "are you using inventory or catalog now?",
+                "expect_mode": "scope_status",
+                "expect_answer_contains": "full mkc catalog",
+            },
+        ],
+    },
+    {
+        "id": "r02",
+        "name": "Ambiguous scope asks clarification",
+        "turns": [
+            {
+                "question": "How many knives are there in the Blood Brothers family?",
+                "expect_mode": "clarification_scope",
+                "expect_answer_contains": "quick clarification",
+            },
+            {
+                "question": "How many knives are there in the Blood Brothers family in my inventory (knives I own)?",
+                "expect_mode": "semantic_compiled_aggregate",
+                "expect_min_rows": 1,
+            },
+        ],
+    },
+    {
+        "id": "r03",
+        "name": "Negation exclusion carryover (except Speedgoat)",
+        "turns": [
+            {
+                "question": "How many knives do I have except Speedgoat?",
+                "expect_mode": "semantic_compiled_aggregate",
+                "expect_min_rows": 1,
+            },
+            {
+                "question": "list them",
+                "expect_mode": "semantic_compiled_list_inventory",
+                "expect_min_rows": 1,
+                "expect_rows_no_contains": [
+                    {"fields": ["knife_name", "family_name", "series_name"], "contains": "speedgoat"},
+                ],
+            },
+        ],
+    },
+]
+
 # Golden pair checks for critical intents.
 GOLDEN_PAIRS = [
     {"pair": "p01", "kind": "sum_close", "field": "total_estimated_value", "epsilon": 0.01},
@@ -146,6 +220,8 @@ SUITES = {
     "full": {"pairs": None, "golden_pairs": None},
     # Adversarial-only suite (does not run the 40-prompt eval cases).
     "security": {"pairs": None, "golden_pairs": None, "adversarial_only": True},
+    # Conversation robustness-only suite (runs multi-turn scenarios).
+    "robustness": {"pairs": set(), "golden_pairs": set(), "robustness_only": True},
 }
 
 
@@ -226,6 +302,85 @@ def run_case(base: str, case: dict) -> tuple[bool, dict[str, Any]]:
     return ok, merged
 
 
+def run_followup_case(base: str, case: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
+    # First turn
+    ok1, first = run_case(base, {"question": case["first_question"], "expect_min_rows": 1})
+    first_mode = str(first.get("generation_mode") or "")
+    sid = first.get("session_id")
+    if case.get("expect_first_mode") and case["expect_first_mode"] not in first_mode:
+        ok1 = False
+    if not sid:
+        return False, {"first": first, "second": {"detail": "missing session_id"}}
+
+    # Follow-up turn in same session
+    payload2 = {"question": case["followup_question"], "session_id": sid, "max_rows": MAX_ROWS}
+    success2, status2, result2 = post_json_any(f"{base}/api/reporting/query", payload2)
+    second = {**result2, "_http_status": status2, "_request_ok": success2}
+    rows2 = second.get("rows") or []
+    if not isinstance(rows2, list):
+        rows2 = []
+    mode2 = str(second.get("generation_mode") or "")
+    ok2 = success2 and len(rows2) >= int(case.get("expect_followup_min_rows", 1))
+    if case.get("expect_followup_mode") and case["expect_followup_mode"] not in mode2:
+        ok2 = False
+    return ok1 and ok2, {"first": first, "second": second}
+
+
+def run_robustness_scenario(base: str, scenario: dict[str, Any]) -> tuple[bool, list[dict[str, Any]]]:
+    turns = list(scenario.get("turns") or [])
+    if not turns:
+        return False, []
+    sid: str | None = None
+    results: list[dict[str, Any]] = []
+    all_ok = True
+    for t in turns:
+        payload = {"question": t["question"], "max_rows": MAX_ROWS}
+        if sid:
+            payload["session_id"] = sid
+        success, status, result = post_json_any(f"{base}/api/reporting/query", payload)
+        merged = {**result, "_http_status": status, "_request_ok": success, "_question": t["question"]}
+        if result.get("session_id"):
+            sid = str(result.get("session_id"))
+        ok = bool(success)
+        mode = str(result.get("generation_mode") or "")
+        if t.get("expect_mode"):
+            ok = ok and (str(t["expect_mode"]) in mode)
+        rows = result.get("rows") or []
+        if not isinstance(rows, list):
+            rows = []
+        if t.get("expect_min_rows") is not None:
+            ok = ok and (len(rows) >= int(t["expect_min_rows"]))
+        if t.get("expect_answer_contains"):
+            ans = str(result.get("answer_text") or "").lower()
+            ok = ok and (str(t["expect_answer_contains"]).lower() in ans)
+        no_contains = t.get("expect_rows_no_contains") or []
+        if ok and isinstance(no_contains, list) and rows:
+            for rule in no_contains:
+                if not isinstance(rule, dict):
+                    continue
+                needle = str(rule.get("contains") or "").strip().lower()
+                fields = [str(f) for f in (rule.get("fields") or []) if str(f).strip()]
+                if not needle or not fields:
+                    continue
+                violated = False
+                for r in rows:
+                    for f in fields:
+                        val = str(r.get(f) or "").lower()
+                        if needle in val:
+                            violated = True
+                            break
+                    if violated:
+                        break
+                if violated:
+                    ok = False
+                    break
+        merged["_ok"] = ok
+        merged["_rows_len"] = len(rows)
+        all_ok = all_ok and ok
+        results.append(merged)
+    return all_ok, results
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run reporting evaluation prompts against /api/reporting/query.")
     parser.add_argument("base_url", nargs="?", default=BASE_URL, help="Base API URL (default: http://localhost:8008)")
@@ -272,6 +427,8 @@ def main() -> int:
     selected = SUITES[args.suite]
     if selected.get("adversarial_only"):
         run_cases = list(ADVERSARIAL_CASES)
+    elif selected.get("robustness_only"):
+        run_cases = []
     else:
         selected_pairs = selected["pairs"]
         run_cases = [c for c in CASES if selected_pairs is None or c["pair"] in selected_pairs]
@@ -331,6 +488,67 @@ def main() -> int:
                 f"[{idx}] FAIL {case['name']} | rows={len(rows)} "
                 f"answer={result.get('answer_text')} mode={result.get('generation_mode')}{http_bit}"
             )
+
+    # Follow-up continuity checks (for non-security and non-robustness-only suites).
+    if not selected.get("adversarial_only") and not selected.get("robustness_only"):
+        for fidx, fcase in enumerate(FOLLOWUP_CASES, start=1):
+            try:
+                ok, pair_result = run_followup_case(base, fcase)
+            except urllib.error.URLError as exc:
+                print(f"[FOLLOWUP {fidx}] FAIL {fcase['name']}: {exc}")
+                failed += 1
+                continue
+            except Exception as exc:
+                print(f"[FOLLOWUP {fidx}] FAIL {fcase['name']}: {exc}")
+                failed += 1
+                continue
+            first = pair_result.get("first") or {}
+            second = pair_result.get("second") or {}
+            rows2 = second.get("rows") or []
+            if not isinstance(rows2, list):
+                rows2 = []
+            if ok:
+                passed += 1
+                print(
+                    f"[FOLLOWUP {fidx}] PASS {fcase['name']} | "
+                    f"first_mode={first.get('generation_mode')} second_mode={second.get('generation_mode')} "
+                    f"second_rows={len(rows2)}"
+                )
+            else:
+                failed += 1
+                print(
+                    f"[FOLLOWUP {fidx}] FAIL {fcase['name']} | "
+                    f"first_mode={first.get('generation_mode')} second_mode={second.get('generation_mode')} "
+                    f"second_rows={len(rows2)} second_answer={second.get('answer_text')}"
+                )
+
+    # Multi-turn robustness scenarios.
+    if selected.get("robustness_only"):
+        for ridx, scenario in enumerate(ROBUSTNESS_SCENARIOS, start=1):
+            try:
+                ok, turns = run_robustness_scenario(base, scenario)
+            except urllib.error.URLError as exc:
+                print(f"[ROBUSTNESS {ridx}] FAIL {scenario['name']}: {exc}")
+                failed += 1
+                continue
+            except Exception as exc:
+                print(f"[ROBUSTNESS {ridx}] FAIL {scenario['name']}: {exc}")
+                failed += 1
+                continue
+            if ok:
+                passed += 1
+                print(f"[ROBUSTNESS {ridx}] PASS {scenario['name']}")
+            else:
+                failed += 1
+                print(f"[ROBUSTNESS {ridx}] FAIL {scenario['name']}")
+                for tidx, tr in enumerate(turns, start=1):
+                    if tr.get("_ok"):
+                        continue
+                    print(
+                        f"  - turn {tidx} question={tr.get('_question')!r} "
+                        f"mode={tr.get('generation_mode')} rows={tr.get('_rows_len')} "
+                        f"answer={tr.get('answer_text')}"
+                    )
 
     # Golden pair checks
     if not args.no_golden and not selected.get("adversarial_only"):

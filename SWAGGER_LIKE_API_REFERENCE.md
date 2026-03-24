@@ -48,6 +48,9 @@ This document is a Swagger-like, code-aligned reference for APIs defined in `app
 ### `ReportingSaveQueryIn`
 - `name`, `question`, `config`
 
+### `ReportingFeedbackIn`
+- `session_id`, `message_id`, `helpful`
+
 ### `V2ModelIn`
 - Identity: `official_name`, `knife_type`, `form_name`, `family_name`, `series_name`, `collaborator_name`
 - Controlled dimensions: `generation_label`, `size_modifier`, `platform_variant`, `handle_type`
@@ -132,10 +135,12 @@ This document is a Swagger-like, code-aligned reference for APIs defined in `app
 | GET | `/api/reporting/sessions` | List reporting sessions |
 | POST | `/api/reporting/sessions` | Create reporting session |
 | GET | `/api/reporting/sessions/{session_id}` | Session detail + message history |
+| GET | `/api/reporting/hints` | List learned semantic hints (optional `session_id`) |
 | GET | `/api/reporting/saved-queries` | List saved queries |
 | POST | `/api/reporting/saved-queries` | Save query (`ReportingSaveQueryIn`) |
 | DELETE | `/api/reporting/saved-queries/{saved_id}` | Delete saved query |
 | POST | `/api/reporting/query` | Run reporting query (`ReportingQueryIn`) |
+| POST | `/api/reporting/feedback` | Record helpful/not-helpful feedback for an assistant message (`ReportingFeedbackIn`) |
 
 ### V2 Catalog + Inventory APIs (Canonical)
 
@@ -199,6 +204,7 @@ Returns:
 - `chart_spec` (`type`, `x`, `y`, `data`) when available
 - `follow_ups`, `confidence`, `limitations`, `generation_mode`, `execution_ms`
 - `date_window` (`start`, `end`, `label`)
+- `assistant_message_id` (used by feedback API for message-level rating)
 
 ### `GET /api/v2/inventory`
 Returns a list of item rows that join inventory, model, and dimension metadata (name/type/family/form/series/collaborator + value/condition/location).

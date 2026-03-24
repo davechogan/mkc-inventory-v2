@@ -993,6 +993,21 @@ th.sortable.sort-desc::after {
   background: rgba(35, 42, 49, 0.65);
   border: 1px solid var(--line);
 }
+.reporting-feedback {
+  display: inline-flex;
+  gap: 0.35rem;
+  margin-left: 0.65rem;
+  vertical-align: middle;
+}
+.reporting-feedback-btn {
+  padding: 0.15rem 0.45rem;
+  min-height: auto;
+  line-height: 1.1;
+}
+.reporting-feedback-btn.is-active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
 .reporting-followups {
   display: flex;
   gap: 0.6rem;

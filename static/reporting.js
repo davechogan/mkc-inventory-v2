@@ -98,6 +98,21 @@ function pickBestResultTab(result) {
   return 'text';
 }
 
+function renderFeedbackControls(m) {
+  if (!m || m.role !== 'assistant' || !m.id || !state.sessionId) return '';
+  const fb = m.meta?.feedback_helpful;
+  const upOn = fb === true ? 'is-active' : '';
+  const dnOn = fb === false ? 'is-active' : '';
+  const disabled = typeof fb === 'boolean' ? 'disabled' : '';
+  const title = typeof fb === 'boolean' ? 'Feedback recorded' : 'Rate this answer';
+  return `
+    <div class="reporting-feedback" data-message-id="${escapeHtml(m.id)}">
+      <button type="button" class="secondary reporting-feedback-btn ${upOn}" data-helpful="true" ${disabled} title="${escapeHtml(title)}" aria-label="Helpful">👍</button>
+      <button type="button" class="secondary reporting-feedback-btn ${dnOn}" data-helpful="false" ${disabled} title="${escapeHtml(title)}" aria-label="Not helpful">👎</button>
+    </div>
+  `;
+}
+
 function renderMessages() {
   const wrap = document.getElementById('reportingMessages');
   if (!wrap) return;
@@ -108,7 +123,7 @@ function renderMessages() {
   wrap.innerHTML = state.messages.map((m) => {
     const role = m.role === 'user' ? 'You' : 'Assistant';
     const cls = m.role === 'user' ? 'report-msg-user' : 'report-msg-assistant';
-    return `<div class="report-msg ${cls}"><strong>${role}:</strong> ${escapeHtml(m.content || '')}</div>`;
+    return `<div class="report-msg ${cls}"><strong>${role}:</strong> ${escapeHtml(m.content || '')}${renderFeedbackControls(m)}</div>`;
   }).join('');
   wrap.scrollTop = wrap.scrollHeight;
 }
@@ -563,9 +578,7 @@ async function runQuery() {
     state.sessionId = result.session_id;
     state.lastResult = result;
     await loadSessions();
-    renderMessages();
-    refreshOutputs(result);
-    switchReportTab(pickBestResultTab(result));
+    await loadSessionDetail(state.sessionId);
   } catch (err) {
     alert(err.message || String(err));
     await loadSessionDetail(state.sessionId);
@@ -663,6 +676,28 @@ function bindEvents() {
       state.gridView.sortDir = 'asc';
     }
     refreshReportingGrid();
+  });
+
+  document.getElementById('reportingMessages')?.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.reporting-feedback-btn[data-helpful]');
+    if (!btn) return;
+    const row = btn.closest('.reporting-feedback[data-message-id]');
+    const messageId = Number(row?.getAttribute('data-message-id') || 0);
+    if (!messageId || !state.sessionId) return;
+    const helpful = btn.getAttribute('data-helpful') === 'true';
+    try {
+      await api('/api/reporting/feedback', {
+        method: 'POST',
+        body: JSON.stringify({
+          session_id: state.sessionId,
+          message_id: messageId,
+          helpful,
+        }),
+      });
+      await loadSessionDetail(state.sessionId);
+    } catch (err) {
+      alert(err.message || String(err));
+    }
   });
 }
 

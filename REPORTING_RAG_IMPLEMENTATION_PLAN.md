@@ -250,6 +250,8 @@ This is the implementation track we are now using to improve reliability and red
 - [ ] Detect short follow-up vs topic reset and avoid stale-scope errors
 - [ ] Merge explicit user constraints first; reject ungrounded implicit filter injection
 - [ ] Include semantic state summaries in context blocks for planner continuity
+- [x] Investigate follow-up carryover regression:  
+      Example repro: `how many "goat" knives do I have?` -> `list them` returns no rows instead of applying prior scope.
 
 ### 11.3 Evaluation Harness + Telemetry + Model Routing Policy
 
@@ -270,3 +272,15 @@ This is the implementation track we are now using to improve reliability and red
   - model split (planner/responder/retry)
   - runtime configuration variables
   - phased rollout and acceptance criteria
+
+### 11.5 Adaptive Semantic Hint Learning (New)
+
+Goal: let the system "learn" successful interpretation patterns from chat outcomes, but treat them as confidence-weighted hints rather than hard rules.
+
+- [x] Add persistent semantic-hint store (`reporting_semantic_hints`) with confidence, evidence count, and success/failure feedback fields.
+- [x] Add hint extraction from colloquial phrasing (`entity + cue` patterns like `"Blood Brothers family"`).
+- [x] Apply hints as soft priors during semantic planning (only fill missing filters; never override explicit constraints).
+- [x] Add confidence feedback loop: reinforce hints on successful non-empty responses, decay on failed applications.
+- [x] Add observability endpoint (`GET /api/reporting/hints`) to inspect learned hints by session.
+- [x] Add explicit user feedback signal (thumbs up/down) to accelerate confidence updates.
+- [ ] Promote high-confidence repeated session hints into optional global hints with moderation.

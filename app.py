@@ -311,6 +311,7 @@ REPORTING_SERIES_ALIASES = {
     "blood brothers": "Blood Brothers",
 }
 REPORTING_METRICS = {"count", "total_spend", "total_estimated_value"}
+REPORTING_HINT_MIN_CONFIDENCE = 0.55
 
 
 def ensure_reporting_schema(conn: sqlite3.Connection) -> None:
@@ -365,10 +366,31 @@ def ensure_reporting_schema(conn: sqlite3.Connection) -> None:
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
 
+        CREATE TABLE IF NOT EXISTS reporting_semantic_hints (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            scope_type TEXT NOT NULL DEFAULT 'session',
+            scope_id TEXT,
+            entity_norm TEXT NOT NULL,
+            cue_word TEXT NOT NULL,
+            target_dimension TEXT NOT NULL,
+            target_value TEXT NOT NULL,
+            confidence REAL NOT NULL DEFAULT 0.55,
+            evidence_count INTEGER NOT NULL DEFAULT 1,
+            success_count INTEGER NOT NULL DEFAULT 0,
+            failure_count INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            last_used_at TEXT
+        );
+
         CREATE INDEX IF NOT EXISTS ix_reporting_messages_session_created
             ON reporting_messages(session_id, created_at);
         CREATE INDEX IF NOT EXISTS ix_reporting_query_telemetry_created
             ON reporting_query_telemetry(created_at DESC);
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_reporting_semantic_hints_key
+            ON reporting_semantic_hints(scope_type, scope_id, entity_norm, cue_word, target_dimension, target_value);
+        CREATE INDEX IF NOT EXISTS ix_reporting_semantic_hints_lookup
+            ON reporting_semantic_hints(scope_type, scope_id, entity_norm, cue_word, confidence DESC, evidence_count DESC);
 
         DROP VIEW IF EXISTS reporting_inventory;
         CREATE VIEW reporting_inventory AS
@@ -485,6 +507,110 @@ def _reporting_detect_date_bounds(question: str) -> tuple[Optional[str], Optiona
         end.isoformat() if end else None,
         label,
     )
+
+
+def _reporting_detect_unsafe_request(question: str) -> Optional[str]:
+    """
+    Detect obvious prompt-injection / SQL-command attempts in user text.
+
+    This guardrail runs before planning/SQL generation and rejects requests
+    that try to force SQL execution or schema exfiltration instructions.
+    """
+    q = (question or "").strip()
+    if not q:
+        return None
+    ql = q.lower()
+    compact = " ".join(ql.split())
+    patterns: list[tuple[str, str]] = [
+        (r"(?is)```(?:sql)?\s*(select|with|insert|update|delete|drop|alter|create)\b", "sql_code_block"),
+        (r"\b(drop\s+table|delete\s+from|insert\s+into|update\s+\w+\s+set|alter\s+table|create\s+table)\b", "mutating_sql_phrase"),
+        (r"\b(pragma|sqlite_master|information_schema)\b", "schema_exfiltration_phrase"),
+        (r"\bunion\s+select\b", "union_select_phrase"),
+        (r";\s*(select|with|insert|update|delete|drop|alter|create)\b", "multi_statement_hint"),
+        (r"(?is)\b(ignore|bypass|override)\b.{0,40}\b(instruction|guardrail|safety|policy)\b", "guardrail_bypass_phrase"),
+    ]
+    for pat, reason in patterns:
+        if re.search(pat, compact):
+            return reason
+    # Direct SQL command starters are not supported as user input.
+    if re.match(r"^\s*(select|with|insert|update|delete|drop|alter|create|pragma)\b", compact):
+        return "direct_sql_prefix"
+    return None
+
+
+def _reporting_detect_scope(question: str) -> Optional[str]:
+    q = " ".join((question or "").strip().lower().split())
+    if not q:
+        return None
+    inventory_markers = (
+        "in my inventory",
+        "my inventory",
+        "my collection",
+        "do i have",
+        "i have",
+        "owned",
+        "own",
+    )
+    catalog_markers = (
+        "mkc has made",
+        "mkc made",
+        "full catalog",
+        "catalog",
+        "all models",
+        "offered by mkc",
+        "ever made",
+    )
+    inv = any(m in q for m in inventory_markers)
+    cat = any(m in q for m in catalog_markers)
+    if inv and not cat:
+        return "inventory"
+    if cat and not inv:
+        return "catalog"
+    return None
+
+
+def _reporting_needs_scope_clarification(question: str) -> bool:
+    """
+    Detect naturally ambiguous prompts where "inventory vs full catalog" is unclear.
+    """
+    q = " ".join((question or "").strip().lower().split())
+    if not q:
+        return False
+    if _reporting_detect_scope(q):
+        return False
+    # These intents already imply scope semantics in our planner/compiler.
+    if (
+        "missing" in q
+        or "not in inventory" in q
+        or "do i not have" in q
+        or "still not have" in q
+        or ("complete" in q and "collection" in q)
+    ):
+        return False
+    if any(x in q for x in ("compare ", "vs ", "versus")):
+        return False
+    # Ambiguous counting/listing phrasing with entity classifier terms.
+    asks_count_or_list = any(k in q for k in ("how many", "count", "list", "which"))
+    has_entity_cue = any(k in q for k in (" family", " families", " series", " type", " line", " knives"))
+    return asks_count_or_list and has_entity_cue
+
+
+def _reporting_is_scope_status_question(question: str) -> bool:
+    q = " ".join((question or "").strip().lower().split())
+    if not q:
+        return False
+    asks_scope = any(
+        p in q for p in (
+            "are you looking at my inventory",
+            "are you looking at inventory",
+            "inventory or the catalog",
+            "inventory or catalog",
+            "what scope are you using",
+            "are you using inventory",
+            "are you using catalog",
+        )
+    )
+    return asks_scope
 
 
 def _reporting_validate_sql(sql: str) -> str:
@@ -702,6 +828,29 @@ def _reporting_is_short_followup(question: str) -> bool:
     return any(q.startswith(p) for p in prefixes)
 
 
+def _reporting_is_contextual_followup(question: str) -> bool:
+    q = " ".join((question or "").strip().lower().split())
+    if not q:
+        return False
+    cues = (
+        "verify your answer",
+        "verify that",
+        "verify this",
+        "list them",
+        "show them",
+        "which ones",
+        "what are the names",
+        "show names",
+        "list names",
+        "those names",
+    )
+    return any(c in q for c in cues)
+
+
+def _reporting_is_followup(question: str) -> bool:
+    return _reporting_is_short_followup(question) or _reporting_is_contextual_followup(question)
+
+
 def _reporting_extract_dimension_from_text(q: str) -> Optional[str]:
     ql = (q or "").lower()
     for k, col in REPORTING_GROUPABLE_DIMENSIONS.items():
@@ -711,39 +860,244 @@ def _reporting_extract_dimension_from_text(q: str) -> Optional[str]:
 
 
 def _reporting_filter_explicit_in_question(question: str, key: str, value: str) -> bool:
+    base_key = key[:-5] if str(key).endswith("__not") else key
     q = " ".join((question or "").strip().lower().split())
     v = " ".join((value or "").strip().lower().split())
     if not q or not v:
         return False
-    if key == "series_name":
+    if base_key == "series_name":
         if f"{v} series" in q or f"series {v}" in q or f"from the {v} series" in q:
             return True
         for alias, canonical in REPORTING_SERIES_ALIASES.items():
             if canonical.lower() == v and alias in q:
                 return True
         return False
-    if key == "knife_type":
+    if base_key == "knife_type":
         # Only accept if type is explicitly requested in language.
         return (("knife type" in q) or ("type" in q and "by type" in q)) and (v in q)
-    if key in {"family_name", "form_name", "collaborator_name", "steel", "condition", "location"} and v in q:
-        return True
+    if base_key == "text_search":
+        return v in q
+    if base_key == "family_name":
+        if ("family" in q or "families" in q) and v in q:
+            return True
+        if re.search(rf"\b{re.escape(v)}\s+knives?\b", q):
+            return True
+        return False
+    if base_key == "form_name":
+        return ("form" in q) and (v in q)
+    if base_key == "collaborator_name":
+        return (("collaborator" in q) or ("collab" in q) or ("collaboration" in q)) and (v in q)
+    if base_key == "steel":
+        return ("steel" in q) and (v in q)
+    if base_key == "condition":
+        return ("condition" in q) and (v in q)
+    if base_key == "location":
+        return (("location" in q) or ("where" in q)) and (v in q)
     # Common semantic aliases for series-oriented prompts.
-    if key in {"knife_type", "family_name", "form_name", "collaborator_name", "steel", "condition", "location"}:
-        token = key.replace("_name", "").replace("_", " ")
+    if base_key in {"knife_type", "family_name", "form_name", "collaborator_name", "steel", "condition", "location"}:
+        token = base_key.replace("_name", "").replace("_", " ")
         if token in q and v in q:
             return True
     return False
 
 
+def _reporting_norm_entity(value: str) -> str:
+    return " ".join(str(value or "").strip().lower().split())
+
+
+def _reporting_extract_hint_entities(question: str) -> list[tuple[str, str]]:
+    """
+    Extract (entity, cue_word) pairs from colloquial phrasing.
+
+    Example:
+      "Blood Brothers family" -> ("blood brothers", "family")
+      "family blood brothers" -> ("blood brothers", "family")
+    """
+    q = " ".join((question or "").strip().lower().split())
+    if not q:
+        return []
+    cues = ("family", "type", "series", "line", "kind", "style")
+    out: list[tuple[str, str]] = []
+    cue_re = "|".join(cues)
+    pats = [
+        rf"\b([a-z0-9][a-z0-9 '&/-]{{1,60}}?)\s+({cue_re})\b",
+        rf"\b({cue_re})\s+([a-z0-9][a-z0-9 '&/-]{{1,60}}?)\b",
+    ]
+    stop_prefix = re.compile(
+        r"^(how many|what is|what are|which|show me|show|list|count|are there|there are|there is|in|the)\s+",
+        re.I,
+    )
+    stop_suffix = re.compile(r"\s+(in|the|my|our|collection|inventory|there|are|is|by)$", re.I)
+    for pat in pats:
+        for m in re.finditer(pat, q):
+            if len(m.groups()) != 2:
+                continue
+            g1 = _reporting_norm_entity(m.group(1))
+            g2 = _reporting_norm_entity(m.group(2))
+            cue = g1 if g1 in cues else g2
+            ent = g2 if cue == g1 else g1
+            ent = _reporting_normalize_filter_value("text_search", ent)
+            # Trim conversational scaffolding so we keep just the entity phrase.
+            while True:
+                new_ent = stop_prefix.sub("", ent).strip()
+                if new_ent == ent:
+                    break
+                ent = new_ent
+            while True:
+                new_ent = stop_suffix.sub("", ent).strip()
+                if new_ent == ent:
+                    break
+                ent = new_ent
+            if ent and cue:
+                pair = (ent, cue)
+                if pair not in out:
+                    out.append(pair)
+    return out
+
+
+def _reporting_get_semantic_hints(
+    conn: sqlite3.Connection,
+    session_id: str,
+    question: str,
+    min_confidence: float = REPORTING_HINT_MIN_CONFIDENCE,
+) -> dict[str, Any]:
+    entities = _reporting_extract_hint_entities(question)
+    if not entities:
+        return {"filters": {}, "hint_ids": [], "hints": []}
+    filters: dict[str, str] = {}
+    hint_ids: list[int] = []
+    hints: list[dict[str, Any]] = []
+    for ent, cue in entities:
+        rows = conn.execute(
+            """
+            SELECT id, target_dimension, target_value, confidence, scope_type, scope_id
+            FROM reporting_semantic_hints
+            WHERE entity_norm = ? AND cue_word = ?
+              AND confidence >= ?
+              AND (
+                    (scope_type = 'session' AND scope_id = ?)
+                 OR (scope_type = 'global' AND scope_id IS NULL)
+              )
+            ORDER BY
+              CASE WHEN scope_type = 'session' THEN 0 ELSE 1 END,
+              confidence DESC,
+              evidence_count DESC,
+              id DESC
+            LIMIT 3
+            """,
+            (ent, cue, float(min_confidence), session_id),
+        ).fetchall()
+        for r in rows:
+            dim = str(r.get("target_dimension") or "").strip()
+            val = str(r.get("target_value") or "").strip()
+            if not dim or not val:
+                continue
+            if dim not in {"series_name", "family_name", "knife_type", "form_name", "collaborator_name", "steel", "condition", "location", "text_search"}:
+                continue
+            # Do not overwrite stronger hints in same pass.
+            if dim not in filters:
+                filters[dim] = val
+                hid = int(r.get("id"))
+                hint_ids.append(hid)
+                hints.append(
+                    {
+                        "id": hid,
+                        "dimension": dim,
+                        "value": val,
+                        "confidence": r.get("confidence"),
+                        "scope_type": r.get("scope_type"),
+                    }
+                )
+    return {"filters": filters, "hint_ids": hint_ids, "hints": hints}
+
+
+def _reporting_feedback_semantic_hints(conn: sqlite3.Connection, hint_ids: list[int], success: bool) -> None:
+    if not hint_ids:
+        return
+    adj = 0.06 if success else -0.08
+    succ_inc = 1 if success else 0
+    fail_inc = 0 if success else 1
+    for hid in hint_ids:
+        conn.execute(
+            """
+            UPDATE reporting_semantic_hints
+            SET confidence = MIN(0.95, MAX(0.2, confidence + ?)),
+                success_count = success_count + ?,
+                failure_count = failure_count + ?,
+                last_used_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (adj, succ_inc, fail_inc, int(hid)),
+        )
+
+
+def _reporting_learn_semantic_hints(
+    conn: sqlite3.Connection,
+    *,
+    session_id: str,
+    question: str,
+    plan: Optional[dict[str, Any]],
+    row_count: int,
+) -> None:
+    # Learn only from successful, non-empty answers with a semantic plan.
+    if not plan or row_count <= 0:
+        return
+    candidates = _reporting_extract_hint_entities(question)
+    if not candidates:
+        return
+    plan_filters = dict(plan.get("filters") or {})
+    if not plan_filters:
+        return
+
+    # Prefer identity dimensions over free text for hint targets.
+    priority = ["series_name", "family_name", "knife_type", "form_name", "collaborator_name", "steel", "condition", "location", "text_search"]
+    for ent, cue in candidates:
+        chosen_dim = None
+        chosen_val = None
+        for dim in priority:
+            val = plan_filters.get(dim)
+            if not val:
+                continue
+            nval = _reporting_norm_entity(str(val))
+            if ent in nval or nval in ent or dim == "text_search":
+                chosen_dim = dim
+                chosen_val = str(val).strip()
+                break
+        if not chosen_dim or not chosen_val:
+            continue
+        conn.execute(
+            """
+            INSERT INTO reporting_semantic_hints
+            (scope_type, scope_id, entity_norm, cue_word, target_dimension, target_value, confidence, evidence_count, success_count, failure_count, created_at, updated_at, last_used_at)
+            VALUES ('session', ?, ?, ?, ?, ?, 0.55, 1, 1, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON CONFLICT(scope_type, scope_id, entity_norm, cue_word, target_dimension, target_value)
+            DO UPDATE SET
+                confidence = MIN(0.95, reporting_semantic_hints.confidence + 0.05),
+                evidence_count = reporting_semantic_hints.evidence_count + 1,
+                success_count = reporting_semantic_hints.success_count + 1,
+                updated_at = CURRENT_TIMESTAMP,
+                last_used_at = CURRENT_TIMESTAMP
+            """,
+            (session_id, ent, cue, chosen_dim, chosen_val),
+        )
+
+
 def _reporting_normalize_filter_value(key: str, value: str) -> str:
+    base_key = key[:-5] if str(key).endswith("__not") else key
     v = " ".join(str(value or "").strip().lower().split())
     if not v:
         return ""
+    # Remove lightweight quoting wrappers.
+    v = v.strip("\"'`")
     # Remove common filler words that LLM may include in entity values.
     v = re.sub(r"\b(any|all|the|a|an)\b", " ", v)
     v = re.sub(r"\b(knife|knives|model|models)\b", " ", v)
+    # Remove common tail phrases that do not belong to entity values.
+    v = re.sub(r"\b(do i have|that i have|in my inventory|from inventory|from my inventory)\b", " ", v)
+    v = re.sub(r"\b(please|show|list|count|how many)\b", " ", v)
     v = " ".join(v.split()).strip(" ,.;:-")
-    if key == "series_name":
+    if base_key == "series_name":
         for alias, canonical in REPORTING_SERIES_ALIASES.items():
             if alias in v or v == canonical.lower():
                 return canonical
@@ -766,6 +1120,9 @@ def _reporting_explicit_constraints(question: str) -> dict[str, Any]:
     out: dict[str, Any] = {"filters": {}}
     if not q:
         return out
+    scope = _reporting_detect_scope(q)
+    if scope:
+        out["scope"] = scope
 
     if ("how much" in q or "cost" in q or "price" in q) and "complete" in q and "collection" in q:
         out["intent"] = "completion_cost"
@@ -780,6 +1137,8 @@ def _reporting_explicit_constraints(question: str) -> dict[str, Any]:
     elif "how many" in q or "count" in q or "breakdown" in q or "distribution" in q:
         out["intent"] = "aggregate"
         out["metric"] = "count"
+    elif ("verify" in q or "name" in q) and ("list" in q or "show" in q or "what are" in q or "verify" in q):
+        out["intent"] = "list_inventory"
 
     group_by = _reporting_extract_dimension_from_text(q)
     if group_by:
@@ -795,6 +1154,60 @@ def _reporting_explicit_constraints(question: str) -> dict[str, Any]:
         out["filters"]["knife_type"] = "Tactical"
     if "hunting" in q:
         out["filters"]["knife_type"] = "Hunting"
+
+    # Scope extraction for prompts like:
+    # - how many "goat" knives do i have?
+    # - how many goat knives do i have?
+    # - list goat knives
+    scope_patterns = [
+        r"['\"]([a-z0-9][a-z0-9 -]+?)['\"]\s+knives?\b",
+        r"\bhow many\s+([a-z0-9][a-z0-9 -]+?)\s+knives?\b",
+        r"\b(?:list|show)\s+([a-z0-9][a-z0-9 -]+?)\s+knives?\b",
+    ]
+    for pat in scope_patterns:
+        m = re.search(pat, q)
+        if not m:
+            continue
+        raw = m.group(1).strip()
+        if raw in {"tactical", "hunting"}:
+            break
+        if _reporting_is_series_term(raw):
+            # Treat known series aliases as series filters.
+            norm_series = _reporting_normalize_filter_value("series_name", raw)
+            if norm_series:
+                out["filters"]["series_name"] = norm_series
+            break
+        term = _reporting_normalize_filter_value("text_search", raw)
+        if term:
+            out["filters"]["text_search"] = term
+            break
+
+    # Negation / exclusion phrases (soft, generalized):
+    # - "except Speedgoat"
+    # - "without traditions"
+    # - "except tactical knives"
+    neg_patterns = [
+        r"\bexcept\s+([a-z0-9][a-z0-9 -]+?)(?:\s+knives?|\s+models?)?\b",
+        r"\bwithout\s+([a-z0-9][a-z0-9 -]+?)(?:\s+knives?|\s+models?)?\b",
+    ]
+    for pat in neg_patterns:
+        m = re.search(pat, q)
+        if not m:
+            continue
+        raw = m.group(1).strip()
+        norm = _reporting_normalize_filter_value("text_search", raw)
+        if not norm:
+            continue
+        # Prefer explicit controlled dimensions when obvious.
+        series_norm = _reporting_normalize_filter_value("series_name", norm)
+        if series_norm and series_norm in REPORTING_SERIES_ALIASES.values():
+            out["filters"]["series_name__not"] = series_norm
+            break
+        if norm in {"tactical", "hunting"}:
+            out["filters"]["knife_type__not"] = norm.title()
+            break
+        out["filters"]["text_search__not"] = norm
+        break
 
     # Family extraction only for explicit missing-family phrasing; avoid broad false captures.
     family_patterns = [
@@ -817,17 +1230,113 @@ def _reporting_explicit_constraints(question: str) -> dict[str, Any]:
     return out
 
 
+def _reporting_prune_conflicting_filters(question: str, filters: dict[str, Any]) -> dict[str, Any]:
+    """
+    Resolve ambiguous identity filters that can over-constrain results.
+
+    Example: prompts with "Traditions knives" should not accidentally enforce both
+    series_name=Traditions and family_name=Traditions unless family is explicitly requested.
+    """
+    q = " ".join((question or "").strip().lower().split())
+    out = dict(filters or {})
+    if not out:
+        return out
+
+    series_val = out.get("series_name")
+    if series_val:
+        norm_series = _reporting_normalize_filter_value("series_name", series_val)
+        fam_val = out.get("family_name")
+        if fam_val:
+            norm_fam = _reporting_normalize_filter_value("family_name", fam_val)
+            explicit_family_dim = (
+                "by family" in q
+                or "grouped by family" in q
+                or "family breakdown" in q
+                or "per family" in q
+                or "each family" in q
+            )
+            if norm_fam and norm_series and norm_fam.lower() == norm_series.lower() and (not explicit_family_dim):
+                out.pop("family_name", None)
+        type_val = out.get("knife_type")
+        if type_val:
+            norm_type = _reporting_normalize_filter_value("knife_type", type_val)
+            explicit_type_dim = (
+                "by type" in q
+                or "grouped by type" in q
+                or "type breakdown" in q
+                or "knife type" in q
+            )
+            if norm_type and norm_series and norm_type.lower() == norm_series.lower() and (not explicit_type_dim):
+                out.pop("knife_type", None)
+    return out
+
+
+def _reporting_has_substantive_rows(intent: Optional[str], rows: list[dict[str, Any]]) -> bool:
+    if not rows:
+        return False
+    if intent in {"aggregate", "completion_cost"}:
+        numeric_keys = (
+            "rows_count",
+            "total_spend",
+            "total_estimated_value",
+            "missing_models_count",
+            "estimated_completion_cost_msrp",
+        )
+        for r in rows:
+            for k in numeric_keys:
+                try:
+                    if float(r.get(k) or 0) > 0:
+                        return True
+                except Exception:
+                    continue
+        return False
+    return True
+
+
+def _reporting_relax_ambiguous_plan(plan: dict[str, Any], question: str) -> Optional[dict[str, Any]]:
+    """
+    If an initial plan yields non-substantive results, relax ambiguous filters by
+    dropping likely duplicate constraints across dimensions.
+    """
+    p = dict(plan or {})
+    f = dict(p.get("filters") or {})
+    if not f:
+        return None
+    changed = False
+    q = " ".join((question or "").strip().lower().split())
+    s = _reporting_normalize_filter_value("series_name", f.get("series_name") or "")
+    fam = _reporting_normalize_filter_value("family_name", f.get("family_name") or "")
+    typ = _reporting_normalize_filter_value("knife_type", f.get("knife_type") or "")
+    if s and fam and s == fam:
+        # If user did not explicitly demand family segmentation, prefer series scope.
+        if "by family" not in q and "family breakdown" not in q:
+            f.pop("family_name", None)
+            changed = True
+    if s and typ and s == typ:
+        if "by type" not in q and "knife type" not in q:
+            f.pop("knife_type", None)
+            changed = True
+    if changed:
+        p["filters"] = f
+        return p
+    return None
+
+
 def _reporting_heuristic_plan(question: str, last_state: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     q = " ".join((question or "").strip().lower().split())
     plan = dict(last_state or {})
-    if not plan or not _reporting_is_short_followup(q):
+    if not plan or not _reporting_is_followup(q):
         plan = {
             "intent": "list_inventory",
             "filters": {},
             "group_by": None,
             "metric": "count",
             "limit": 200,
+            "scope": _reporting_detect_scope(q) or "inventory",
         }
+    else:
+        # Preserve prior scope across contextual follow-ups unless user changes it.
+        plan["scope"] = _reporting_detect_scope(q) or str(plan.get("scope") or "inventory")
     filters = dict(plan.get("filters") or {})
 
     if ("how much" in q or "cost" in q or "price" in q) and "complete" in q and "collection" in q:
@@ -845,6 +1354,10 @@ def _reporting_heuristic_plan(question: str, last_state: Optional[dict[str, Any]
         plan["metric"] = "total_estimated_value"
     elif any(w in q for w in ("list", "show", "which")) and "knife" in q:
         plan["intent"] = "list_inventory"
+    elif _reporting_is_short_followup(q) and q in {"list them", "show them", "which ones", "show those", "list those"}:
+        # Keep prior scope; just switch output shape to row listing.
+        plan["intent"] = "list_inventory"
+        plan["group_by"] = None
 
     group_by = _reporting_extract_dimension_from_text(q)
     if group_by:
@@ -926,9 +1439,10 @@ def _reporting_semantic_plan(
     retry_model: Optional[str] = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     last_state = _reporting_get_last_query_state(conn, session_id)
-    is_followup = _reporting_is_short_followup(question)
+    is_followup = _reporting_is_followup(question)
     explicit = _reporting_explicit_constraints(question)
     heuristic = _reporting_heuristic_plan(question, last_state=last_state)
+    learned_hints = _reporting_get_semantic_hints(conn, session_id, question)
     schema_context = _reporting_build_prompt_schema(conn)
     llm_plan = _reporting_llm_plan(planner_model, question, context_block, schema_context)
     planner_attempts = 1
@@ -950,7 +1464,11 @@ def _reporting_semantic_plan(
         if isinstance(llm_plan.get("filters"), dict):
             f = {}
             for k, v in llm_plan["filters"].items():
-                if k in {"series_name", "family_name", "knife_type", "form_name", "collaborator_name", "steel", "condition", "location"}:
+                if k in {
+                    "series_name", "family_name", "knife_type", "form_name", "collaborator_name", "steel", "condition", "location",
+                    "series_name__not", "family_name__not", "knife_type__not", "form_name__not", "collaborator_name__not", "steel__not", "condition__not", "location__not",
+                    "text_search", "text_search__not",
+                }:
                     sv = _reporting_normalize_filter_value(k, str(v or ""))
                     if sv and (is_followup or _reporting_filter_explicit_in_question(question, k, sv)):
                         f[k] = sv
@@ -963,12 +1481,32 @@ def _reporting_semantic_plan(
         plan["intent"] = explicit["intent"]
     if explicit.get("metric") in REPORTING_METRICS:
         plan["metric"] = explicit["metric"]
+    if explicit.get("scope") in {"inventory", "catalog"}:
+        plan["scope"] = explicit["scope"]
     if explicit.get("group_by") in REPORTING_GROUPABLE_DIMENSIONS.values():
         plan["group_by"] = explicit["group_by"]
     if isinstance(explicit.get("filters"), dict) and explicit["filters"]:
         plan["filters"] = {**(plan.get("filters") or {}), **explicit["filters"]}
 
-    return plan, {"mode": mode, "planner_attempts": planner_attempts}
+    # Final pass: remove ambiguous cross-dimension filters unless the dimension
+    # is explicitly requested in user language.
+    merged_filters = dict(plan.get("filters") or {})
+    # Learned hints are soft priors: only add if the dimension is currently unset.
+    for k, v in dict(learned_hints.get("filters") or {}).items():
+        if k not in merged_filters and v:
+            merged_filters[k] = v
+    plan["filters"] = _reporting_prune_conflicting_filters(question, merged_filters)
+
+    plan["scope"] = str(plan.get("scope") or "inventory")
+    if plan["scope"] not in {"inventory", "catalog"}:
+        plan["scope"] = "inventory"
+
+    return plan, {
+        "mode": mode,
+        "planner_attempts": planner_attempts,
+        "hint_ids": learned_hints.get("hint_ids") or [],
+        "hints": learned_hints.get("hints") or [],
+    }
 
 
 def _reporting_plan_to_sql(
@@ -982,6 +1520,8 @@ def _reporting_plan_to_sql(
     group_by = plan.get("group_by")
     metric = str(plan.get("metric") or "count")
     limit = min(max_rows, int(plan.get("limit") or max_rows))
+    scope = str(plan.get("scope") or "inventory").strip().lower()
+    use_catalog = scope == "catalog"
 
     def esc(v: Any) -> str:
         return str(v or "").replace("'", "''").strip()
@@ -992,15 +1532,36 @@ def _reporting_plan_to_sql(
             return f"lower(COALESCE({k}, '')) = lower('{ev}')"
         return f"lower(COALESCE({k}, '')) LIKE lower('%{ev}%')"
 
-    model_filter_cols = {"series_name", "family_name", "knife_type", "form_name", "collaborator_name", "steel"}
-    inv_filter_cols = {"series_name", "family_name", "knife_type", "form_name", "collaborator_name", "steel", "condition", "location"}
+    model_filter_cols = {
+        "series_name", "family_name", "knife_type", "form_name", "collaborator_name", "steel", "text_search",
+        "series_name__not", "family_name__not", "knife_type__not", "form_name__not", "collaborator_name__not", "steel__not", "text_search__not",
+    }
+    inv_filter_cols = {
+        "series_name", "family_name", "knife_type", "form_name", "collaborator_name", "steel", "condition", "location", "text_search",
+        "series_name__not", "family_name__not", "knife_type__not", "form_name__not", "collaborator_name__not", "steel__not", "condition__not", "location__not", "text_search__not",
+    }
 
     if intent == "completion_cost":
         where = ["COALESCE(inv.total_qty, 0) = 0"]
         for k, v in filters.items():
             if k not in model_filter_cols:
                 continue
-            where.append(cond(f"m.{k}", v, exact=(k in {"series_name", "knife_type"})))
+            negate = k.endswith("__not")
+            base_k = k[:-5] if negate else k
+            if base_k == "text_search":
+                ev = esc(v)
+                expr = (
+                    "("
+                    "lower(COALESCE(m.official_name, '')) LIKE lower('%" + ev + "%') OR "
+                    "lower(COALESCE(m.family_name, '')) LIKE lower('%" + ev + "%') OR "
+                    "lower(COALESCE(m.form_name, '')) LIKE lower('%" + ev + "%') OR "
+                    "lower(COALESCE(m.series_name, '')) LIKE lower('%" + ev + "%')"
+                    ")"
+                )
+                where.append(f"NOT {expr}" if negate else expr)
+                continue
+            expr = cond(f"m.{base_k}", v, exact=(base_k in {"series_name", "knife_type"}))
+            where.append(f"NOT ({expr})" if negate else expr)
         sql = (
             "SELECT "
             "COUNT(*) AS missing_models_count, "
@@ -1018,7 +1579,22 @@ def _reporting_plan_to_sql(
         for k, v in filters.items():
             if k not in model_filter_cols:
                 continue
-            where.append(cond(f"m.{k}", v, exact=(k in {"series_name", "knife_type"})))
+            negate = k.endswith("__not")
+            base_k = k[:-5] if negate else k
+            if base_k == "text_search":
+                ev = esc(v)
+                expr = (
+                    "("
+                    "lower(COALESCE(m.official_name, '')) LIKE lower('%" + ev + "%') OR "
+                    "lower(COALESCE(m.family_name, '')) LIKE lower('%" + ev + "%') OR "
+                    "lower(COALESCE(m.form_name, '')) LIKE lower('%" + ev + "%') OR "
+                    "lower(COALESCE(m.series_name, '')) LIKE lower('%" + ev + "%')"
+                    ")"
+                )
+                where.append(f"NOT {expr}" if negate else expr)
+                continue
+            expr = cond(f"m.{base_k}", v, exact=(base_k in {"series_name", "knife_type"}))
+            where.append(f"NOT ({expr})" if negate else expr)
         sql = (
             "SELECT m.model_id, m.official_name, m.knife_type, m.family_name, m.form_name, "
             "m.series_name, m.collaborator_name, m.record_status, COALESCE(inv.total_qty, 0) AS inventory_quantity "
@@ -1035,7 +1611,37 @@ def _reporting_plan_to_sql(
     for k, v in filters.items():
         if k not in inv_filter_cols:
             continue
-        where.append(cond(k, v, exact=(k in {"series_name", "knife_type", "condition"})))
+        negate = k.endswith("__not")
+        base_k = k[:-5] if negate else k
+        if use_catalog and base_k in {"condition", "location"}:
+            # Catalog scope does not include inventory-only dimensions.
+            continue
+        if base_k == "text_search":
+            ev = esc(v)
+            if use_catalog:
+                expr = (
+                    "("
+                    "lower(COALESCE(official_name, '')) LIKE lower('%" + ev + "%') OR "
+                    "lower(COALESCE(family_name, '')) LIKE lower('%" + ev + "%') OR "
+                    "lower(COALESCE(form_name, '')) LIKE lower('%" + ev + "%') OR "
+                    "lower(COALESCE(series_name, '')) LIKE lower('%" + ev + "%') OR "
+                    "lower(COALESCE(collaborator_name, '')) LIKE lower('%" + ev + "%')"
+                    ")"
+                )
+            else:
+                expr = (
+                    "("
+                    "lower(COALESCE(knife_name, '')) LIKE lower('%" + ev + "%') OR "
+                    "lower(COALESCE(family_name, '')) LIKE lower('%" + ev + "%') OR "
+                    "lower(COALESCE(form_name, '')) LIKE lower('%" + ev + "%') OR "
+                    "lower(COALESCE(series_name, '')) LIKE lower('%" + ev + "%') OR "
+                    "lower(COALESCE(collaborator_name, '')) LIKE lower('%" + ev + "%')"
+                    ")"
+                )
+            where.append(f"NOT {expr}" if negate else expr)
+            continue
+        expr = cond(base_k, v, exact=(base_k in {"series_name", "knife_type", "condition"}))
+        where.append(f"NOT ({expr})" if negate else expr)
     if date_start:
         where.append(f"acquired_date >= '{esc(date_start)}'")
     if date_end:
@@ -1043,6 +1649,11 @@ def _reporting_plan_to_sql(
     where_sql = f"WHERE {' AND '.join(where)}" if where else ""
 
     if intent == "aggregate":
+        source_view = "reporting_models" if use_catalog else "reporting_inventory"
+        supported_catalog_group = {"series_name", "family_name", "knife_type", "form_name", "collaborator_name", "steel"}
+        if use_catalog and group_by and group_by not in supported_catalog_group:
+            # Fallback to inventory when grouping on inventory-only dimensions.
+            source_view = "reporting_inventory"
         if metric == "total_spend":
             expr = "ROUND(SUM(COALESCE(purchase_price, 0) * COALESCE(quantity, 1)), 2) AS total_spend"
             sort_col = "total_spend"
@@ -1052,27 +1663,39 @@ def _reporting_plan_to_sql(
         else:
             expr = "COUNT(*) AS rows_count"
             sort_col = "rows_count"
+            if source_view == "reporting_models":
+                expr = "COUNT(*) AS rows_count"
         if group_by in REPORTING_GROUPABLE_DIMENSIONS.values():
             sql = (
                 f"SELECT COALESCE({group_by}, 'Unknown') AS bucket, {expr} "
-                "FROM reporting_inventory "
+                f"FROM {source_view} "
                 f"{where_sql} "
                 "GROUP BY bucket "
                 f"ORDER BY {sort_col} DESC "
                 f"LIMIT {limit}"
             )
         else:
-            sql = f"SELECT {expr} FROM reporting_inventory {where_sql}"
+            sql = f"SELECT {expr} FROM {source_view} {where_sql}"
         return sql, {"mode": "semantic_compiled_aggregate"}
 
-    sql = (
-        "SELECT inventory_id, knife_name, knife_type, family_name, form_name, series_name, collaborator_name, "
-        "steel, blade_finish, handle_color, condition, quantity, location "
-        "FROM reporting_inventory "
-        f"{where_sql} "
-        "ORDER BY knife_name "
-        f"LIMIT {limit}"
-    )
+    if use_catalog:
+        sql = (
+            "SELECT model_id, official_name AS knife_name, knife_type, family_name, form_name, series_name, collaborator_name, "
+            "steel, blade_finish, handle_color, handle_type, blade_length, msrp, record_status "
+            "FROM reporting_models "
+            f"{where_sql} "
+            "ORDER BY knife_name "
+            f"LIMIT {limit}"
+        )
+    else:
+        sql = (
+            "SELECT inventory_id, knife_name, knife_type, family_name, form_name, series_name, collaborator_name, "
+            "steel, blade_finish, handle_color, condition, quantity, location "
+            "FROM reporting_inventory "
+            f"{where_sql} "
+            "ORDER BY knife_name "
+            f"LIMIT {limit}"
+        )
     return sql, {"mode": "semantic_compiled_list_inventory"}
 
 
@@ -4838,6 +5461,12 @@ class ReportingSaveQueryIn(BaseModel):
     config: Optional[dict[str, Any]] = None
 
 
+class ReportingFeedbackIn(BaseModel):
+    session_id: str = Field(min_length=8, max_length=120)
+    message_id: int = Field(ge=1)
+    helpful: bool
+
+
 def _reporting_create_session(conn: sqlite3.Connection, model_default: Optional[str] = None) -> dict[str, Any]:
     sid = str(uuid.uuid4())
     conn.execute(
@@ -4875,8 +5504,8 @@ def _reporting_store_message(
     result: Optional[dict[str, Any]] = None,
     chart_spec: Optional[dict[str, Any]] = None,
     meta: Optional[dict[str, Any]] = None,
-) -> None:
-    conn.execute(
+) -> int:
+    cur = conn.execute(
         """
         INSERT INTO reporting_messages (session_id, role, content, sql_executed, result_json, chart_spec_json, meta_json, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -4895,6 +5524,7 @@ def _reporting_store_message(
         "UPDATE reporting_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
         (session_id,),
     )
+    return int(cur.lastrowid)
 
 
 def _reporting_context_block(conn: sqlite3.Connection, session_id: str, limit: int = 12) -> str:
@@ -5137,6 +5767,91 @@ def reporting_telemetry(limit: int = 100):
         return {"events": rows}
 
 
+@app.get("/api/reporting/hints")
+def reporting_hints(limit: int = 100, session_id: Optional[str] = None):
+    with get_conn() as conn:
+        ensure_reporting_schema(conn)
+        safe_limit = min(1000, max(1, int(limit)))
+        if session_id and session_id.strip():
+            rows = conn.execute(
+                """
+                SELECT id, scope_type, scope_id, entity_norm, cue_word, target_dimension, target_value,
+                       confidence, evidence_count, success_count, failure_count, created_at, updated_at, last_used_at
+                FROM reporting_semantic_hints
+                WHERE (scope_type = 'session' AND scope_id = ?) OR (scope_type = 'global' AND scope_id IS NULL)
+                ORDER BY confidence DESC, evidence_count DESC, id DESC
+                LIMIT ?
+                """,
+                (session_id.strip(), safe_limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT id, scope_type, scope_id, entity_norm, cue_word, target_dimension, target_value,
+                       confidence, evidence_count, success_count, failure_count, created_at, updated_at, last_used_at
+                FROM reporting_semantic_hints
+                ORDER BY confidence DESC, evidence_count DESC, id DESC
+                LIMIT ?
+                """,
+                (safe_limit,),
+            ).fetchall()
+        return {"hints": rows}
+
+
+@app.post("/api/reporting/feedback")
+def reporting_feedback(payload: ReportingFeedbackIn):
+    with get_conn() as conn:
+        ensure_reporting_schema(conn)
+        sid = payload.session_id.strip()
+        msg = conn.execute(
+            """
+            SELECT id, session_id, role, meta_json
+            FROM reporting_messages
+            WHERE id = ? AND session_id = ?
+            """,
+            (int(payload.message_id), sid),
+        ).fetchone()
+        if not msg:
+            raise HTTPException(status_code=404, detail="Message not found for this session.")
+        if str(msg.get("role") or "") != "assistant":
+            raise HTTPException(status_code=400, detail="Feedback is only supported on assistant messages.")
+
+        meta = json.loads(msg.get("meta_json") or "{}") if msg.get("meta_json") else {}
+        if not isinstance(meta, dict):
+            meta = {}
+        prior = meta.get("feedback_helpful")
+        if isinstance(prior, bool):
+            # Idempotent behavior: do not re-apply confidence changes.
+            if prior == bool(payload.helpful):
+                return {"ok": True, "message": "Feedback already recorded.", "changed": False}
+            raise HTTPException(status_code=409, detail="Feedback already recorded for this message.")
+
+        hint_ids: list[int] = []
+        for h in (meta.get("semantic_hints") or []):
+            if not isinstance(h, dict):
+                continue
+            hid = h.get("id")
+            if isinstance(hid, int):
+                hint_ids.append(hid)
+            elif isinstance(hid, str) and hid.isdigit():
+                hint_ids.append(int(hid))
+
+        if hint_ids:
+            _reporting_feedback_semantic_hints(conn, hint_ids, success=bool(payload.helpful))
+
+        meta["feedback_helpful"] = bool(payload.helpful)
+        meta["feedback_at"] = _reporting_iso_now()
+        conn.execute(
+            "UPDATE reporting_messages SET meta_json = ? WHERE id = ?",
+            (json.dumps(meta), int(payload.message_id)),
+        )
+        conn.execute(
+            "UPDATE reporting_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (sid,),
+        )
+        return {"ok": True, "changed": True, "hint_ids_updated": hint_ids}
+
+
 @app.post("/api/reporting/sessions")
 def reporting_session_create(model: Optional[str] = None):
     with get_conn() as conn:
@@ -5267,9 +5982,132 @@ def reporting_query(payload: ReportingQueryIn):
                 meta={},
             )
 
+        if _reporting_is_scope_status_question(question):
+            state = _reporting_get_last_query_state(conn, session_id) or {}
+            scope = str(state.get("scope") or "inventory").strip().lower()
+            if scope == "catalog":
+                msg = (
+                    "I am currently scoped to the full MKC catalog "
+                    "(all models made), not just your inventory."
+                )
+            else:
+                msg = (
+                    "I am currently scoped to your inventory "
+                    "(knives you own), not the full MKC catalog."
+                )
+            assistant_message_id = _reporting_store_message(
+                conn,
+                session_id,
+                "assistant",
+                msg,
+                meta={"scope_status": scope},
+            )
+            total_ms = round((time.perf_counter() - started) * 1000.0, 2)
+            _reporting_log_query_event(
+                conn,
+                session_id=session_id,
+                question=question,
+                planner_model=planner_model,
+                responder_model=responder_model,
+                generation_mode="scope_status",
+                semantic_intent=None,
+                sql_excerpt=None,
+                row_count=0,
+                execution_ms=None,
+                total_ms=total_ms,
+                status="ok",
+                error_detail=None,
+                meta={"scope": scope},
+            )
+            return {
+                "session_id": session_id,
+                "model": responder_model,
+                "planner_model": planner_model,
+                "answer_text": msg,
+                "columns": [],
+                "rows": [],
+                "chart_spec": None,
+                "sql_executed": None,
+                "follow_ups": [],
+                "confidence": 0.9,
+                "limitations": None,
+                "generation_mode": "scope_status",
+                "execution_ms": None,
+                "date_window": {"start": date_start, "end": date_end, "label": date_label},
+                "assistant_message_id": assistant_message_id,
+            }
+
+        if _reporting_needs_scope_clarification(question):
+            clarify = (
+                "Quick clarification: do you want this based on knives you currently own "
+                "(your inventory), or based on all models MKC has made (full catalog)?"
+            )
+            follow_ups = [
+                f"{question.rstrip('?')} in my inventory (knives I own)?",
+                f"{question.rstrip('?')} in the full MKC catalog (all models made)?",
+            ]
+            assistant_message_id = _reporting_store_message(
+                conn,
+                session_id,
+                "assistant",
+                clarify,
+                meta={"clarification_needed": "scope", "follow_ups": follow_ups},
+            )
+            total_ms = round((time.perf_counter() - started) * 1000.0, 2)
+            _reporting_log_query_event(
+                conn,
+                session_id=session_id,
+                question=question,
+                planner_model=planner_model,
+                responder_model=responder_model,
+                generation_mode="clarification_scope",
+                semantic_intent=None,
+                sql_excerpt=None,
+                row_count=0,
+                execution_ms=None,
+                total_ms=total_ms,
+                status="clarification_needed",
+                error_detail="scope_ambiguous",
+                meta={"follow_ups": follow_ups},
+            )
+            return {
+                "session_id": session_id,
+                "model": responder_model,
+                "planner_model": planner_model,
+                "answer_text": clarify,
+                "columns": [],
+                "rows": [],
+                "chart_spec": None,
+                "sql_executed": None,
+                "follow_ups": follow_ups,
+                "confidence": None,
+                "limitations": "Scope was ambiguous (inventory vs full catalog).",
+                "generation_mode": "clarification_scope",
+                "execution_ms": None,
+                "date_window": {"start": date_start, "end": date_end, "label": date_label},
+                "assistant_message_id": assistant_message_id,
+            }
+
+        unsafe_reason = _reporting_detect_unsafe_request(question)
+        if unsafe_reason:
+            safe_msg = (
+                "I can only help with safe, read-only collection questions. "
+                "Please ask in plain language without SQL commands or schema instructions."
+            )
+            _reporting_store_message(
+                conn,
+                session_id,
+                "assistant",
+                safe_msg,
+                meta={"guardrail": "unsafe_request", "reason": unsafe_reason},
+            )
+            _log_error("guardrail_reject", unsafe_reason, mode="guardrail", semantic_intent=None)
+            raise HTTPException(status_code=400, detail=safe_msg)
+
         semantic_plan: Optional[dict[str, Any]] = None
         sql: Optional[str] = None
         sql_meta: dict[str, Any] = {}
+        hint_ids_used: list[int] = []
 
         # Explicit compare mode remains template-backed for predictable behavior.
         if payload.compare_dimension and payload.compare_value_a and payload.compare_value_b:
@@ -5297,6 +6135,7 @@ def reporting_query(payload: ReportingQueryIn):
                 payload.max_rows,
             )
             sql_meta = {**semantic_meta, **compile_meta}
+            hint_ids_used = [int(x) for x in (semantic_meta.get("hint_ids") or []) if isinstance(x, int) or str(x).isdigit()]
 
         # Fallback path for robustness with old behavior.
         if not sql:
@@ -5337,6 +6176,51 @@ def reporting_query(payload: ReportingQueryIn):
             if drill:
                 row["_drill_link"] = drill
             rows_out.append(row)
+
+        primary_intent = (semantic_plan or {}).get("intent")
+        substantive = _reporting_has_substantive_rows(primary_intent, rows_out)
+        # If semantic plan looks over-constrained, attempt one generic ambiguity relaxation pass.
+        if not substantive and semantic_plan:
+            relaxed = _reporting_relax_ambiguous_plan(semantic_plan, question)
+            if relaxed:
+                relaxed_sql, relaxed_meta = _reporting_plan_to_sql(
+                    relaxed,
+                    date_start,
+                    date_end,
+                    payload.max_rows,
+                )
+                if relaxed_sql:
+                    try:
+                        cols2, rows2, exec2 = _reporting_exec_sql(conn, relaxed_sql, payload.max_rows)
+                        rows_out2 = []
+                        for r2 in rows2:
+                            row2 = dict(r2)
+                            drill2 = _reporting_build_drill_link(row2)
+                            if drill2:
+                                row2["_drill_link"] = drill2
+                            rows_out2.append(row2)
+                        if _reporting_has_substantive_rows((relaxed or {}).get("intent"), rows_out2):
+                            columns = cols2
+                            rows_out = rows_out2
+                            execution_ms = exec2
+                            semantic_plan = relaxed
+                            sql = relaxed_sql
+                            sql_meta = {**sql_meta, **relaxed_meta, "mode": f"{sql_meta.get('mode')}_relaxed"}
+                            substantive = True
+                    except HTTPException:
+                        pass
+
+        # Learn and feedback hint confidence from final outcome.
+        if hint_ids_used:
+            _reporting_feedback_semantic_hints(conn, hint_ids_used, success=substantive)
+        if semantic_plan:
+            _reporting_learn_semantic_hints(
+                conn,
+                session_id=session_id,
+                question=question,
+                plan=semantic_plan,
+                row_count=(1 if substantive else 0),
+            )
 
         chart_spec = _reporting_infer_chart(
             question,
@@ -5380,8 +6264,9 @@ def reporting_query(payload: ReportingQueryIn):
             "execution_ms": execution_ms,
             "semantic_plan": semantic_plan,
             "timestamp": _reporting_iso_now(),
+            "semantic_hints": sql_meta.get("hints") or [],
         }
-        _reporting_store_message(
+        assistant_message_id = _reporting_store_message(
             conn,
             session_id,
             "assistant",
@@ -5414,6 +6299,7 @@ def reporting_query(payload: ReportingQueryIn):
                 "planner_attempts": sql_meta.get("planner_attempts"),
                 "has_compare_mode": bool(payload.compare_dimension and payload.compare_value_a and payload.compare_value_b),
                 "semantic_plan": semantic_plan,
+                "semantic_hints": sql_meta.get("hints") or [],
             },
         )
 
@@ -5432,6 +6318,7 @@ def reporting_query(payload: ReportingQueryIn):
             "generation_mode": sql_meta.get("mode"),
             "execution_ms": execution_ms,
             "date_window": {"start": date_start, "end": date_end, "label": date_label},
+            "assistant_message_id": assistant_message_id,
         }
 
 
