@@ -26,6 +26,34 @@ from pydantic import BaseModel, Field
 
 from sqlite_schema import column_exists
 
+from reporting.regex_contract import (
+    RE_COMPLETION_COST_LEX,
+    RE_DATE_ISO,
+    RE_DIRECT_SQL_USER_PREFIX,
+    RE_HINT_ENTITY_STOP_PREFIX,
+    RE_HINT_ENTITY_STOP_SUFFIX,
+    RE_LAST_N_DAYS,
+    RE_LAST_N_MONTHS,
+    RE_LAST_N_YEARS,
+    RE_NORM_STRIP_ANY_ALL,
+    RE_NORM_STRIP_INVENTORY_PHRASES,
+    RE_NORM_STRIP_KNIFE_WORDS,
+    RE_NORM_STRIP_POLITE_VERBS,
+    RE_SCOPE_OWN,
+    RE_SCOPE_OWNED,
+    RE_SINCE_ISO_DATE,
+    RE_SQL_FENCED_BLOCK,
+    RE_SQL_FROM_JOIN_IDENT,
+    RE_SQL_LOOSE_FROM_SELECT,
+    RE_SQL_QUOTED_RELATION_REF,
+    RE_WHICH_WHAT_KNIVES,
+    RE_YEAR_4,
+    RE_YEAR_VS_YEAR,
+    UNSAFE_REQUEST_PATTERN_REASONS,
+    clean_llm_sql_fences,
+    extract_first_json_object,
+)
+
 _ConnectionCtx = AbstractContextManager[sqlite3.Connection]
 GetConn = Callable[[], _ConnectionCtx]
 
@@ -242,19 +270,19 @@ def _reporting_detect_date_bounds(question: str) -> tuple[Optional[str], Optiona
     end: Optional[date] = None
     label: Optional[str] = None
 
-    m = re.search(r"\blast\s+(\d+)\s+days?\b", q)
+    m = RE_LAST_N_DAYS.search(q)
     if m:
         n = max(1, int(m.group(1)))
         start = today - timedelta(days=n)
         end = today
         label = f"last {n} days"
-    m = m or re.search(r"\blast\s+(\d+)\s+months?\b", q)
+    m = m or RE_LAST_N_MONTHS.search(q)
     if m and label is None:
         n = max(1, int(m.group(1)))
         start = today - timedelta(days=(30 * n))
         end = today
         label = f"last {n} months"
-    m = m or re.search(r"\blast\s+(\d+)\s+years?\b", q)
+    m = m or RE_LAST_N_YEARS.search(q)
     if m and label is None:
         n = max(1, int(m.group(1)))
         start = date(today.year - n, today.month, min(today.day, 28))
@@ -268,7 +296,7 @@ def _reporting_detect_date_bounds(question: str) -> tuple[Optional[str], Optiona
         start = date(today.year - 1, 1, 1)
         end = date(today.year - 1, 12, 31)
         label = "last year"
-    m_since = re.search(r"\bsince\s+(\d{4}-\d{2}-\d{2})\b", q)
+    m_since = RE_SINCE_ISO_DATE.search(q)
     if m_since and label is None:
         try:
             start = datetime.strptime(m_since.group(1), "%Y-%m-%d").date()
@@ -290,7 +318,7 @@ def _reporting_detect_year_comparison(question: str) -> Optional[tuple[str, str]
     Returns (year_a, year_b) as strings when exactly 2 years are detected.
     """
     q = " ".join((question or "").strip().lower().split())
-    m = re.search(r"\b((?:19|20)\d{2})\b\s*(?:vs|versus)\s*\b((?:19|20)\d{2})\b", q, flags=re.I)
+    m = RE_YEAR_VS_YEAR.search(q)
     if not m:
         return None
     a, b = m.group(1), m.group(2)
@@ -311,24 +339,12 @@ def _reporting_detect_unsafe_request(question: str) -> Optional[str]:
         return None
     ql = q.lower()
     compact = " ".join(ql.split())
-    patterns: list[tuple[str, str]] = [
-        (r"(?is)```(?:sql)?\s*(select|with|insert|update|delete|drop|alter|create)\b", "sql_code_block"),
-        (r"\b(drop\s+table|delete\s+from|insert\s+into|update\s+\w+\s+set|alter\s+table|create\s+table)\b", "mutating_sql_phrase"),
-        (r"\b(pragma|sqlite_master|information_schema)\b", "schema_exfiltration_phrase"),
-        (r"\bunion\s+select\b", "union_select_phrase"),
-        (r";\s*(select|with|insert|update|delete|drop|alter|create)\b", "multi_statement_hint"),
-        (r"(?is)\b(ignore|bypass|override)\b.{0,40}\b(instruction|guardrail|safety|policy)\b", "guardrail_bypass_phrase"),
-    ]
-    for pat, reason in patterns:
+    for pat, reason in UNSAFE_REQUEST_PATTERN_REASONS:
         if re.search(pat, compact):
             return reason
     # Direct SQL command starters are not supported as user input.
     # Do not treat plain English "create a …" / "make a …" as CREATE TABLE.
-    if re.match(
-        r"^\s*(select|with|insert|update|delete|drop|alter|pragma)\b"
-        r"|^\s*create\s+(table|view|index|database|trigger|virtual)\b",
-        compact,
-    ):
+    if RE_DIRECT_SQL_USER_PREFIX.match(compact):
         return "direct_sql_prefix"
     return None
 
@@ -370,10 +386,10 @@ def _reporting_detect_scope(question: str) -> Optional[str]:
         "ever made",
     )
     inv = any(m in q for m in inventory_markers)
-    if not inv and (re.search(r"\bowned\b", q) or re.search(r"\bown\b", q)):
+    if not inv and (RE_SCOPE_OWNED.search(q) or RE_SCOPE_OWN.search(q)):
         inv = True
     # Personal collection value / ranking (inventory pieces), not catalog MSRP rollups.
-    if not inv and "estimated value" in q and re.search(r"\b(which|what)\s+knives\b", q):
+    if not inv and "estimated value" in q and RE_WHICH_WHAT_KNIVES.search(q):
         inv = True
     cat = any(m in q for m in catalog_markers)
     if inv and not cat:
@@ -389,13 +405,7 @@ def _reporting_is_completion_cost_question(q: str) -> bool:
         return False
     if not ("complete" in q or "finish" in q):
         return False
-    return bool(
-        re.search(
-            r"\b(how much|cost|price|msrp|estimate|estimated)\b",
-            q,
-            flags=re.I,
-        )
-    )
+    return bool(RE_COMPLETION_COST_LEX.search(q))
 
 
 def _reporting_needs_scope_clarification(question: str) -> bool:
@@ -463,12 +473,12 @@ def _reporting_validate_sql(sql: str) -> str:
     if not (lower.startswith("select ") or lower.startswith("with ")):
         raise HTTPException(status_code=400, detail="Only SELECT queries are allowed.")
     # Disallow quoted relation references to avoid bypassing allowlist parsing.
-    if re.search(r'\b(?:from|join)\s+["`\\[]', lower):
+    if RE_SQL_QUOTED_RELATION_REF.search(lower):
         raise HTTPException(status_code=400, detail="Quoted relation references are not allowed in reporting SQL.")
     for token in REPORTING_FORBIDDEN_SQL:
         if re.search(rf"\b{token}\b", lower):
             raise HTTPException(status_code=400, detail=f"Forbidden SQL token: {token}")
-    refs = re.findall(r"\b(?:from|join)\s+([a-zA-Z_][a-zA-Z0-9_]*)", lower)
+    refs = RE_SQL_FROM_JOIN_IDENT.findall(lower)
     if not refs:
         raise HTTPException(status_code=400, detail="Query must read from approved reporting sources.")
     for ref in refs:
@@ -753,11 +763,8 @@ def _reporting_extract_hint_entities(question: str) -> list[tuple[str, str]]:
         rf"\b([a-z0-9][a-z0-9 '&/-]{{1,60}}?)\s+({cue_re})\b",
         rf"\b({cue_re})\s+([a-z0-9][a-z0-9 '&/-]{{1,60}}?)\b",
     ]
-    stop_prefix = re.compile(
-        r"^(how many|what is|what are|which|show me|show|list|count|are there|there are|there is|in|the)\s+",
-        re.I,
-    )
-    stop_suffix = re.compile(r"\s+(in|the|my|our|collection|inventory|there|are|is|by)$", re.I)
+    stop_prefix = RE_HINT_ENTITY_STOP_PREFIX
+    stop_suffix = RE_HINT_ENTITY_STOP_SUFFIX
     for pat in pats:
         for m in re.finditer(pat, q):
             if len(m.groups()) != 2:
@@ -923,11 +930,11 @@ def _reporting_normalize_filter_value(key: str, value: str) -> str:
     # Remove lightweight quoting wrappers.
     v = v.strip("\"'`")
     # Remove common filler words that LLM may include in entity values.
-    v = re.sub(r"\b(any|all|the|a|an)\b", " ", v)
-    v = re.sub(r"\b(knife|knives|model|models)\b", " ", v)
+    v = RE_NORM_STRIP_ANY_ALL.sub(" ", v)
+    v = RE_NORM_STRIP_KNIFE_WORDS.sub(" ", v)
     # Remove common tail phrases that do not belong to entity values.
-    v = re.sub(r"\b(do i have|that i have|in my inventory|from inventory|from my inventory)\b", " ", v)
-    v = re.sub(r"\b(please|show|list|count|how many)\b", " ", v)
+    v = RE_NORM_STRIP_INVENTORY_PHRASES.sub(" ", v)
+    v = RE_NORM_STRIP_POLITE_VERBS.sub(" ", v)
     v = " ".join(v.split()).strip(" ,.;:-")
     if base_key == "series_name":
         for alias, canonical in REPORTING_SERIES_ALIASES.items():
@@ -1290,10 +1297,10 @@ def _reporting_llm_plan(
             except Exception:
                 parsed = None
         if parsed is None:
-            m = re.search(r"\{.*\}", raw, re.S)
-            if m:
+            braced = extract_first_json_object(raw)
+            if braced:
                 try:
-                    parsed = json.loads(m.group(0))
+                    parsed = json.loads(braced)
                 except Exception:
                     parsed = None
         return parsed if isinstance(parsed, dict) else None
@@ -1347,15 +1354,15 @@ def _reporting_semantic_plan(
                 plan["filters"] = {**(plan.get("filters") or {}), **f}
         llm_ds = str(llm_plan.get("date_start") or "").strip()
         llm_de = str(llm_plan.get("date_end") or "").strip()
-        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", llm_ds):
+        if RE_DATE_ISO.fullmatch(llm_ds):
             plan["date_start"] = llm_ds
-        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", llm_de):
+        if RE_DATE_ISO.fullmatch(llm_de):
             plan["date_end"] = llm_de
         yc = llm_plan.get("year_compare")
         if isinstance(yc, (list, tuple)) and len(yc) == 2:
             ya = str(yc[0]).strip()
             yb = str(yc[1]).strip()
-            if re.fullmatch(r"(?:19|20)\d{2}", ya) and re.fullmatch(r"(?:19|20)\d{2}", yb):
+            if RE_YEAR_4.fullmatch(ya) and RE_YEAR_4.fullmatch(yb):
                 plan["year_compare"] = [ya, yb]
         mode = "semantic_llm_plus_heuristic"
 
@@ -1420,7 +1427,7 @@ def _reporting_plan_to_sql(
     if isinstance(yc, (list, tuple)) and len(yc) == 2:
         ya = str(yc[0]).strip()
         yb = str(yc[1]).strip()
-        if re.fullmatch(r"(?:19|20)\d{2}", ya) and re.fullmatch(r"(?:19|20)\d{2}", yb):
+        if RE_YEAR_4.fullmatch(ya) and RE_YEAR_4.fullmatch(yb):
             year_compare = (ya, yb)
 
     def esc(v: Any) -> str:
@@ -1809,10 +1816,7 @@ def _reporting_call_llm_for_sql(
     try:
         raw = blade_ai.ollama_chat(model, system, user, timeout=90.0)
         def _clean_extracted_sql(candidate: str) -> str:
-            s = (candidate or "").strip()
-            # Remove markdown fences/labels if present.
-            s = re.sub(r"(?is)^```(?:sql)?\s*", "", s).strip()
-            s = re.sub(r"(?is)\s*```$", "", s).strip()
+            s = clean_llm_sql_fences(candidate)
             # Cut non-SQL trailing sections from common malformed outputs.
             cut_markers = [
                 "\n```",
@@ -1844,10 +1848,10 @@ def _reporting_call_llm_for_sql(
             except (json.JSONDecodeError, TypeError, ValueError) as exc:
                 parse_error = str(exc)
         if parsed is None:
-            m = re.search(r"\{.*\}", raw, re.S)
-            if m:
+            braced = extract_first_json_object(raw)
+            if braced:
                 try:
-                    parsed = json.loads(m.group(0))
+                    parsed = json.loads(braced)
                 except (json.JSONDecodeError, TypeError, ValueError) as exc:
                     parse_error = str(exc)
         sql = None
@@ -1864,11 +1868,11 @@ def _reporting_call_llm_for_sql(
             }
         else:
             # Fallback when model returns prose with embedded SQL instead of strict JSON.
-            m_fenced = re.search(r"(?is)```(?:sql)?\s*((?:select|with)\b.*?)```", raw)
+            m_fenced = RE_SQL_FENCED_BLOCK.search(raw)
             if m_fenced:
                 sql = _clean_extracted_sql(m_fenced.group(1))
             else:
-                m_sql = re.search(r"(?is)\b(select|with)\b.+", raw)
+                m_sql = RE_SQL_LOOSE_FROM_SELECT.search(raw)
                 if m_sql:
                     sql = _clean_extracted_sql(m_sql.group(0))
             meta = {
@@ -2085,9 +2089,9 @@ def _reporting_generate_answer(
         raw = blade_ai.ollama_chat(model, system, user, timeout=90.0)
         parsed = json.loads(raw) if raw.strip().startswith("{") else None
         if parsed is None:
-            m = re.search(r"\{.*\}", raw, re.S)
-            if m:
-                parsed = json.loads(m.group(0))
+            braced = extract_first_json_object(raw)
+            if braced:
+                parsed = json.loads(braced)
         if isinstance(parsed, dict):
             answer = str(parsed.get("answer_text") or "").strip() or f"Returned {len(rows)} rows."
             followups = parsed.get("follow_ups") if isinstance(parsed.get("follow_ups"), list) else []
