@@ -547,6 +547,22 @@ def _reporting_detect_date_bounds(question: str) -> tuple[Optional[str], Optiona
     )
 
 
+def _reporting_detect_year_comparison(question: str) -> Optional[tuple[str, str]]:
+    """
+    Detect patterns like "2024 vs 2025" / "2024 versus 2025".
+
+    Returns (year_a, year_b) as strings when exactly 2 years are detected.
+    """
+    q = " ".join((question or "").strip().lower().split())
+    m = re.search(r"\b((?:19|20)\d{2})\b\s*(?:vs|versus)\s*\b((?:19|20)\d{2})\b", q, flags=re.I)
+    if not m:
+        return None
+    a, b = m.group(1), m.group(2)
+    if not a or not b:
+        return None
+    return (a, b)
+
+
 def _reporting_detect_unsafe_request(question: str) -> Optional[str]:
     """
     Detect obvious prompt-injection / SQL-command attempts in user text.
@@ -1192,6 +1208,20 @@ def _reporting_explicit_constraints(question: str) -> dict[str, Any]:
         out["filters"]["knife_type"] = "Tactical"
     if "hunting" in q:
         out["filters"]["knife_type"] = "Hunting"
+    ds, de, dl = _reporting_detect_date_bounds(question)
+    if ds:
+        out["date_start"] = ds
+    if de:
+        out["date_end"] = de
+    if dl:
+        out["date_label"] = dl
+    yc = _reporting_detect_year_comparison(question)
+    if yc:
+        out["year_compare"] = [yc[0], yc[1]]
+        if "intent" not in out:
+            out["intent"] = "aggregate"
+        if "metric" not in out and ("spend" in q or "spent" in q):
+            out["metric"] = "total_spend"
 
     # Scope extraction for prompts like:
     # - how many "goat" knives do i have?
@@ -1409,6 +1439,25 @@ def _reporting_heuristic_plan(question: str, last_state: Optional[dict[str, Any]
             plan["intent"] = "aggregate"
             plan["metric"] = "count"
 
+    # Preserve date intent across short/contextual follow-ups when user did not
+    # restate a new date window explicitly.
+    if _reporting_is_followup(q) and isinstance(last_state, dict):
+        for k in ("date_start", "date_end", "date_label", "year_compare"):
+            if k in last_state and k not in plan:
+                plan[k] = last_state[k]
+
+    # Fresh question date intent overrides inherited state.
+    ds, de, dl = _reporting_detect_date_bounds(question)
+    if ds:
+        plan["date_start"] = ds
+    if de:
+        plan["date_end"] = de
+    if dl:
+        plan["date_label"] = dl
+    yc = _reporting_detect_year_comparison(question)
+    if yc:
+        plan["year_compare"] = [yc[0], yc[1]]
+
     for needle, canonical in REPORTING_SERIES_ALIASES.items():
         if needle in q:
             filters["series_name"] = canonical
@@ -1437,11 +1486,13 @@ def _reporting_llm_plan(
 ) -> Optional[dict[str, Any]]:
     system = (
         "You convert collection questions into semantic JSON plans. "
-        "Return JSON only with keys: intent, filters, group_by, metric, limit. "
+        "Return JSON only with keys: intent, filters, group_by, metric, limit, date_start, date_end, year_compare. "
         "intent must be one of: missing_models, list_inventory, aggregate, completion_cost. "
         "filters is an object using only: series_name, family_name, knife_type, form_name, collaborator_name, steel, condition, location. "
         "group_by must be null or one of: series_name, family_name, knife_type, form_name, collaborator_name, steel, condition, location. "
-        "metric must be one of: count, total_spend, total_estimated_value."
+        "metric must be one of: count, total_spend, total_estimated_value. "
+        "date_start/date_end must be YYYY-MM-DD or null. "
+        "year_compare must be null or [YYYY, YYYY] when user asks year-vs-year."
     )
     user = (
         f"Schema:\n{schema_context}\n\n"
@@ -1512,6 +1563,18 @@ def _reporting_semantic_plan(
                         f[k] = sv
             if f:
                 plan["filters"] = {**(plan.get("filters") or {}), **f}
+        llm_ds = str(llm_plan.get("date_start") or "").strip()
+        llm_de = str(llm_plan.get("date_end") or "").strip()
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", llm_ds):
+            plan["date_start"] = llm_ds
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", llm_de):
+            plan["date_end"] = llm_de
+        yc = llm_plan.get("year_compare")
+        if isinstance(yc, (list, tuple)) and len(yc) == 2:
+            ya = str(yc[0]).strip()
+            yb = str(yc[1]).strip()
+            if re.fullmatch(r"(?:19|20)\d{2}", ya) and re.fullmatch(r"(?:19|20)\d{2}", yb):
+                plan["year_compare"] = [ya, yb]
         mode = "semantic_llm_plus_heuristic"
 
     # Explicit user constraints always win over LLM refinements.
@@ -1525,6 +1588,14 @@ def _reporting_semantic_plan(
         plan["group_by"] = explicit["group_by"]
     if isinstance(explicit.get("filters"), dict) and explicit["filters"]:
         plan["filters"] = {**(plan.get("filters") or {}), **explicit["filters"]}
+    if explicit.get("date_start"):
+        plan["date_start"] = explicit.get("date_start")
+    if explicit.get("date_end"):
+        plan["date_end"] = explicit.get("date_end")
+    if explicit.get("date_label"):
+        plan["date_label"] = explicit.get("date_label")
+    if isinstance(explicit.get("year_compare"), list) and len(explicit["year_compare"]) == 2:
+        plan["year_compare"] = [str(explicit["year_compare"][0]), str(explicit["year_compare"][1])]
 
     # Final pass: remove ambiguous cross-dimension filters unless the dimension
     # is explicitly requested in user language.
@@ -1560,6 +1631,15 @@ def _reporting_plan_to_sql(
     limit = min(max_rows, int(plan.get("limit") or max_rows))
     scope = str(plan.get("scope") or "inventory").strip().lower()
     use_catalog = scope == "catalog"
+    plan_date_start = str(plan.get("date_start") or "").strip() or None
+    plan_date_end = str(plan.get("date_end") or "").strip() or None
+    yc = plan.get("year_compare")
+    year_compare: Optional[tuple[str, str]] = None
+    if isinstance(yc, (list, tuple)) and len(yc) == 2:
+        ya = str(yc[0]).strip()
+        yb = str(yc[1]).strip()
+        if re.fullmatch(r"(?:19|20)\d{2}", ya) and re.fullmatch(r"(?:19|20)\d{2}", yb):
+            year_compare = (ya, yb)
 
     def esc(v: Any) -> str:
         return str(v or "").replace("'", "''").strip()
@@ -1680,10 +1760,12 @@ def _reporting_plan_to_sql(
             continue
         expr = cond(base_k, v, exact=(base_k in {"series_name", "knife_type", "condition"}))
         where.append(f"NOT ({expr})" if negate else expr)
-    if date_start:
-        where.append(f"acquired_date >= '{esc(date_start)}'")
-    if date_end:
-        where.append(f"acquired_date <= '{esc(date_end)}'")
+    effective_date_start = plan_date_start or date_start
+    effective_date_end = plan_date_end or date_end
+    if effective_date_start:
+        where.append(f"acquired_date >= '{esc(effective_date_start)}'")
+    if effective_date_end:
+        where.append(f"acquired_date <= '{esc(effective_date_end)}'")
     where_sql = f"WHERE {' AND '.join(where)}" if where else ""
 
     if intent == "aggregate":
@@ -1703,6 +1785,17 @@ def _reporting_plan_to_sql(
             sort_col = "rows_count"
             if source_view == "reporting_models":
                 expr = "COUNT(*) AS rows_count"
+        if year_compare and source_view == "reporting_inventory" and not group_by:
+            ya, yb = year_compare
+            sql = (
+                "SELECT substr(acquired_date, 1, 4) AS bucket, "
+                f"{expr} "
+                "FROM reporting_inventory "
+                f"WHERE acquired_date IS NOT NULL AND substr(acquired_date, 1, 4) IN ('{esc(ya)}', '{esc(yb)}') "
+                "GROUP BY bucket "
+                "ORDER BY bucket"
+            )
+            return sql, {"mode": "semantic_compiled_year_compare"}
         if group_by in REPORTING_GROUPABLE_DIMENSIONS.values():
             sql = (
                 f"SELECT COALESCE({group_by}, 'Unknown') AS bucket, {expr} "
@@ -6506,12 +6599,18 @@ def reporting_query(payload: ReportingQueryIn):
                 confidence = float(sql_meta["confidence"])
             except (TypeError, ValueError):
                 confidence = confidence
+        effective_date_start = (semantic_plan or {}).get("date_start") or date_start
+        effective_date_end = (semantic_plan or {}).get("date_end") or date_end
+        effective_date_label = (semantic_plan or {}).get("date_label") or date_label
+        yc = (semantic_plan or {}).get("year_compare")
+        if not effective_date_label and isinstance(yc, (list, tuple)) and len(yc) == 2:
+            effective_date_label = f"{yc[0]} vs {yc[1]}"
 
         result_payload = {
             "columns": columns,
             "rows": rows_out,
             "row_count": len(rows_out),
-            "date_window": {"start": date_start, "end": date_end, "label": date_label},
+            "date_window": {"start": effective_date_start, "end": effective_date_end, "label": effective_date_label},
         }
         meta = {
             "planner_model": planner_model,
@@ -6555,7 +6654,7 @@ def reporting_query(payload: ReportingQueryIn):
             total_ms=total_ms,
             status="ok",
             meta={
-                "date_window": {"start": date_start, "end": date_end, "label": date_label},
+                "date_window": {"start": effective_date_start, "end": effective_date_end, "label": effective_date_label},
                 "planner_attempts": sql_meta.get("planner_attempts"),
                 "has_compare_mode": bool(payload.compare_dimension and payload.compare_value_a and payload.compare_value_b),
                 "semantic_plan": semantic_plan,
@@ -6577,7 +6676,7 @@ def reporting_query(payload: ReportingQueryIn):
             "limitations": limitations,
             "generation_mode": sql_meta.get("mode"),
             "execution_ms": execution_ms,
-            "date_window": {"start": date_start, "end": date_end, "label": date_label},
+            "date_window": {"start": effective_date_start, "end": effective_date_end, "label": effective_date_label},
             "assistant_message_id": assistant_message_id,
         }
 
