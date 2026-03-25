@@ -1,0 +1,31 @@
+Gap analysis: MKC email orders (knives CSV) vs inventory_items_v2
+Orders file: /Volumes/dhogan/invapp_v2/data/mkc_email_orders_knives.csv
+Match mode: Traditions/Ultra/Damascus = model only (handle+blade '*'); Blood Brothers + tactical use blade; other models model+handle + blade '*'
+Singleton SKU models (Traditions + Ultra + Damascus, model-only match): 11
+  — Traditions / Ultra subset: 10
+  — Damascus name subset: 1
+Inventory SKUs linked by mkc_order_number / notes matching email order #(s): 75 pc(s) netted out of bucket gaps (FIFO by order # + model).
+Inventory SKUs with acquired_date set but order #(s) not found in email CSV: 3 pc(s) excluded from bucket gap math (no email confirmation).
+Tactical catalog models (blade bucket active): 7
+Trailing gift VIP models: inventory excluded (not expected on order emails).
+Output CSV: /Volumes/dhogan/invapp_v2/data/gap_orders_vs_inventory_buckets.csv
+
+Distinct bucket keys: 0
+Buckets orders > inventory: 0
+Buckets inventory > orders: 0
+Gift VIP inventory qty excluded (total pieces): 5
+
+=== Model-level totals (all handles / colors combined) ===
+
+
+=== Gift VIP — inventory excluded from gap math ===
+  Bighorn Chef VIP (id 366): 1 pc(s)
+  Little Bighorn Petty VIP (id 368): 1 pc(s)
+  MKC Whitetail  VIP (id 359): 1 pc(s)
+  Smith River Santoku VIP (id 367): 1 pc(s)
+  Stoned Goat 2.0 VIP (id 363): 1 pc(s)
+
+=== Next steps ===
+- Culinary set: filter script splits set → 3 catalog models.
+- Full mode already ignores blade for non-tactical knives; use --name-handle to drop blade for every model.
+- Trailing " VIP" catalog models: free gifts; inventory-only is expected.

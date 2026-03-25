@@ -30,9 +30,11 @@ from pathlib import Path
 from typing import Any, DefaultDict
 
 
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+_HERE = Path(__file__).resolve().parent
+_ARCHIVE_ROOT = _HERE.parent
+_REPO_ROOT = _HERE.parents[2]
+if str(_ARCHIVE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ARCHIVE_ROOT))
 
 from gap_analysis_core import (  # noqa: E402
     BLADE_WILDCARD,
@@ -85,8 +87,8 @@ def _compute_name_handle_bucket_key(
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--orders", type=Path, default=ROOT / "data/mkc_email_orders_knives.csv")
-    ap.add_argument("--db", type=Path, default=ROOT / "data/mkc_inventory.db")
+    ap.add_argument("--orders", type=Path, default=_REPO_ROOT / "data/mkc_email_orders_knives.csv")
+    ap.add_argument("--db", type=Path, default=_REPO_ROOT / "data/mkc_inventory.db")
     ap.add_argument("--apply", action="store_true", help="Actually write updates/inserts to DB.")
     args = ap.parse_args()
 

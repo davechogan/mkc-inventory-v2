@@ -25,20 +25,22 @@ import argparse
 import sys
 from pathlib import Path
 
-# Repo root (parent of tools/)
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+# This script lives under archive/order-inventory-gap/tools/; gap_analysis_core is the parent dir.
+_HERE = Path(__file__).resolve().parent
+_ARCHIVE_ROOT = _HERE.parent
+_REPO_ROOT = _HERE.parents[2]
+if str(_ARCHIVE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ARCHIVE_ROOT))
 
 from gap_analysis_core import compute_gap_analysis, write_gap_outputs
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--orders", type=Path, default=ROOT / "data/mkc_email_orders_knives.csv")
-    ap.add_argument("--db", type=Path, default=ROOT / "data/mkc_inventory.db")
-    ap.add_argument("--summary", type=Path, default=ROOT / "data/gap_orders_vs_inventory_summary.txt")
-    ap.add_argument("--csv-out", type=Path, default=ROOT / "data/gap_orders_vs_inventory_buckets.csv")
+    ap.add_argument("--orders", type=Path, default=_REPO_ROOT / "data/mkc_email_orders_knives.csv")
+    ap.add_argument("--db", type=Path, default=_REPO_ROOT / "data/mkc_inventory.db")
+    ap.add_argument("--summary", type=Path, default=_REPO_ROOT / "data/gap_orders_vs_inventory_summary.txt")
+    ap.add_argument("--csv-out", type=Path, default=_REPO_ROOT / "data/gap_orders_vs_inventory_buckets.csv")
     ap.add_argument(
         "--name-handle",
         action="store_true",
@@ -52,8 +54,8 @@ def main() -> int:
     args = ap.parse_args()
 
     if args.name_handle:
-        summary_path = ROOT / "data/gap_orders_vs_inventory_name_handle_summary.txt"
-        csv_path = ROOT / "data/gap_orders_vs_inventory_name_handle_buckets.csv"
+        summary_path = _REPO_ROOT / "data/gap_orders_vs_inventory_name_handle_summary.txt"
+        csv_path = _REPO_ROOT / "data/gap_orders_vs_inventory_name_handle_buckets.csv"
     else:
         summary_path = args.summary
         csv_path = args.csv_out
