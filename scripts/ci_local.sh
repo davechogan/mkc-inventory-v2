@@ -18,8 +18,12 @@ if [[ ! -x "$PY" ]]; then
 fi
 
 "$PIP" install -q -r requirements.txt
+if [[ -f "${ROOT}/requirements-dev.txt" ]]; then
+  "$PIP" install -q -r requirements-dev.txt
+fi
 "$PY" -m py_compile app.py
 "$PY" -m py_compile tools/reporting_eval_harness.py
+"$PY" -m pytest -q
 
 if [[ "${VERIFY_IMPORT_APP:-}" == "1" ]]; then
   SMOKE_DB="${TMPDIR:-/tmp}/mkc_ci_smoke_$$.db"
