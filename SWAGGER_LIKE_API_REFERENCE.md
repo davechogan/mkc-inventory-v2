@@ -60,7 +60,7 @@ This document is a Swagger-like, code-aligned reference for APIs defined in `app
 - Relationship: `parent_model_id`
 
 ### `InventoryItemV2In` (v2 inventory)
-- `knife_model_id`, `nickname`, `quantity`, `acquired_date`, `purchase_price`, `estimated_value`
+- `knife_model_id`, `nickname`, `quantity`, `acquired_date`, `mkc_order_number`, `purchase_price`, `estimated_value`
 - `condition`, `handle_color`, `steel`, `blade_finish`, `blade_color`, `blade_length`
 - `collaboration_name`, `serial_number`, `location`, `purchase_source`, `last_sharpened`, `notes`
 

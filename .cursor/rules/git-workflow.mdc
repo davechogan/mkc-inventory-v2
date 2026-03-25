@@ -1,0 +1,32 @@
+---
+description: Branches, commit messages, isolation, and merge criteria (treat dev like main when that is the integration branch)
+alwaysApply: true
+---
+
+# Git branching, commits, and merges
+
+Use **`main`** below as the **protected integration branch**; in this repo that is often **`dev`**—apply the same rules to whichever branch is primary.
+
+## Branching
+
+- Do **not** do non-trivial work directly on the integration branch.
+- Use a branch for: each new feature; multi-file/layer bugfixes; refactors beyond tiny cleanup; risky experiments.
+- Name branches clearly: `feature/<name>`, `fix/<name>`, `refactor/<area>`, `chore/<task>` (e.g. `feature/year-compare-reporting`).
+
+## Isolation
+
+- Keep features on their branch until: E2E works; tests pass; regression tests added; temporary hacks removed or documented.
+- Do not merge partial scaffolding unless **feature-flagged** or **unreachable** in normal paths.
+
+## Commits
+
+- Include the **feature or fix name** in every message on that branch.
+- Prefer a **prefix**, e.g. `[year-compare-reporting] compile year_compare into grouped SQL`.
+- One **coherent step** per commit; avoid mixing unrelated refactor, behavior, tests, and formatting when you can split.
+- Avoid useless messages: `fix stuff`, `updates`, `wip`, `misc changes`.
+
+## Merge
+
+- Merge when: feature works; branch is coherent; reviewable; boundary is complete—not when architecture is unstable or tests pass only via bandaids.
+- Keep **integration branch** stable: no broken tests, no unapproved experimental fallbacks, no scratchpad work.
+- Before merge: correct layer; generalized solution; tests added; branch name OK; commit messages tagged; dead scaffolding removed where possible.

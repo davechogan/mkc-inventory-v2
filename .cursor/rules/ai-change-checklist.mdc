@@ -1,0 +1,16 @@
+---
+description: Self-check before finalizing a change (root cause, layer, generalization)
+alwaysApply: true
+---
+
+# AI change checklist (before finishing)
+
+Answer honestly; if several are **no**, refactor before stopping.
+
+- Did I fix the **root cause**?
+- Did I put logic in the **correct layer**?
+- Did I **duplicate** interpretation logic?
+- Will this **generalize** to nearby variants?
+- Is this a **bandaid**?
+- Did I preserve the **canonical path**?
+- Did I add tests that **prove generalization** (not only the one line that broke)?

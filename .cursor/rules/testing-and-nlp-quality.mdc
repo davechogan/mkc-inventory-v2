@@ -1,0 +1,18 @@
+---
+description: Testing depth, NLP/planner invariants, and bugfix test matrix
+alwaysApply: true
+---
+
+# Testing and NLP / planner quality
+
+- **Green tests are necessary, not sufficient.** Test behavior, route/path, and normalized representation.
+- For **parser / NLP / planning** systems, assert where relevant:
+  - Equivalent **paraphrases** normalize the same way.
+  - Standard prompts use the **intended path**; fallbacks are **not** used for normal cases.
+  - **Compiled SQL** (or artifacts) match the **normalized plan**.
+- When fixing a bug, add:
+  - the **failing case**;
+  - at least **two sibling variants**;
+  - **one negative** case;
+  - **one structural or route** assertion.
+- After tests pass, do a **consolidation / refactor** pass when it reduces duplication or clarifies layers.

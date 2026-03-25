@@ -1,0 +1,26 @@
+---
+description: Architecture, canonical layers, and explicit anti-patterns for code changes
+alwaysApply: true
+---
+
+# Engineering standards
+
+- Prefer **generalized fixes** over local patches; fix the **canonical layer** (normalization, mapping, planning, validation, compilation), not only the symptom.
+- **Single source of truth** once structured intent or canonical data exists; do not parse the same concept in multiple places.
+- Keep **business logic out of** controllers, transport handlers, and thin UI layers.
+- **Avoid monolithic files**; extract domain logic into focused modules.
+- Prefer **pure, composable, typed** functions where practical.
+- **Limit regex** to narrow parsing; do not build core architecture on regex.
+- If **more than two** similar conditionals are needed, stop and refactor.
+- Make retries, setup, migrations, reconciliation, and upserts **idempotent** where practical.
+- **Validate** generated SQL, code, or commands before execution.
+- **Fail clearly**; do not hide errors to keep tests green.
+- Comment **invariants and tradeoffs** when complexity is unavoidable.
+
+## Anti-patterns (do not)
+
+- Add “one more regex” for one more prompt, or another fallback because the main path is weak.
+- Special-case production logic for a single test.
+- Keep growing giant utility/controller files.
+- Let passing tests replace architectural review.
+- Silently reinterpret structured intent after it has been normalized.

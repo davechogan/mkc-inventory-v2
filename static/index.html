@@ -16,6 +16,7 @@
     <a href="/identify">Identify</a>
     <a href="/master">Catalog</a>
     <a href="/reporting">Reporting</a>
+    <a href="/order-inventory-gaps">Order gaps</a>
   </nav>
 
   <header class="app-header">
@@ -170,6 +171,7 @@
       <label>Quantity<input type="number" name="quantity" value="1" min="1" required /></label>
       <label>Blade length (this piece, in)<input type="number" step="0.01" name="blade_length" placeholder="From master by default" /></label>
       <label>Acquired Date<input type="date" name="acquired_date" /></label>
+      <label>MKC order #<input name="mkc_order_number" inputmode="numeric" placeholder="e.g. 127663" /></label>
       <label>Purchase Price<input type="number" step="0.01" name="purchase_price" /></label>
       <label>Estimated Value<input type="number" step="0.01" name="estimated_value" /></label>
       <label>Condition
