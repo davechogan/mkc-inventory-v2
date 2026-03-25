@@ -96,4 +96,4 @@ This document tracks alignment with project Cursor rules under `.cursor/rules/` 
 | Date | Change |
 |------|--------|
 | 2026-03-26 | Initial plan, progress table, merge advice, git hygiene. |
-| 2026-03-26 | Phase 0 baseline commit: `d9302b9` — rules, `COMPLIANCE_PLAN.md`, `run.sh` hardening, nav/swagger. |
+| 2026-03-26 | Phase 0 baseline commit: `d9302b9` — rules, compliance plan, `run.sh` hardening, nav/swagger. |

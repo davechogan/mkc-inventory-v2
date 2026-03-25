@@ -5,7 +5,7 @@ This document is a Swagger-like, code-aligned reference for APIs defined in `app
 ## API Info
 
 - **Title:** MKC Inventory Manager API
-- **App file:** `/Volumes/dhogan/invapp_v2/app.py`
+- **App file:** `app.py` (repository root)
 - **Primary DB:** SQLite (`data/mkc_inventory.db`)
 - **Content types:**
   - `application/json` for most APIs

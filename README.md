@@ -89,6 +89,10 @@ source .venv/bin/activate
 python tools/import_legacy_data.py
 ```
 
+## Documentation
+
+Long-form plans, API reference, and reporting eval materials are in [`docs/`](docs/README.md). The root [`README.md`](README.md) is the project entrypoint.
+
 ## Notes
 
 This is a bridge build, not a total rewrite. The old UI and endpoints still exist, but the new normalized tables give you a much cleaner foundation for the next iteration.
