@@ -10,6 +10,9 @@ Web UI: ``/`` collection dashboard, ``/master`` catalog and descriptor managemen
 
 Optional: set ``OLLAMA_HOST`` (default ``http://192.168.50.196:11434``) for AI + vision identification via Ollama;
 blade silhouette templates live in ``blade_shape_templates`` (Hu moments vs OpenCV hints).
+
+Optional: set ``MKC_INVENTORY_DB`` to an absolute path to override the default SQLite file under ``data/``
+(useful for CI or smoke tests on read-only or flaky volumes).
 """
 from __future__ import annotations
 
@@ -44,7 +47,12 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
 BASE_DIR = Path(__file__).resolve().parent
-DB_PATH = BASE_DIR / "data" / "mkc_inventory.db"
+_db_override = (os.environ.get("MKC_INVENTORY_DB") or "").strip()
+DB_PATH = (
+    Path(_db_override).expanduser().resolve()
+    if _db_override
+    else (BASE_DIR / "data" / "mkc_inventory.db")
+)
 STATIC_DIR = BASE_DIR / "static"
 LOG_PATH = BASE_DIR / "data" / "mkc_app.log"
 
