@@ -595,7 +595,12 @@ def _reporting_detect_unsafe_request(question: str) -> Optional[str]:
         if re.search(pat, compact):
             return reason
     # Direct SQL command starters are not supported as user input.
-    if re.match(r"^\s*(select|with|insert|update|delete|drop|alter|create|pragma)\b", compact):
+    # Do not treat plain English "create a …" / "make a …" as CREATE TABLE.
+    if re.match(
+        r"^\s*(select|with|insert|update|delete|drop|alter|pragma)\b"
+        r"|^\s*create\s+(table|view|index|database|trigger|virtual)\b",
+        compact,
+    ):
         return "direct_sql_prefix"
     return None
 
@@ -6379,7 +6384,10 @@ def reporting_query(payload: ReportingQueryIn):
                 meta={},
             )
 
-        if _reporting_is_scope_status_question(question):
+        # Scope preprocessing disabled for testing: let semantic plan + compiler run without
+        # short-circuiting on scope_status or clarification_scope. Restore by changing to
+        # ``if _reporting_is_scope_status_question(question):`` (and same below).
+        if False and _reporting_is_scope_status_question(question):
             state = _reporting_get_last_query_state(conn, session_id) or {}
             scope = str(state.get("scope") or "inventory").strip().lower()
             if scope == "catalog":
@@ -6434,7 +6442,7 @@ def reporting_query(payload: ReportingQueryIn):
                 "assistant_message_id": assistant_message_id,
             }
 
-        if _reporting_needs_scope_clarification(question):
+        if False and _reporting_needs_scope_clarification(question):
             clarify = (
                 "Quick clarification: do you want this based on knives you currently own "
                 "(your inventory), or based on all models MKC has made (full catalog)?"
