@@ -26,6 +26,7 @@ fi
 "$PY" -m py_compile reporting/regex_contract.py
 "$PY" -m py_compile reporting/routes.py
 "$PY" -m py_compile routes/v2_routes.py
+"$PY" -m py_compile routes/normalized_routes.py
 "$PY" -m py_compile sqlite_schema.py
 "$PY" -m py_compile tools/reporting_eval_harness.py
 "$PY" -m pytest -q
