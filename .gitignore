@@ -8,3 +8,7 @@ data/*.log
 data/*.db
 *.db
 *.sqlite
+
+# Machine-local workspace: exports, scratch copies, personal artifacts (see local/README.md)
+/local/**
+!/local/README.md

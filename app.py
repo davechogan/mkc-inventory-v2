@@ -1713,6 +1713,44 @@ def _reporting_plan_to_sql(
         "series_name__not", "family_name__not", "knife_type__not", "form_name__not", "collaborator_name__not", "steel__not", "condition__not", "location__not", "text_search__not",
     }
 
+    def inv_filter_where(filters_map: dict[str, Any], *, catalog_style: bool) -> list[str]:
+        """WHERE fragments using reporting_inventory / reporting_models column names."""
+        w: list[str] = []
+        for k, v in filters_map.items():
+            if k not in inv_filter_cols:
+                continue
+            negate = k.endswith("__not")
+            base_k = k[:-5] if negate else k
+            if catalog_style and base_k in {"condition", "location"}:
+                continue
+            if base_k == "text_search":
+                ev = esc(v)
+                if catalog_style:
+                    expr = (
+                        "("
+                        "lower(COALESCE(official_name, '')) LIKE lower('%" + ev + "%') OR "
+                        "lower(COALESCE(family_name, '')) LIKE lower('%" + ev + "%') OR "
+                        "lower(COALESCE(form_name, '')) LIKE lower('%" + ev + "%') OR "
+                        "lower(COALESCE(series_name, '')) LIKE lower('%" + ev + "%') OR "
+                        "lower(COALESCE(collaborator_name, '')) LIKE lower('%" + ev + "%')"
+                        ")"
+                    )
+                else:
+                    expr = (
+                        "("
+                        "lower(COALESCE(knife_name, '')) LIKE lower('%" + ev + "%') OR "
+                        "lower(COALESCE(family_name, '')) LIKE lower('%" + ev + "%') OR "
+                        "lower(COALESCE(form_name, '')) LIKE lower('%" + ev + "%') OR "
+                        "lower(COALESCE(series_name, '')) LIKE lower('%" + ev + "%') OR "
+                        "lower(COALESCE(collaborator_name, '')) LIKE lower('%" + ev + "%')"
+                        ")"
+                    )
+                w.append(f"NOT {expr}" if negate else expr)
+                continue
+            expr = cond(base_k, v, exact=(base_k in {"series_name", "knife_type", "condition"}))
+            w.append(f"NOT ({expr})" if negate else expr)
+        return w
+
     if intent == "completion_cost":
         where = ["COALESCE(inv.total_qty, 0) = 0"]
         for k, v in filters.items():
@@ -1779,41 +1817,7 @@ def _reporting_plan_to_sql(
         )
         return sql, {"mode": "semantic_compiled_missing_models"}
 
-    where = []
-    for k, v in filters.items():
-        if k not in inv_filter_cols:
-            continue
-        negate = k.endswith("__not")
-        base_k = k[:-5] if negate else k
-        if use_catalog and base_k in {"condition", "location"}:
-            # Catalog scope does not include inventory-only dimensions.
-            continue
-        if base_k == "text_search":
-            ev = esc(v)
-            if use_catalog:
-                expr = (
-                    "("
-                    "lower(COALESCE(official_name, '')) LIKE lower('%" + ev + "%') OR "
-                    "lower(COALESCE(family_name, '')) LIKE lower('%" + ev + "%') OR "
-                    "lower(COALESCE(form_name, '')) LIKE lower('%" + ev + "%') OR "
-                    "lower(COALESCE(series_name, '')) LIKE lower('%" + ev + "%') OR "
-                    "lower(COALESCE(collaborator_name, '')) LIKE lower('%" + ev + "%')"
-                    ")"
-                )
-            else:
-                expr = (
-                    "("
-                    "lower(COALESCE(knife_name, '')) LIKE lower('%" + ev + "%') OR "
-                    "lower(COALESCE(family_name, '')) LIKE lower('%" + ev + "%') OR "
-                    "lower(COALESCE(form_name, '')) LIKE lower('%" + ev + "%') OR "
-                    "lower(COALESCE(series_name, '')) LIKE lower('%" + ev + "%') OR "
-                    "lower(COALESCE(collaborator_name, '')) LIKE lower('%" + ev + "%')"
-                    ")"
-                )
-            where.append(f"NOT {expr}" if negate else expr)
-            continue
-        expr = cond(base_k, v, exact=(base_k in {"series_name", "knife_type", "condition"}))
-        where.append(f"NOT ({expr})" if negate else expr)
+    where = inv_filter_where(filters, catalog_style=use_catalog)
     effective_date_start = plan_date_start or date_start
     effective_date_end = plan_date_end or date_end
     # Filters only (year-compare path adds its own acquired_date / year constraints).
@@ -1841,12 +1845,22 @@ def _reporting_plan_to_sql(
             sort_col = "rows_count"
             if source_view == "reporting_models":
                 expr = "COUNT(*) AS rows_count"
-        if year_compare and source_view == "reporting_inventory" and not group_by:
+        if year_compare and not group_by:
             ya, yb = year_compare
-            yc_parts = list(where_filters_only)
+            yc_parts = (
+                inv_filter_where(filters, catalog_style=False)
+                if use_catalog
+                else list(where_filters_only)
+            )
             yc_parts.append("acquired_date IS NOT NULL")
             yc_parts.append(f"substr(acquired_date, 1, 4) IN ('{esc(ya)}', '{esc(yb)}')")
             yc_where_sql = f"WHERE {' AND '.join(yc_parts)}"
+            meta: dict[str, Any] = {"mode": "semantic_compiled_year_compare"}
+            if use_catalog:
+                meta["year_compare_inventory_note"] = (
+                    "Catalog filters preserved; results are bucketed by inventory acquired_date "
+                    "(year-over-year needs collection dates, not the catalog view alone)."
+                )
             sql = (
                 "SELECT substr(acquired_date, 1, 4) AS bucket, "
                 f"{expr} "
@@ -1855,7 +1869,7 @@ def _reporting_plan_to_sql(
                 "GROUP BY bucket "
                 "ORDER BY bucket"
             )
-            return sql, {"mode": "semantic_compiled_year_compare"}
+            return sql, meta
         if group_by in REPORTING_GROUPABLE_DIMENSIONS.values():
             sql = (
                 f"SELECT COALESCE({group_by}, 'Unknown') AS bucket, {expr} "
@@ -6654,6 +6668,14 @@ def reporting_query(payload: ReportingQueryIn):
             follow_ups = sql_meta["follow_ups"][:5]
         if sql_meta.get("limitations") and not limitations:
             limitations = str(sql_meta["limitations"])
+        yc_inv_note = sql_meta.get("year_compare_inventory_note")
+        if yc_inv_note:
+            extra = str(yc_inv_note).strip()
+            if extra:
+                if limitations:
+                    limitations = f"{str(limitations).strip()} {extra}".strip()
+                else:
+                    limitations = extra
         if sql_meta.get("confidence") is not None and confidence is None:
             try:
                 confidence = float(sql_meta["confidence"])
