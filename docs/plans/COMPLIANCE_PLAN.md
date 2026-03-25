@@ -67,7 +67,7 @@ This document tracks alignment with project Cursor rules under `.cursor/rules/` 
 
 | Step | Done | Notes |
 |------|------|--------|
-| Split remaining `app.py` by domain routers | **~** | **Started:** `reporting/routes.py` + `create_reporting_router()` mounted from `app.py`. **Next:** v2 API, legacy master/inventory, normalized, AI — own routers or `routes/` package as needed. |
+| Split remaining `app.py` by domain routers | **~** | **`reporting/routes.py`** + **`routes/v2_routes.py`** (`create_v2_router(...)` mounted after shared CSV/identity models). **Next:** legacy master/inventory, normalized, AI routers. |
 
 ### Phase 6 — Harness in CI (optional)
 
@@ -100,3 +100,4 @@ This document tracks alignment with project Cursor rules under `.cursor/rules/` 
 | 2026-03-26 | Phases 1–3: scope env flag + pytest/CI + `reporting/` package; `REPORTING_SCOPE_PREPROCESSING` default aligns with legacy **off**. |
 | 2026-03-26 | Phase 4: `reporting/regex_contract.py` + tests; CI compiles module. |
 | 2026-03-26 | Phase 5 (incremental): `reporting/routes.py` — FastAPI router for all `/reporting` and `/api/reporting/*` endpoints. |
+| 2026-03-26 | Phase 5 (incremental): `routes/v2_routes.py` — all `/api/v2/*` endpoints via `create_v2_router(...)`. |
