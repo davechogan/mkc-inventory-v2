@@ -6730,6 +6730,8 @@ def reporting_query(payload: ReportingQueryIn):
             "execution_ms": execution_ms,
             "date_window": {"start": effective_date_start, "end": effective_date_end, "label": effective_date_label},
             "assistant_message_id": assistant_message_id,
+            # Top-level for clients and reporting_eval_harness brittle/plan-equiv checks (also in stored meta).
+            "semantic_plan": semantic_plan,
         }
 
 
