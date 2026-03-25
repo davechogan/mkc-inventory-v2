@@ -1,0 +1,32 @@
+---
+description: Backup SQLite inventory DB before any init/migrate or risky command that could wipe data
+alwaysApply: true
+---
+
+# SQLite inventory database safety (`MKC_INVENTORY_DB` / `data/mkc_inventory.db`)
+
+The app’s canonical DB path is `data/mkc_inventory.db` unless **`MKC_INVENTORY_DB`** is set to an absolute path. **`init_db()`** at import time can create/migrate schema and **must not be allowed to run against a valuable file without a fresh backup**.
+
+## Before doing any of this, back up the DB first
+
+- Running **anything** that **imports `app`** when `MKC_INVENTORY_DB` is **unset** or points at the **real** inventory file (same as default `data/mkc_inventory.db`), if that import triggers **`init_db()`** and you are unsure it is read-only for existing data.
+- Running **`VERIFY_IMPORT_APP=1`** or **`import app`** manually in a shell where **`MKC_INVENTORY_DB`** is **not** forced to a **throwaway** path (e.g. under `$TMPDIR`). The stock **`./scripts/ci_local.sh`** sets a temp DB for the verify step; **do not change that to the production path** without a backup.
+- **`pytest`**: normally **`tests/conftest.py`** sets `MKC_INVENTORY_DB` to a **temp file** before import. **Never remove or bypass conftest** for “quick tests” without confirming env.
+- One-off scripts, `sqlite3` migrations, **`rm`** / replace on `*.db`, or edits to **`init_db()`** / startup that might reset or empty tables.
+- Suggesting the user run **`normalized_rebuild()`**, destructive imports, or “fresh DB” flows on a path that holds their collection.
+
+## Standard backup command
+
+From repo root (or set `MKC_INVENTORY_DB` to the file to copy):
+
+```bash
+./scripts/backup_mkc_db.sh
+```
+
+This writes `mkc_inventory.db.backup.<UTC>` next to the DB file. **Run it before** `init_db`-invoking commands when there is any doubt about the target path.
+
+## Checklist for agents
+
+- If the operation can **write** the live DB and is not provably using an isolated temp path: **run `./scripts/backup_mkc_db.sh` first** (or instruct the user to stop the app and run it).
+- **No “just run import app / init_db / CI verify”** against the default `data/mkc_inventory.db` when that file is known to contain irreplaceable data, **unless** a backup was just created or the env explicitly points to a throwaway DB.
+- Prefer **`MKC_INVENTORY_DB="$(mktemp -u /tmp/mkc_test_XXXXXX.db)"`** (or pytest) for experiments, not the production file.

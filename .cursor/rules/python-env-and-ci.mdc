@@ -10,7 +10,7 @@ alwaysApply: true
 - If `.venv` is missing or broken (wrong interpreter path), recreate with `python3 -m venv .venv` then `.venv/bin/pip install -r requirements.txt`. Prefer Python 3.11 to match GitHub Actions (see `.python-version` for pyenv).
 - If you see **bad interpreter: No such file or directory** on `.venv/bin/uvicorn` or `python`, the venv was built on another **absolute path** (e.g. `/Volumes/...` vs `/Users/...`). **Delete `.venv` and recreate** in the directory where you actually run the app.
 - Before committing Python or dependency changes, run `./scripts/ci_local.sh` from the repo root and fix any failures. It mirrors the GitHub Actions job that installs dependencies and runs `py_compile` on `app.py` and `tools/reporting_eval_harness.py`. That **does not** start a server or hit a network API.
-- For a deeper check, run `VERIFY_IMPORT_APP=1 ./scripts/ci_local.sh`. That runs `import app` against a fresh DB path (`MKC_INVENTORY_DB` under your temp directory); first run can take several minutes because `init_db()` seeds and migrates the schema.
+- For a deeper check, run `VERIFY_IMPORT_APP=1 ./scripts/ci_local.sh`. That runs `import app` against a fresh DB path (`MKC_INVENTORY_DB` under your temp directory); first run can take several minutes because `init_db()` seeds and migrates the schema. **Never point that step at `data/mkc_inventory.db` without `./scripts/backup_mkc_db.sh` first** — see **`.cursor/rules/sqlite-inventory-db-safety.mdc`**.
 
 ## Reporting harness (requires a running API)
 

@@ -6,6 +6,7 @@ __pycache__/
 # Local runtime artifacts
 data/*.log
 data/*.db
+data/mkc_inventory.db.backup.*
 *.db
 *.sqlite
 
