@@ -22,7 +22,7 @@ if [[ -f "${ROOT}/requirements-dev.txt" ]]; then
   "$PIP" install -q -r requirements-dev.txt
 fi
 "$PY" -m py_compile app.py
-"$PY" -m py_compile reporting_domain.py
+"$PY" -m py_compile reporting/domain.py
 "$PY" -m py_compile sqlite_schema.py
 "$PY" -m py_compile tools/reporting_eval_harness.py
 "$PY" -m pytest -q

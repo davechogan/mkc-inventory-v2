@@ -1,4 +1,10 @@
-"""Natural-language reporting: schema, semantic planning, SQL compilation, sessions."""
+"""Natural-language reporting: schema, semantic planning, SQL compilation, sessions.
+
+Env:
+  ``REPORTING_SCOPE_PREPROCESSING`` — when ``1``/``true``/``yes``/``on``, enable scope-status
+  short-circuit and inventory-vs-catalog clarification prompts. Default **unset** = off (legacy behavior).
+  Other reporting model env vars: ``REPORTING_PLANNER_MODEL``, ``REPORTING_RESPONDER_MODEL``, …
+"""
 
 from __future__ import annotations
 
@@ -70,11 +76,16 @@ REPORTING_SERIES_ALIASES = {
 REPORTING_METRICS = {"count", "total_spend", "total_estimated_value"}
 REPORTING_HINT_MIN_CONFIDENCE = 0.55
 
-_REPORTING_SCOPE_PREPROCESSING_RAW = (os.environ.get("REPORTING_SCOPE_PREPROCESSING") or "").strip().lower()
-REPORTING_SCOPE_PREPROCESSING = (
-    _REPORTING_SCOPE_PREPROCESSING_RAW in {"1", "true", "yes", "on"}
-    if _REPORTING_SCOPE_PREPROCESSING_RAW
-    else True  # default to production behavior
+def reporting_scope_preprocessing_enabled(raw: Optional[str]) -> bool:
+    """Parse ``REPORTING_SCOPE_PREPROCESSING``. Unset/empty -> False (matches legacy ``if False and …``)."""
+    s = (raw or "").strip().lower()
+    if not s:
+        return False
+    return s in {"1", "true", "yes", "on"}
+
+
+REPORTING_SCOPE_PREPROCESSING = reporting_scope_preprocessing_enabled(
+    os.environ.get("REPORTING_SCOPE_PREPROCESSING")
 )
 
 
@@ -2176,7 +2187,7 @@ def run_reporting_query(
             )
 
         # Optional scope preprocessing: short-circuit on scope_status or clarification_scope.
-        # Controlled by REPORTING_SCOPE_PREPROCESSING (default = production behavior).
+        # Controlled by REPORTING_SCOPE_PREPROCESSING (default off = legacy production).
         if REPORTING_SCOPE_PREPROCESSING and _reporting_is_scope_status_question(question):
             state = _reporting_get_last_query_state(conn, session_id) or {}
             scope = str(state.get("scope") or "inventory").strip().lower()

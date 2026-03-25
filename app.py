@@ -46,7 +46,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 from sqlite_schema import column_exists
 
-from reporting_domain import (
+from reporting import (
     ReportingFeedbackIn,
     ReportingQueryIn,
     ReportingSaveQueryIn,

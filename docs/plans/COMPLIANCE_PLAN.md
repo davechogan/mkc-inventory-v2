@@ -22,8 +22,8 @@ This document tracks alignment with project Cursor rules under `.cursor/rules/` 
 |------|-------------------|-------------------|
 | Monolith / layers | `engineering-standards.mdc` | **Gap** — `app.py` is still a large monolith; domain split mainly `normalized_model`, `blade_ai`, … (order–inventory gap tooling lives under `archive/order-inventory-gap/`). |
 | Canonical reporting vs regex | `engineering-standards.mdc` | **Partial** — semantic plan + SQL compiler exist; many heuristics/guardrails still in `app.py`. |
-| Scope preprocessing | `engineering-standards.mdc` | **Debt** — `if False and _reporting_*` disables clarification; replace with env flag (Phase 1). |
-| Automated tests | `testing-and-nlp-quality.mdc` | **Gap** — CI = `py_compile` only; no `pytest`; harness is integration-only. |
+| Scope preprocessing | `engineering-standards.mdc` | **Done** — `REPORTING_SCOPE_PREPROCESSING` in `reporting/domain.py`; default **off** (legacy `if False`); set `1`/`true`/`yes`/`on` to enable. |
+| Automated tests | `testing-and-nlp-quality.mdc` | **Improved** — `pytest tests/` in CI + `scripts/ci_local.sh`; SQL helper tests + scope-env parsing tests. |
 | Git / env | `git-workflow.mdc`, `python-env-and-ci.mdc` | **OK** — scripts + rules documented; venv path portability called out. |
 
 ---
@@ -41,21 +41,21 @@ This document tracks alignment with project Cursor rules under `.cursor/rules/` 
 
 | Step | Done | Notes |
 |------|------|--------|
-| Replace `if False and _reporting_*` with env var (e.g. `REPORTING_SCOPE_PREPROCESSING`) | [ ] | Default = production behavior; document in one place. |
+| Replace `if False and _reporting_*` with env var (e.g. `REPORTING_SCOPE_PREPROCESSING`) | [x] | `reporting/domain.py`; default **off**; `reporting_scope_preprocessing_enabled()` + tests. |
 
 ### Phase 2 — Pytest + CI
 
 | Step | Done | Notes |
 |------|------|--------|
-| Add `pytest` (dev/deps) and `tests/` | [ ] | |
-| Unit tests: `plan_to_sql`, unsafe-request guardrail, scope helpers | [ ] | No server required. |
-| Extend GitHub `checks` job with `pytest tests/` | [ ] | |
+| Add `pytest` (dev/deps) and `tests/` | [x] | |
+| Unit tests: `plan_to_sql`, unsafe-request guardrail, scope helpers | [x] | No server required. |
+| Extend GitHub `checks` job with `pytest tests/` | [x] | |
 
 ### Phase 3 — Extract reporting module
 
 | Step | Done | Notes |
 |------|------|--------|
-| Move reporting semantics out of `app.py` into `reporting/` package | [ ] | Thin FastAPI routes only. |
+| Move reporting semantics out of `app.py` into `reporting/` package | [x] | **`reporting/`** package (`domain.py` + `__init__.py`); `app.py` imports `reporting` for routes. Regex/plan surface debt remains Phase 4. |
 
 ### Phase 4 — Regex / plan surface
 
@@ -97,3 +97,4 @@ This document tracks alignment with project Cursor rules under `.cursor/rules/` 
 |------|--------|
 | 2026-03-26 | Initial plan, progress table, merge advice, git hygiene. |
 | 2026-03-26 | Phase 0 baseline commit: `d9302b9` — rules, compliance plan, `run.sh` hardening, nav/swagger. |
+| 2026-03-26 | Phases 1–3: scope env flag + pytest/CI + `reporting/` package; `REPORTING_SCOPE_PREPROCESSING` default aligns with legacy **off**. |
