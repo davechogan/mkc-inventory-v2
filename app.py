@@ -601,6 +601,12 @@ def _reporting_detect_unsafe_request(question: str) -> Optional[str]:
 
 
 def _reporting_detect_scope(question: str) -> Optional[str]:
+    """
+    Infer reporting scope (inventory vs full catalog) from user language.
+
+    Prefer high-precision phrases and word-boundary tokens so we do not treat
+    substrings like "own" inside "location" as ownership cues.
+    """
     q = " ".join((question or "").strip().lower().split())
     if not q:
         return None
@@ -608,10 +614,18 @@ def _reporting_detect_scope(question: str) -> Optional[str]:
         "in my inventory",
         "my inventory",
         "my collection",
+        "inventory counts",
+        "inventory count",
         "do i have",
         "i have",
-        "owned",
-        "own",
+        "did i buy",
+        "i buy",
+        "list my",
+        "show my",
+        "each location",
+        "by location",
+        "storage location",
+        "purchase source",
     )
     catalog_markers = (
         "mkc has made",
@@ -623,12 +637,32 @@ def _reporting_detect_scope(question: str) -> Optional[str]:
         "ever made",
     )
     inv = any(m in q for m in inventory_markers)
+    if not inv and (re.search(r"\bowned\b", q) or re.search(r"\bown\b", q)):
+        inv = True
+    # Personal collection value / ranking (inventory pieces), not catalog MSRP rollups.
+    if not inv and "estimated value" in q and re.search(r"\b(which|what)\s+knives\b", q):
+        inv = True
     cat = any(m in q for m in catalog_markers)
     if inv and not cat:
         return "inventory"
     if cat and not inv:
         return "catalog"
     return None
+
+
+def _reporting_is_completion_cost_question(q: str) -> bool:
+    """Cost to obtain missing catalog models (complete / finish collection wording)."""
+    if "collection" not in q:
+        return False
+    if not ("complete" in q or "finish" in q):
+        return False
+    return bool(
+        re.search(
+            r"\b(how much|cost|price|msrp|estimate|estimated)\b",
+            q,
+            flags=re.I,
+        )
+    )
 
 
 def _reporting_needs_scope_clarification(question: str) -> bool:
@@ -638,7 +672,7 @@ def _reporting_needs_scope_clarification(question: str) -> bool:
     q = " ".join((question or "").strip().lower().split())
     if not q:
         return False
-    if _reporting_detect_scope(q):
+    if _reporting_detect_scope(question) is not None:
         return False
     # These intents already imply scope semantics in our planner/compiler.
     if (
@@ -647,6 +681,7 @@ def _reporting_needs_scope_clarification(question: str) -> bool:
         or "do i not have" in q
         or "still not have" in q
         or ("complete" in q and "collection" in q)
+        or ("finish" in q and "collection" in q)
     ):
         return False
     if any(x in q for x in ("compare ", "vs ", "versus")):
@@ -1186,7 +1221,7 @@ def _reporting_explicit_constraints(question: str) -> dict[str, Any]:
     if scope:
         out["scope"] = scope
 
-    if ("how much" in q or "cost" in q or "price" in q) and "complete" in q and "collection" in q:
+    if _reporting_is_completion_cost_question(q):
         out["intent"] = "completion_cost"
     elif "missing" in q or "not in inventory" in q or "do i not have" in q:
         out["intent"] = "missing_models"
@@ -1246,6 +1281,10 @@ def _reporting_explicit_constraints(question: str) -> dict[str, Any]:
             continue
         raw = m.group(1).strip()
         if raw in {"tactical", "hunting"}:
+            break
+        # "list my hunting knives" captures "my hunting"; knife_type is already set from keywords.
+        my_tail = re.match(r"^my\s+(.+)$", raw, flags=re.I)
+        if my_tail and my_tail.group(1).strip().lower() in {"hunting", "tactical"}:
             break
         if _reporting_is_series_term(raw):
             # Treat known series aliases as series filters.
@@ -1415,7 +1454,7 @@ def _reporting_heuristic_plan(question: str, last_state: Optional[dict[str, Any]
         plan["scope"] = _reporting_detect_scope(q) or str(plan.get("scope") or "inventory")
     filters = dict(plan.get("filters") or {})
 
-    if ("how much" in q or "cost" in q or "price" in q) and "complete" in q and "collection" in q:
+    if _reporting_is_completion_cost_question(q):
         plan["intent"] = "completion_cost"
     elif "missing" in q or "not in inventory" in q or "do i not have" in q:
         plan["intent"] = "missing_models"
@@ -1886,10 +1925,7 @@ def _reporting_template_sql(
 
     # Missing-models intents are handled by semantic planner/compiler in primary flow.
 
-    if (
-        ("cost" in q or "price" in q or "how much" in q)
-        and ("complete my collection" in q or ("complete" in q and "collection" in q))
-    ):
+    if _reporting_is_completion_cost_question(q):
         return (
             "SELECT "
             "COUNT(*) AS missing_models_count, "
