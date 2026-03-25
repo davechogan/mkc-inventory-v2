@@ -91,7 +91,7 @@ python tools/import_legacy_data.py
 
 ## Documentation
 
-Long-form plans, API reference, and reporting eval materials are in [`docs/`](docs/README.md). The root [`README.md`](README.md) is the project entrypoint.
+Long-form plans, API reference, and reporting eval materials are in [`docs/`](docs/README.md). This file (repository root) remains the project entrypoint.
 
 ## Notes
 
