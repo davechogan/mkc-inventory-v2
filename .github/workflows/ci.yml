@@ -32,6 +32,8 @@ jobs:
       - name: Python compile checks
         run: |
           python -m py_compile app.py
+          python -m py_compile reporting_domain.py
+          python -m py_compile sqlite_schema.py
           python -m py_compile tools/reporting_eval_harness.py
           python -m pytest -q
 
