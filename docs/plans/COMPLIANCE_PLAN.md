@@ -20,7 +20,7 @@ This document tracks alignment with project Cursor rules under `.cursor/rules/` 
 
 | Area | Target rule files | Status (baseline) |
 |------|-------------------|-------------------|
-| Monolith / layers | `engineering-standards.mdc` | **Gap** — `app.py` ~8.7k lines; some domain split (`gap_analysis_core`, `normalized_model`, `blade_ai`, …). |
+| Monolith / layers | `engineering-standards.mdc` | **Gap** — `app.py` is still a large monolith; domain split mainly `normalized_model`, `blade_ai`, … (order–inventory gap tooling lives under `archive/order-inventory-gap/`). |
 | Canonical reporting vs regex | `engineering-standards.mdc` | **Partial** — semantic plan + SQL compiler exist; many heuristics/guardrails still in `app.py`. |
 | Scope preprocessing | `engineering-standards.mdc` | **Debt** — `if False and _reporting_*` disables clarification; replace with env flag (Phase 1). |
 | Automated tests | `testing-and-nlp-quality.mdc` | **Gap** — CI = `py_compile` only; no `pytest`; harness is integration-only. |
