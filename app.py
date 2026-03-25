@@ -22,6 +22,8 @@ import json
 import os
 import re
 import sqlite3
+import subprocess
+import sys
 import uuid
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta
@@ -33,6 +35,7 @@ from urllib.parse import urlencode
 import httpx
 
 import blade_ai
+import gap_analysis_core
 import identifier_outline_sync
 import normalized_model
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -226,6 +229,8 @@ def ensure_v2_exclusive_schema(conn: sqlite3.Connection) -> None:
 
     if not column_exists(conn, "inventory_items_v2", "blade_length"):
         conn.execute("ALTER TABLE inventory_items_v2 ADD COLUMN blade_length REAL")
+    if not column_exists(conn, "inventory_items_v2", "mkc_order_number"):
+        conn.execute("ALTER TABLE inventory_items_v2 ADD COLUMN mkc_order_number TEXT")
     if not column_exists(conn, "knife_models_v2", "handle_type"):
         conn.execute("ALTER TABLE knife_models_v2 ADD COLUMN handle_type TEXT")
 
@@ -455,6 +460,39 @@ def ensure_reporting_schema(conn: sqlite3.Connection) -> None:
     )
     if not column_exists(conn, "reporting_sessions", "last_query_state_json"):
         conn.execute("ALTER TABLE reporting_sessions ADD COLUMN last_query_state_json TEXT")
+
+
+def ensure_gap_reconciliation_schema(conn: sqlite3.Connection) -> None:
+    """Persist user notes on order vs inventory gaps and manual order line → inventory links."""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS order_inv_gap_bucket_overrides (
+            bucket_key TEXT NOT NULL,
+            match_mode TEXT NOT NULL,
+            cleared INTEGER NOT NULL DEFAULT 0,
+            resolution_code TEXT,
+            note TEXT,
+            linked_inventory_item_ids TEXT,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (bucket_key, match_mode)
+        );
+
+        CREATE TABLE IF NOT EXISTS order_inv_gap_line_links (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_number TEXT NOT NULL,
+            order_date TEXT,
+            line_title TEXT NOT NULL,
+            matched_catalog_name TEXT,
+            inventory_item_id INTEGER NOT NULL,
+            note TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(inventory_item_id) REFERENCES inventory_items_v2(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_order_inv_gap_line_links_order
+            ON order_inv_gap_line_links(order_number);
+        """
+    )
 
 
 def _reporting_iso_now() -> str:
@@ -3756,6 +3794,7 @@ def init_db() -> None:
         normalized_model.ensure_normalized_schema(conn)
         ensure_v2_exclusive_schema(conn)
         ensure_reporting_schema(conn)
+        ensure_gap_reconciliation_schema(conn)
         migrate_legacy_media_to_v2(conn)
         backfill_v2_model_identity(conn)
         normalize_v2_additional_fields(conn)
@@ -3899,6 +3938,226 @@ def identify_page():
 @app.get("/master")
 def master_page():
     return FileResponse(STATIC_DIR / "master.html")
+
+
+@app.get("/order-inventory-gaps")
+def order_inventory_gaps_page() -> FileResponse:
+    return FileResponse(STATIC_DIR / "gap_reconciliation.html")
+
+
+class OrderInvGapOverrideIn(BaseModel):
+    bucket_key: str = Field(min_length=1, max_length=500)
+    match_mode: str = Field(default="full")
+    cleared: bool = False
+    resolution_code: Optional[str] = Field(default=None, max_length=80)
+    note: Optional[str] = Field(default=None, max_length=4000)
+    linked_inventory_item_ids: Optional[str] = Field(
+        default=None, max_length=500, description="Comma-separated inventory_items_v2.id"
+    )
+
+    @field_validator("match_mode")
+    @classmethod
+    def _gap_override_match_mode(cls, v: Any) -> str:
+        x = (v or "full").strip()
+        if x not in ("full", "name_handle"):
+            raise ValueError("match_mode must be 'full' or 'name_handle'")
+        return x
+
+
+class OrderInvGapLineLinkIn(BaseModel):
+    order_number: str = Field(min_length=1, max_length=40)
+    order_date: Optional[str] = Field(default=None, max_length=32)
+    line_title: str = Field(min_length=1, max_length=500)
+    matched_catalog_name: Optional[str] = Field(default=None, max_length=300)
+    inventory_item_id: int = Field(ge=1)
+    note: Optional[str] = Field(default=None, max_length=2000)
+
+
+def _gap_iso_now() -> str:
+    return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+
+
+def _order_inventory_gaps_payload(mode: str) -> dict[str, Any]:
+    raw_mode = (mode or "full").strip().lower()
+    name_handle = raw_mode in ("name_handle", "name-handle", "nh", "handle")
+    orders_path = BASE_DIR / "data/mkc_email_orders_knives.csv"
+    if not orders_path.is_file():
+        raise HTTPException(
+            status_code=503,
+            detail="Missing data/mkc_email_orders_knives.csv — run the email filter / enrich pipeline first.",
+        )
+    result = gap_analysis_core.compute_gap_analysis(
+        orders_path, DB_PATH, name_handle=name_handle, strict=False
+    )
+    try:
+        mtime = orders_path.stat().st_mtime
+        orders_csv_mtime_iso = datetime.utcfromtimestamp(mtime).replace(microsecond=0).isoformat() + "Z"
+    except OSError:
+        orders_csv_mtime_iso = ""
+    mm = "name_handle" if name_handle else "full"
+    with get_conn() as conn:
+        ensure_gap_reconciliation_schema(conn)
+        ovr_rows = conn.execute(
+            "SELECT bucket_key, match_mode, cleared, resolution_code, note, linked_inventory_item_ids, updated_at "
+            "FROM order_inv_gap_bucket_overrides WHERE match_mode = ?",
+            (mm,),
+        ).fetchall()
+        overrides_by_key = {str(r["bucket_key"]): dict(r) for r in ovr_rows}
+        links = conn.execute(
+            """
+            SELECT l.id, l.order_number, l.order_date, l.line_title, l.matched_catalog_name,
+                   l.inventory_item_id, l.note, l.created_at,
+                   km.official_name AS knife_name,
+                   COALESCE(i.handle_color, km.handle_color) AS inv_handle,
+                   i.quantity AS inv_qty
+            FROM order_inv_gap_line_links l
+            JOIN inventory_items_v2 i ON i.id = l.inventory_item_id
+            LEFT JOIN knife_models_v2 km ON km.id = i.knife_model_id
+            ORDER BY l.id DESC
+            """
+        ).fetchall()
+    merged_rows: list[dict[str, Any]] = []
+    open_count = 0
+    for r in result["rows"]:
+        g = int(r["gap_ordered_minus_inventory"])
+        o = overrides_by_key.get(r["bucket_key"])
+        cleared = bool(o and int(o.get("cleared") or 0))
+        needs = g != 0 and not cleared
+        if needs:
+            open_count += 1
+        merged_rows.append({**r, "override": o, "needs_attention": needs})
+    return {
+        "match_mode": mm,
+        "stats": result["stats"],
+        "model_gaps": result["model_gaps"],
+        "skipped_bundle": result["skipped_bundle"],
+        "skipped_unresolved": result["skipped_unresolved"],
+        "vip_inventory_excluded": result["vip_inventory_excluded"],
+        "orders_path": result["orders_path"],
+        "db_path": result["db_path"],
+        "orders_csv_mtime_iso": orders_csv_mtime_iso,
+        "rows": merged_rows,
+        "line_links": links,
+        "open_discrepancy_count": open_count,
+    }
+
+
+@app.get("/api/order-inventory-gaps")
+def api_order_inventory_gaps(mode: str = "full") -> dict[str, Any]:
+    """Compare email knife orders CSV to inventory; merge saved overrides and manual links."""
+    return _order_inventory_gaps_payload(mode)
+
+
+@app.post("/api/order-inventory-gaps/rebuild-order-pipeline")
+def api_order_inventory_gaps_rebuild_order_pipeline() -> dict[str, Any]:
+    """
+    Run knife-order pipeline on the server: filter → enrich colors → normalize to v2 → write gap CSVs.
+    Refreshes data/mkc_email_orders_knives.csv; UI should call GET /api/order-inventory-gaps after.
+    """
+    root = BASE_DIR
+    py = sys.executable
+    steps: list[list[str]] = [
+        [py, str(root / "tools" / "filter_email_orders_to_catalog_knives.py")],
+        [py, str(root / "tools" / "enrich_order_line_colors.py")],
+        [py, str(root / "tools" / "normalize_order_colors_to_v2.py")],
+        [py, str(root / "tools" / "gap_analysis_orders_vs_inventory.py")],
+        [py, str(root / "tools" / "gap_analysis_orders_vs_inventory.py"), "--name-handle"],
+    ]
+    log_parts: list[str] = []
+    for cmd in steps:
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd=str(root),
+                capture_output=True,
+                text=True,
+                timeout=600,
+            )
+        except subprocess.TimeoutExpired:
+            raise HTTPException(
+                status_code=504,
+                detail=f"Timed out running: {' '.join(cmd)}",
+            )
+        out = ((proc.stdout or "") + (proc.stderr or "")).strip()
+        log_parts.append(f"$ {' '.join(cmd)}\n{out if out else '(no output)'}")
+        if proc.returncode != 0:
+            raise HTTPException(
+                status_code=500,
+                detail="Pipeline failed on: "
+                + " ".join(cmd)
+                + "\n\n"
+                + "\n\n".join(log_parts)[-12000:],
+            )
+    return {"ok": True, "log": "\n\n".join(log_parts)}
+
+
+@app.post("/api/order-inventory-gaps/override")
+def api_order_inventory_gaps_override(body: OrderInvGapOverrideIn) -> dict[str, Any]:
+    now = _gap_iso_now()
+    with get_conn() as conn:
+        ensure_gap_reconciliation_schema(conn)
+        conn.execute(
+            """
+            INSERT INTO order_inv_gap_bucket_overrides
+                (bucket_key, match_mode, cleared, resolution_code, note, linked_inventory_item_ids, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(bucket_key, match_mode) DO UPDATE SET
+                cleared = excluded.cleared,
+                resolution_code = excluded.resolution_code,
+                note = excluded.note,
+                linked_inventory_item_ids = excluded.linked_inventory_item_ids,
+                updated_at = excluded.updated_at
+            """,
+            (
+                body.bucket_key.strip(),
+                body.match_mode,
+                1 if body.cleared else 0,
+                (body.resolution_code or "").strip() or None,
+                (body.note or "").strip() or None,
+                (body.linked_inventory_item_ids or "").strip() or None,
+                now,
+            ),
+        )
+    return {"ok": True, "updated_at": now}
+
+
+@app.post("/api/order-inventory-gaps/link")
+def api_order_inventory_gaps_link(body: OrderInvGapLineLinkIn) -> dict[str, Any]:
+    with get_conn() as conn:
+        ensure_gap_reconciliation_schema(conn)
+        exists = conn.execute(
+            "SELECT 1 FROM inventory_items_v2 WHERE id = ?",
+            (body.inventory_item_id,),
+        ).fetchone()
+        if not exists:
+            raise HTTPException(status_code=400, detail="inventory_item_id not found")
+        cur = conn.execute(
+            """
+            INSERT INTO order_inv_gap_line_links
+                (order_number, order_date, line_title, matched_catalog_name, inventory_item_id, note)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                body.order_number.strip(),
+                (body.order_date or "").strip() or None,
+                body.line_title.strip(),
+                (body.matched_catalog_name or "").strip() or None,
+                body.inventory_item_id,
+                (body.note or "").strip() or None,
+            ),
+        )
+        link_id = int(cur.lastrowid)
+    return {"ok": True, "id": link_id}
+
+
+@app.delete("/api/order-inventory-gaps/link/{link_id}")
+def api_order_inventory_gaps_link_delete(link_id: int) -> dict[str, Any]:
+    with get_conn() as conn:
+        ensure_gap_reconciliation_schema(conn)
+        cur = conn.execute("DELETE FROM order_inv_gap_line_links WHERE id = ?", (link_id,))
+        if cur.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Link not found")
+    return {"ok": True}
 
 
 @app.get("/api/admin/silhouettes/status")
@@ -5163,6 +5422,7 @@ INVENTORY_CSV_COLUMNS = [
     "nickname",
     "quantity",
     "acquired_date",
+    "mkc_order_number",
     "purchase_price",
     "estimated_value",
     "condition",
@@ -6571,6 +6831,7 @@ def _v2_inventory_base_sql() -> str:
             i.nickname,
             i.quantity,
             i.acquired_date,
+            i.mkc_order_number,
             i.purchase_price,
             i.estimated_value,
             i.condition,
@@ -7248,7 +7509,8 @@ def v2_duplicate_model(model_id: int):
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                row.get("legacy_master_id"), new_name, row.get("normalized_name") or new_name, row.get("sortable_name") or new_name, slug,
+                # v2 schema marks `legacy_master_id` as UNIQUE; duplicates should not point at the same legacy master.
+                None, new_name, row.get("normalized_name") or new_name, row.get("sortable_name") or new_name, slug,
                 row.get("type_id"), row.get("form_id"), row.get("family_id"), row.get("series_id"), row.get("collaborator_id"),
                 row.get("parent_model_id"), row.get("generation_label"), row.get("size_modifier"), row.get("platform_variant"),
                 row.get("steel"), row.get("blade_finish"), row.get("blade_color"), row.get("handle_color"), row.get("handle_type"), row.get("blade_length"),
@@ -7680,6 +7942,7 @@ class InventoryItemV2In(BaseModel):
     nickname: Optional[str] = None
     quantity: int = 1
     acquired_date: Optional[str] = None
+    mkc_order_number: Optional[str] = None
     purchase_price: Optional[float] = None
     estimated_value: Optional[float] = None
     condition: str = "Like New"
@@ -7709,10 +7972,10 @@ def v2_create_inventory_item(payload: InventoryItemV2In):
         cur = conn.execute(
             """
             INSERT INTO inventory_items_v2
-            (legacy_master_id, knife_model_id, nickname, quantity, acquired_date, purchase_price, estimated_value,
+            (legacy_master_id, knife_model_id, nickname, quantity, acquired_date, mkc_order_number, purchase_price, estimated_value,
              condition, steel, blade_finish, blade_color, handle_color, blade_length, collaboration_name, serial_number,
              location, purchase_source, last_sharpened, notes, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """,
             (
                 model_exists.get("legacy_master_id"),
@@ -7720,6 +7983,7 @@ def v2_create_inventory_item(payload: InventoryItemV2In):
                 payload.nickname,
                 payload.quantity,
                 payload.acquired_date,
+                payload.mkc_order_number,
                 payload.purchase_price,
                 payload.estimated_value,
                 payload.condition,
@@ -7753,7 +8017,7 @@ def v2_update_inventory_item(item_id: int, payload: InventoryItemV2In):
             """
             UPDATE inventory_items_v2
             SET knife_model_id = ?, legacy_master_id = ?, nickname = ?, quantity = ?, acquired_date = ?,
-                purchase_price = ?, estimated_value = ?, condition = ?, steel = ?, blade_finish = ?, blade_color = ?,
+                mkc_order_number = ?, purchase_price = ?, estimated_value = ?, condition = ?, steel = ?, blade_finish = ?, blade_color = ?,
                 handle_color = ?, blade_length = ?, collaboration_name = ?, serial_number = ?, location = ?,
                 purchase_source = ?, last_sharpened = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
@@ -7764,6 +8028,7 @@ def v2_update_inventory_item(item_id: int, payload: InventoryItemV2In):
                 payload.nickname,
                 payload.quantity,
                 payload.acquired_date,
+                payload.mkc_order_number,
                 payload.purchase_price,
                 payload.estimated_value,
                 payload.condition,
@@ -7806,13 +8071,14 @@ def v2_duplicate_inventory_item(item_id: int):
         cur = conn.execute(
             """
             INSERT INTO inventory_items_v2
-            (legacy_master_id, knife_model_id, nickname, quantity, acquired_date, purchase_price, estimated_value,
+            (legacy_master_id, knife_model_id, nickname, quantity, acquired_date, mkc_order_number, purchase_price, estimated_value,
              condition, steel, blade_finish, blade_color, handle_color, blade_length, collaboration_name, serial_number,
              location, purchase_source, last_sharpened, notes, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """,
             (
                 row.get("legacy_master_id"), row["knife_model_id"], new_nick, row["quantity"], row["acquired_date"],
+                row.get("mkc_order_number"),
                 row["purchase_price"], row["estimated_value"], row.get("condition") or "Like New", row["steel"],
                 row["blade_finish"], row["blade_color"], row["handle_color"], row.get("blade_length"),
                 row["collaboration_name"], None, row["location"], row["purchase_source"], row["last_sharpened"], row["notes"],
@@ -7834,6 +8100,7 @@ def v2_export_inventory_csv() -> Response:
                 i.nickname,
                 i.quantity,
                 i.acquired_date,
+                i.mkc_order_number,
                 i.purchase_price,
                 i.estimated_value,
                 i.condition,
@@ -8228,6 +8495,7 @@ def normalized_inventory() -> list[dict[str, Any]]:
     with get_conn() as conn:
         rows = conn.execute(
             """SELECT i.id, i.legacy_inventory_id, i.quantity, i.condition, i.purchase_price, i.estimated_value,
+                      i.acquired_date, i.mkc_order_number,
                       i.steel, i.blade_finish, i.blade_color, i.handle_color, i.location, i.serial_number, i.notes,
                       km.official_name, km.normalized_name, kt.name AS knife_type, fam.name AS family_name, frm.name AS form_name, ks.name AS series_name
                FROM inventory_items_v2 i
@@ -8247,6 +8515,7 @@ def normalized_rebuild() -> dict[str, Any]:
         summary = normalized_model.migrate_legacy_to_v2(conn, force=True)
         ensure_v2_exclusive_schema(conn)
         ensure_reporting_schema(conn)
+        ensure_gap_reconciliation_schema(conn)
         media_summary = migrate_legacy_media_to_v2(conn)
         identity_summary = backfill_v2_model_identity(conn)
         extra_summary = normalize_v2_additional_fields(conn)

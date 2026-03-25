@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MKC Inventory — Order vs inventory gaps</title>
+  <link rel="icon" type="image/png" href="/static/logo.png" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body data-page="gaps">
+  <nav class="app-nav">
+    <a href="/" class="nav-logo" aria-label="MKC Inventory home">
+      <img src="/static/logo.png" alt="MKC" class="nav-logo-img" />
+    </a>
+    <a href="/">Collection</a>
+    <a href="/identify">Identify</a>
+    <a href="/master">Catalog</a>
+    <a href="/reporting">Reporting</a>
+    <a href="/order-inventory-gaps" class="active" aria-current="page">Order gaps</a>
+  </nav>
+
+  <header class="app-header">
+    <div>
+      <h1>Order vs inventory reconciliation</h1>
+      <p>
+        Compare email knife orders to <code>inventory_items_v2</code>.
+        <strong>Traditions</strong>, <strong>Ultra</strong>, and <strong>Damascus</strong> catalog models match on <strong>model only</strong> (handle/blade in the DB ignored for gaps).
+        <strong>Full</strong> mode uses blade detail only for <strong>Blood Brothers</strong> and <strong>tactical</strong> models; other knives use model + handle + blade <code>*</code>.
+        Tactical two-tones (e.g. COY/OD): first = blade, second = handle.
+        If an inventory row has <strong>MKC order #</strong> (field or in <strong>notes</strong>) that matches an email line for the same model, that quantity is netted out of bucket gaps.
+        If an inventory row has an <strong>acquired_date</strong> (order/purchase date) but its order #(s) are not present in the email CSV, that inventory quantity is excluded from bucket gap math (treat as already matched).
+        Trailing <strong>VIP</strong> gifts are excluded from inventory counts.
+        Mark rows that are not real discrepancies and link order lines to inventory pieces.
+      </p>
+    </div>
+    <div class="header-actions">
+      <button type="button" id="gapRebuildPipelineBtn" class="button-link">Rebuild orders + gaps</button>
+      <button type="button" id="gapRefreshBtn" class="secondary">Refresh</button>
+    </div>
+  </header>
+
+  <main class="layout reporting-layout">
+    <aside class="card reporting-sidebar">
+      <div class="section-header">
+        <h2>Analysis</h2>
+      </div>
+      <label>
+        <span class="muted">Match mode</span>
+        <select id="gapModeSelect">
+          <option value="full">Model + handle + blade</option>
+          <option value="name_handle">Model + handle only</option>
+        </select>
+      </label>
+      <label>
+        <span class="muted">Show</span>
+        <select id="gapFilterSelect">
+          <option value="needs">Needs attention (non-zero gap, not cleared)</option>
+          <option value="nonzero">Any non-zero gap</option>
+          <option value="all">All buckets</option>
+        </select>
+      </label>
+      <p id="gapStats" class="muted small"></p>
+      <pre id="gapRebuildLog" class="hidden muted small" style="max-height:200px;overflow:auto;white-space:pre-wrap;background:var(--card-2);padding:0.6rem;border-radius:8px;border:1px solid var(--line);"></pre>
+      <div class="reporting-block">
+        <h3>Gift VIP inventory excluded</h3>
+        <ul id="gapVipList" class="pill-list muted small"></ul>
+      </div>
+      <div class="reporting-block">
+        <h3>Manual order → inventory links</h3>
+        <ul id="gapLinksList" class="pill-list"></ul>
+      </div>
+      <div class="form-wrap">
+        <h3 class="muted" style="margin-top:0;font-size:0.95rem;">Add link</h3>
+        <label class="full">
+          Order #
+          <input type="text" id="linkOrderNumber" placeholder="138548" />
+        </label>
+        <label class="full">
+          Order date
+          <input type="text" id="linkOrderDate" placeholder="2024-05-17" />
+        </label>
+        <label class="full">
+          Line title
+          <input type="text" id="linkLineTitle" placeholder="MKC CULINARY SET - BLACK" />
+        </label>
+        <label class="full">
+          Catalog name (optional)
+          <input type="text" id="linkCatalogName" placeholder="Bighorn Chef" />
+        </label>
+        <label class="full">
+          Inventory item id
+          <input type="number" id="linkInvId" min="1" placeholder="Search below →" />
+        </label>
+        <label class="full">
+          Note
+          <input type="text" id="linkNote" placeholder="Matched by serial / photos" />
+        </label>
+        <button type="button" id="linkSubmitBtn">Save link</button>
+      </div>
+      <div class="form-wrap">
+        <h3 class="muted" style="margin-top:0;font-size:0.95rem;">Find inventory row</h3>
+        <label class="full">
+          Search
+          <input type="search" id="invSearchInput" placeholder="Model name, serial…" />
+        </label>
+        <button type="button" id="invSearchBtn" class="secondary">Search</button>
+        <div id="invSearchResults" class="muted small" style="margin-top:0.5rem;max-height:200px;overflow:auto;"></div>
+      </div>
+    </aside>
+
+    <section class="card reporting-main">
+      <div class="section-header">
+        <h2>Gap buckets</h2>
+      </div>
+      <div id="gapError" class="hidden" style="color:var(--danger);margin-bottom:0.75rem;"></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Knife</th>
+              <th>Handle</th>
+              <th>Blade</th>
+              <th>Ord</th>
+              <th>Inv</th>
+              <th>Gap</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="gapTableBody"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/gap_reconciliation.js"></script>
+</body>
+</html>

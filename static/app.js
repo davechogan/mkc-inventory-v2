@@ -18,6 +18,7 @@ const INVENTORY_COLUMNS = [
   { id: 'location', label: 'Location', defaultOn: false, sortValue: (i) => i.location || '', render: (item) => ({ text: item.location || '' }) },
   { id: 'purchase_price', label: 'Paid', defaultOn: false, sortValue: (i) => i.purchase_price ?? -1, render: (item) => ({ text: item.purchase_price != null ? currency(item.purchase_price) : '' }) },
   { id: 'acquired_date', label: 'Acquired', defaultOn: false, sortValue: (i) => i.acquired_date || '', render: (item) => ({ text: item.acquired_date || '' }) },
+  { id: 'mkc_order_number', label: 'MKC order', defaultOn: false, sortValue: (i) => i.mkc_order_number || '', render: (item) => ({ text: item.mkc_order_number || '' }) },
   { id: 'collaboration_name', label: 'Collab', defaultOn: false, sortValue: (i) => (i.is_collab ? (i.collaboration_name || 'Yes') : ''), render: (item) => ({ text: item.is_collab ? (item.collaboration_name || 'Yes') : '' }) },
   { id: 'purchase_source', label: 'Source', defaultOn: false, sortValue: (i) => i.purchase_source || '', render: (item) => ({ text: item.purchase_source || '' }) },
 ];
@@ -125,7 +126,14 @@ function getVisibleColumnIds() {
     const stored = localStorage.getItem(INVENTORY_COLUMNS_STORAGE_KEY);
     if (stored) {
       const parsed = JSON.parse(stored);
-      if (Array.isArray(parsed) && parsed.length) return parsed;
+      if (Array.isArray(parsed) && parsed.length) {
+        const valid = new Set(INVENTORY_COLUMNS.map((c) => c.id));
+        // Migrate older saved column sets so new inventory columns appear for spot checks.
+        const ensureIds = new Set(["acquired_date", "mkc_order_number"]);
+        const merged = [...new Set([...parsed, ...Array.from(ensureIds)])]
+          .filter((id) => valid.has(id));
+        return merged.length ? merged : ['knife_name'];
+      }
     }
   } catch (_) {}
   return INVENTORY_COLUMNS.filter((c) => c.defaultOn).map((c) => c.id);
@@ -975,6 +983,7 @@ async function showInventoryForm(item = null, preSelectedMasterId = null, preSel
       form.elements.purchase_source.value = item.purchase_source ?? '';
       form.elements.last_sharpened.value = item.last_sharpened ?? '';
       form.elements.notes.value = item.notes ?? '';
+      form.elements.mkc_order_number.value = item.mkc_order_number ?? '';
     };
     form.elements.id.value = item.id ?? '';
     form.elements.knife_model_id.value = item.knife_model_id ?? '';
@@ -1055,6 +1064,7 @@ async function showInventoryForm(item = null, preSelectedMasterId = null, preSel
       nickname: form.elements.nickname?.value || null,
       quantity: Number(form.elements.quantity?.value || 1),
       acquired_date: form.elements.acquired_date?.value || null,
+      mkc_order_number: form.elements.mkc_order_number?.value?.trim() || null,
       purchase_price: form.elements.purchase_price?.value ? Number(form.elements.purchase_price.value) : null,
       estimated_value: form.elements.estimated_value?.value ? Number(form.elements.estimated_value.value) : null,
       condition: form.elements.condition?.value || 'Like New',
