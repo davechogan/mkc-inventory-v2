@@ -154,6 +154,7 @@ MASTER_KNIVES_PUBLIC_COLUMNS = (
 IDENTIFIER_COLUMNS = {
     "category": "TEXT",
     "blade_profile": "TEXT",
+    "blade_shape": "TEXT",
     "has_ring": "INTEGER NOT NULL DEFAULT 0",
     "is_filleting_knife": "INTEGER NOT NULL DEFAULT 0",
     "is_hatchet": "INTEGER NOT NULL DEFAULT 0",
@@ -2221,8 +2222,10 @@ PHASE1_MASTER_COLUMNS = [
     ("msrp", "REAL"),
     ("blade_shape", "TEXT"),
     ("tip_style", "TEXT"),
+    ("edge_style", "TEXT"),
     ("grind_style", "TEXT"),
     ("size_class", "TEXT"),
+    ("overall_size", "TEXT"),
     ("primary_use_case", "TEXT"),
     ("spine_profile", "TEXT"),
     ("has_ring", "INTEGER DEFAULT 0"),
