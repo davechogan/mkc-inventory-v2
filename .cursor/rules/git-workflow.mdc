@@ -25,6 +25,14 @@ Use **`main`** below as the **protected integration branch**; in this repo that 
 - One **coherent step** per commit; avoid mixing unrelated refactor, behavior, tests, and formatting when you can split.
 - Avoid useless messages: `fix stuff`, `updates`, `wip`, `misc changes`.
 
+## Merge / stash (network volumes & Apple Git)
+
+- **Agents:** run `git` in the repo yourself (status, merge, push); fix failures before stopping.
+- If merge aborts with **`fatal: stash failed`**, Git tried an internal `git stash create` (often with **`merge.autoStash`** or a dirty tracked tree on SMB/APFS oddities). Prefer:
+  - **`git config merge.autoStash false`** in this repo and **`git config --global merge.autoStash false`** / **`rebase.autoStash false`** on dev machines; then retry.
+  - Or one-shot: **`git -c merge.autoStash=false merge ...`**
+  - Ensure no **`index.lock`**; **`git status`** should show no unintended **modified tracked** files before merging (commit or restore them).
+
 ## Merge
 
 - Merge when: feature works; branch is coherent; reviewable; boundary is complete—not when architecture is unstable or tests pass only via bandaids.
