@@ -1153,6 +1153,8 @@ def _reporting_learn_semantic_hints(
         return
 
     # Prefer identity dimensions over free text for hint targets.
+    # Require entity text to overlap the plan filter value — never bind text_search (or any
+    # dimension) when the extracted entity is unrelated to that filter value.
     priority = ["series_name", "family_name", "knife_type", "form_name", "collaborator_name", "steel", "condition", "location", "text_search"]
     for ent, cue in candidates:
         chosen_dim = None
@@ -1162,7 +1164,7 @@ def _reporting_learn_semantic_hints(
             if not val:
                 continue
             nval = _reporting_norm_entity(str(val))
-            if ent in nval or nval in ent or dim == "text_search":
+            if ent in nval or nval in ent:
                 chosen_dim = dim
                 chosen_val = str(val).strip()
                 break
@@ -1814,6 +1816,8 @@ def _reporting_plan_to_sql(
         where.append(f"NOT ({expr})" if negate else expr)
     effective_date_start = plan_date_start or date_start
     effective_date_end = plan_date_end or date_end
+    # Filters only (year-compare path adds its own acquired_date / year constraints).
+    where_filters_only = list(where)
     if effective_date_start:
         where.append(f"acquired_date >= '{esc(effective_date_start)}'")
     if effective_date_end:
@@ -1839,11 +1843,15 @@ def _reporting_plan_to_sql(
                 expr = "COUNT(*) AS rows_count"
         if year_compare and source_view == "reporting_inventory" and not group_by:
             ya, yb = year_compare
+            yc_parts = list(where_filters_only)
+            yc_parts.append("acquired_date IS NOT NULL")
+            yc_parts.append(f"substr(acquired_date, 1, 4) IN ('{esc(ya)}', '{esc(yb)}')")
+            yc_where_sql = f"WHERE {' AND '.join(yc_parts)}"
             sql = (
                 "SELECT substr(acquired_date, 1, 4) AS bucket, "
                 f"{expr} "
                 "FROM reporting_inventory "
-                f"WHERE acquired_date IS NOT NULL AND substr(acquired_date, 1, 4) IN ('{esc(ya)}', '{esc(yb)}') "
+                f"{yc_where_sql} "
                 "GROUP BY bucket "
                 "ORDER BY bucket"
             )
@@ -6971,7 +6979,7 @@ async def api_ai_identify(
 
 
 # -----------------------------------------------------------------------------
-# API v2 — Flattened reads from normalized tables (mkc_ui_rewire_spec.md)
+# API v2 — Flattened reads from normalized tables (docs/plans/mkc_ui_rewire_spec.md)
 # -----------------------------------------------------------------------------
 
 
