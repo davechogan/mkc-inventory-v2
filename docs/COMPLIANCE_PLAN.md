@@ -9,7 +9,7 @@ This document tracks alignment with project Cursor rules under `.cursor/rules/` 
 ## Before starting compliance work (git hygiene)
 
 1. **Working tree clean** — `git status` shows no unintended modifications; commit or stash WIP.
-2. **Branch** — work from **`dev`** or a short-lived branch **`feature/compliance-<phase>`** cut from up-to-date **`dev`** (see git workflow rule: no large refactors directly on `main`).
+2. **Branch** — work from **`dev`** or cut **`feature/compliance-phase-1`** (or similar) from **`dev`** after it is pushed and clean—use for Phase 1+ so `dev` stays mergeable (see git workflow rule: no large refactors directly on `main`).
 3. **Local gate** — `./scripts/ci_local.sh` passes.
 4. **API gate (reporting changes)** — when validating behavior, run `tools/reporting_eval_harness.py` against a live instance (e.g. `http://macstudio:8008`) with the relevant `--suite`.
 5. **Push** — push `dev` (or your feature branch) so `origin` matches what you tested.
@@ -96,3 +96,4 @@ This document tracks alignment with project Cursor rules under `.cursor/rules/` 
 | Date | Change |
 |------|--------|
 | 2026-03-26 | Initial plan, progress table, merge advice, git hygiene. |
+| 2026-03-26 | Phase 0 baseline commit: `d9302b9` — rules, `COMPLIANCE_PLAN.md`, `run.sh` hardening, nav/swagger. |
