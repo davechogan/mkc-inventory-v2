@@ -192,17 +192,17 @@ Add these to make the page genuinely useful:
 
 ### Phase 4 - Visualization + Grid UX
 
-- [ ] Render tabular results with sorting/filtering.
+- [x] Render tabular results with sorting/filtering.
 - [x] Infer/render basic charts from result shape.
 - [x] Add CSV export.
 - [x] Add SQL transparency toggle.
 
 ### Phase 5 - Quality + Guardrails
 
-- [ ] Add test set of representative reporting questions.
+- [x] Add test set of representative reporting questions.
 - [ ] Validate outputs against known totals (spend/value/count).
-- [ ] Add prompt-injection resistance checks.
-- [ ] Add telemetry/logging for performance and failures.
+- [x] Add prompt-injection resistance checks.
+- [x] Add telemetry/logging for performance and failures.
 
 ### Phase 6 - Nice-to-Have Enhancements
 
@@ -215,10 +215,10 @@ Add these to make the page genuinely useful:
 ## 9. Acceptance Criteria
 
 - [ ] User can ask a natural-language question and get a useful answer in <10s on default model for common queries.
-- [ ] Same result can be viewed as text, grid, or graph when data shape allows.
-- [ ] Query execution is read-only and cannot mutate DB.
-- [ ] Model can be changed from the page and preference persists.
-- [ ] At least 15 canonical reporting questions pass expected-value checks.
+- [x] Same result can be viewed as text, grid, or graph when data shape allows.
+- [x] Query execution is read-only and cannot mutate DB.
+- [x] Model can be changed from the page and preference persists.
+- [x] At least 15 canonical reporting questions pass expected-value checks.
 
 ---
 
@@ -245,11 +245,11 @@ This is the implementation track we are now using to improve reliability and red
 
 ### 11.2 Follow-up DSL Mutation Memory
 
-- [ ] Persist last semantic plan per reporting session (`last_query_state_json`)
-- [ ] Implement follow-up mutators (examples: “only Traditions”, “look at series”, “now by family”)
-- [ ] Detect short follow-up vs topic reset and avoid stale-scope errors
-- [ ] Merge explicit user constraints first; reject ungrounded implicit filter injection
-- [ ] Include semantic state summaries in context blocks for planner continuity
+- [x] Persist last semantic plan per reporting session (`last_query_state_json`)
+- [x] Implement follow-up mutators (examples: “only Traditions”, “look at series”, “now by family”)
+- [x] Detect short follow-up vs topic reset and avoid stale-scope errors
+- [x] Merge explicit user constraints first; reject ungrounded implicit filter injection
+- [x] Include semantic state summaries in context blocks for planner continuity
 - [x] Investigate follow-up carryover regression:  
       Example repro: `how many "goat" knives do I have?` -> `list them` returns no rows instead of applying prior scope.
 
@@ -283,4 +283,4 @@ Goal: let the system "learn" successful interpretation patterns from chat outcom
 - [x] Add confidence feedback loop: reinforce hints on successful non-empty responses, decay on failed applications.
 - [x] Add observability endpoint (`GET /api/reporting/hints`) to inspect learned hints by session.
 - [x] Add explicit user feedback signal (thumbs up/down) to accelerate confidence updates.
-- [ ] Promote high-confidence repeated session hints into optional global hints with moderation.
+- [ ] Promote qualified session hints into optional global soft priors using a guarded policy (confidence threshold, evidence count, conflict checks, and optional manual approval).
