@@ -2228,7 +2228,13 @@ def run_reporting_query(
 
         _reporting_store_message(conn, session_id, "user", question)
         context_block = _reporting_context_block(conn, session_id)
-        def _log_error(status: str, detail: str, mode: Optional[str] = None, semantic_intent: Optional[str] = None) -> None:
+        def _log_error(
+            status: str,
+            detail: str,
+            mode: Optional[str] = None,
+            semantic_intent: Optional[str] = None,
+            classification: Optional[str] = None,
+        ) -> None:
             total_ms = round((time.perf_counter() - started) * 1000.0, 2)
             _reporting_log_query_event(
                 conn,
@@ -2244,7 +2250,7 @@ def run_reporting_query(
                 total_ms=total_ms,
                 status=status,
                 error_detail=detail,
-                meta={},
+                meta={"classification": classification} if classification else {},
             )
 
         # Optional scope preprocessing: short-circuit on scope_status or clarification_scope.
@@ -2368,7 +2374,7 @@ def run_reporting_query(
                 safe_msg,
                 meta={"guardrail": "unsafe_request", "reason": unsafe_reason},
             )
-            _log_error("guardrail_reject", unsafe_reason, mode="guardrail", semantic_intent=None)
+            _log_error("guardrail_reject", unsafe_reason, mode="guardrail", semantic_intent=None, classification="invalid_request")
             raise HTTPException(status_code=400, detail=safe_msg)
 
         semantic_plan: Optional[dict[str, Any]] = None
@@ -2447,6 +2453,7 @@ def run_reporting_query(
                     reason,
                     mode="semantic_invalid",
                     semantic_intent=(semantic_plan or {}).get("intent"),
+                    classification="invalid_plan",
                 )
                 raise HTTPException(status_code=400, detail=f"Invalid semantic plan: {reason}")
             sql, compile_meta = _reporting_plan_to_sql(
@@ -2462,7 +2469,13 @@ def run_reporting_query(
             }
             hint_ids_used = [int(x) for x in (semantic_meta.get("hint_ids") or []) if isinstance(x, int) or str(x).isdigit()]
         if not sql:
-            _log_error("no_sql", f"Could not derive SQL. {sql_meta.get('error') or ''}".strip(), mode=sql_meta.get("mode"), semantic_intent=(semantic_plan or {}).get("intent"))
+            _log_error(
+                "no_sql",
+                f"Could not derive SQL. {sql_meta.get('error') or ''}".strip(),
+                mode=sql_meta.get("mode"),
+                semantic_intent=(semantic_plan or {}).get("intent"),
+                classification="invalid_plan",
+            )
             raise HTTPException(
                 status_code=400,
                 detail=f"Could not derive SQL from validated semantic plan. {sql_meta.get('error') or ''}".strip(),
@@ -2471,7 +2484,13 @@ def run_reporting_query(
         try:
             columns, rows, execution_ms = _reporting_exec_sql(conn, sql, payload.max_rows)
         except HTTPException as exc:
-            _log_error("sql_error", str(exc.detail), mode=sql_meta.get("mode"), semantic_intent=(semantic_plan or {}).get("intent"))
+            _log_error(
+                "sql_error",
+                str(exc.detail),
+                mode=sql_meta.get("mode"),
+                semantic_intent=(semantic_plan or {}).get("intent"),
+                classification="internal_failure",
+            )
             raise
         rows_out = []
         for r in rows:
