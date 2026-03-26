@@ -1,0 +1,43 @@
+---
+description: Use shared Artifacts repo for local-only history assets
+alwaysApply: true
+---
+
+# Artifacts Repo Workflow
+
+Use `https://github.com/davechogan/Artifacts.git` for non-release artifacts.
+
+## Purpose
+
+Keep this application repository release-focused. Store project artifacts (plans, ad hoc scripts, DB snapshots, logs, exports) in the shared Artifacts repo so they are versioned but not shipped as app releases.
+
+## Rules
+
+- Do not commit runtime DB files, logs, scratch exports, or local worktree backups to this app repo.
+- Put project artifacts under `projects/<project-slug>/` in the Artifacts repo.
+- Prefer append-only snapshot directories (date-stamped) for DB and exports.
+- Include checksums and provenance metadata for binary artifacts.
+- Use PRs/commits in Artifacts repo for traceability the same way as code repos.
+
+## Project setup for new projects
+
+When onboarding a new project to Artifacts repo:
+
+1. Create project slug: `projects/<project-slug>/`
+2. Create standard folders:
+   - `plans/`
+   - `scripts/`
+   - `db_snapshots/`
+   - `exports/`
+   - `logs/`
+   - `metadata/`
+3. Add a `README.md` in the project folder with:
+   - source code repo URL
+   - owner/maintainer
+   - artifact retention expectations
+   - restore steps for DB snapshots
+4. Add `metadata/provenance.json` for each snapshot batch.
+
+## Recommended commands
+
+- Use `scripts/artifacts_project_scaffold.sh` from this repo to create the standardized project structure in a local clone of the Artifacts repo.
