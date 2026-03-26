@@ -442,12 +442,17 @@ def _get_chroma_client():
         return None, _CHROMA_INIT_ERROR
 
 
-def _chroma_retrieve(question: str, top_k: int) -> tuple[list[RetrievalArtifact], str | None]:
-    """Target architecture path: Chroma collection with sentence-transformer embeddings when available."""
+def _chroma_retrieve(question: str, top_k: int) -> tuple[list[RetrievalArtifact], str | None, dict[str, object]]:
+    """Target architecture path: Chroma collection with sentence-transformer embeddings when available.
+
+    Returns a diagnostics dict (counts, embed mode) so API/UI can confirm vectors were written.
+    """
+    empty_diag: dict[str, object] = {"chroma_client_ready": False}
     client, err = _get_chroma_client()
     if client is None:
-        return _lexical_retrieve(question, top_k), err
+        return _lexical_retrieve(question, top_k), err, {**empty_diag, "chroma_client_error": err}
     by_id = {a.artifact_id: a for a in RETRIEVAL_ARTIFACTS}
+    diag: dict[str, object] = {"chroma_client_ready": True, "chroma_path": RETRIEVAL_CHROMA_PATH}
     try:
         collection = client.get_or_create_collection(name=RETRIEVAL_CHROMA_COLLECTION)
         ids = [a.artifact_id for a in RETRIEVAL_ARTIFACTS]
@@ -458,22 +463,33 @@ def _chroma_retrieve(question: str, top_k: int) -> tuple[list[RetrievalArtifact]
             embeds_raw = embedder.encode(docs, normalize_embeddings=True)
             embeds = [[float(x) for x in list(v)] for v in embeds_raw]
             collection.upsert(ids=ids, documents=docs, embeddings=embeds, metadatas=metas)
+            diag["chroma_embed_mode"] = "sentence_transformers"
+            diag["embedding_dim"] = len(embeds[0]) if embeds else None
             q_vec_raw = embedder.encode([question], normalize_embeddings=True)[0]
             q_vec = [float(x) for x in list(q_vec_raw)]
             res = collection.query(query_embeddings=[q_vec], n_results=max(1, int(top_k)))
         else:
             # Chroma can run with its own embedding function; this keeps sentence-transformers optional.
             collection.upsert(ids=ids, documents=docs, metadatas=metas)
+            diag["chroma_embed_mode"] = "chroma_builtin"
+            diag["embedding_dim"] = None
             res = collection.query(query_texts=[question], n_results=max(1, int(top_k)))
+        try:
+            diag["chroma_collection_count"] = int(collection.count())
+        except Exception as count_exc:
+            diag["chroma_collection_count"] = None
+            diag["chroma_collection_count_error"] = str(count_exc)[:120]
         out_ids = (((res or {}).get("ids") or [[]])[0]) if isinstance(res, dict) else []
+        diag["chroma_query_top_ids"] = [str(x) for x in (out_ids or [])][: max(1, int(top_k))]
         selected: list[RetrievalArtifact] = []
         for aid in out_ids:
             art = by_id.get(str(aid))
             if art and art not in selected:
                 selected.append(art)
-        return selected or _lexical_retrieve(question, top_k), None
+        return selected or _lexical_retrieve(question, top_k), None, diag
     except Exception as exc:
-        return _lexical_retrieve(question, top_k), str(exc)
+        diag["chroma_exception"] = str(exc)[:240]
+        return _lexical_retrieve(question, top_k), str(exc), diag
 
 
 def retrieve_artifacts_with_meta(
@@ -510,9 +526,9 @@ def retrieve_artifacts_with_meta(
             "chroma_error": (_CHROMA_LAST_ERROR or _CHROMA_INIT_ERROR),
         }
     if configured_backend == "chroma":
-        artifacts, chroma_err = _chroma_retrieve(question, k)
+        artifacts, chroma_err, chroma_diag = _chroma_retrieve(question, k)
         _CHROMA_LAST_ERROR = chroma_err
-        return artifacts, {
+        base_chroma: dict[str, object] = {
             "artifact_source": _ARTIFACTS_SOURCE,
             "configured_backend": "chroma",
             "effective_backend": ("chroma" if not chroma_err else "lexical"),
@@ -528,6 +544,8 @@ def retrieve_artifacts_with_meta(
             "vector_index_path": RETRIEVAL_VECTOR_INDEX_PATH,
             "vector_index_error": _VECTOR_INDEX_LOAD_ERROR,
         }
+        base_chroma.update(chroma_diag)
+        return artifacts, base_chroma
     if configured_backend == "vector":
         artifacts, vector_err = _vector_retrieve(question, k)
         _VECTOR_INDEX_LOAD_ERROR = vector_err

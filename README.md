@@ -136,6 +136,8 @@ Install dependencies include **`sentence-transformers`** and **`chromadb`** so y
 
 Use **Reload catalog/index** after changing the artifact JSON file; backend changes apply on the next question without restart.
 
+If `import chromadb` fails in your venv but `pip install chromadb` seemed to work, install with **`python -m pip install chromadb`** (some environments have a `pip` launcher pointed at the wrong `site-packages`).
+
 ## Notes
 
 This is a bridge build, not a total rewrite. The old UI and endpoints still exist, but the new normalized tables give you a much cleaner foundation for the next iteration.

@@ -226,6 +226,12 @@ function renderText(result) {
     if (rb) extra.push(`Retrieval: ${rb}${fallback ? ' (fallback)' : ''}`);
     const ids = Array.isArray(result.retrieval.artifact_ids) ? result.retrieval.artifact_ids : [];
     if (ids.length) extra.push(`Grounding artifacts: ${ids.length}`);
+    const cem = String(result.retrieval.chroma_embed_mode || '').trim();
+    if (cem) extra.push(`Chroma embed: ${cem}`);
+    const ccount = result.retrieval.chroma_collection_count;
+    if (ccount != null && ccount !== '') extra.push(`Chroma rows: ${ccount}`);
+    const edim = result.retrieval.embedding_dim;
+    if (edim != null && edim !== '') extra.push(`Embed dim: ${edim}`);
     const reason = String(result.retrieval.fallback_reason || '').trim();
     if (fallback && reason) extra.push(`Retrieval fallback reason: ${reason}`);
   }
@@ -541,6 +547,8 @@ function renderRetrievalRuntimeStatus(payload, prefix = '') {
   if (retrieval.vector_index_path) parts.push(`vector_index=${String(retrieval.vector_index_path)}`);
   if (retrieval.vector_index_error) parts.push(`vector_error=${String(retrieval.vector_index_error)}`);
   if (retrieval.artifact_load_error) parts.push(`catalog_error=${String(retrieval.artifact_load_error)}`);
+  if (retrieval.chroma_embed_mode) parts.push(`chroma_embed=${String(retrieval.chroma_embed_mode)}`);
+  if (retrieval.chroma_collection_count != null) parts.push(`chroma_count=${String(retrieval.chroma_collection_count)}`);
   statusEl.textContent = parts.join(' | ');
 }
 

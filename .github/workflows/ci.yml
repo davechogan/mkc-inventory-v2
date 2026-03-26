@@ -44,6 +44,7 @@ jobs:
           python -m py_compile routes/admin_routes.py
           python -m py_compile sqlite_schema.py
           python -m py_compile tools/reporting_eval_harness.py
+          python -m py_compile tools/reporting_retrieval_diagnose.py
           python -m pytest -q
 
   reporting-smoke-local:
