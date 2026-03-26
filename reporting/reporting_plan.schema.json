@@ -1,0 +1,263 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://invapp.local/reporting/reporting_plan.schema.json",
+  "title": "ReportingCanonicalPlan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "intent",
+    "scope",
+    "metric",
+    "group_by",
+    "filters",
+    "exclusions",
+    "time_range",
+    "year_compare",
+    "sort",
+    "limit",
+    "needs_clarification",
+    "clarification_reason"
+  ],
+  "properties": {
+    "intent": {
+      "type": "string",
+      "enum": [
+        "aggregate",
+        "list",
+        "missing_models",
+        "compare",
+        "completion_cost"
+      ]
+    },
+    "scope": {
+      "type": "string",
+      "enum": [
+        "inventory",
+        "catalog"
+      ]
+    },
+    "metric": {
+      "type": "string",
+      "enum": [
+        "count",
+        "total_spend",
+        "estimated_value",
+        "msrp"
+      ]
+    },
+    "group_by": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "series_name",
+          "family_name",
+          "knife_type",
+          "form_name",
+          "collaborator_name",
+          "steel",
+          "condition",
+          "location"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "filters": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/filterClause"
+      }
+    },
+    "exclusions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/filterClause"
+      }
+    },
+    "time_range": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/timeRange"
+        }
+      ]
+    },
+    "year_compare": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 1900,
+        "maximum": 2200
+      },
+      "minItems": 0,
+      "maxItems": 2
+    },
+    "sort": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/sortSpec"
+        }
+      ]
+    },
+    "limit": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        }
+      ]
+    },
+    "needs_clarification": {
+      "type": "boolean"
+    },
+    "clarification_reason": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "filterClause": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "field",
+        "op",
+        "value"
+      ],
+      "properties": {
+        "field": {
+          "type": "string",
+          "enum": [
+            "series_name",
+            "family_name",
+            "knife_type",
+            "form_name",
+            "collaborator_name",
+            "steel",
+            "condition",
+            "location",
+            "knife_name",
+            "official_name",
+            "record_status",
+            "acquired_date",
+            "purchase_price",
+            "estimated_value",
+            "msrp",
+            "text_search"
+          ]
+        },
+        "op": {
+          "type": "string",
+          "enum": [
+            "=",
+            "!=",
+            "contains",
+            "not_contains",
+            "in",
+            "not_in",
+            ">",
+            ">=",
+            "<",
+            "<=",
+            "between"
+          ]
+        },
+        "value": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "array",
+              "items": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "integer"
+                  }
+                ]
+              },
+              "minItems": 1
+            }
+          ]
+        }
+      }
+    },
+    "timeRange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "start",
+        "end"
+      ],
+      "properties": {
+        "start": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "end": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "sortSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "field",
+        "direction"
+      ],
+      "properties": {
+        "field": {
+          "type": "string"
+        },
+        "direction": {
+          "type": "string",
+          "enum": [
+            "asc",
+            "desc"
+          ]
+        }
+      }
+    }
+  }
+}
