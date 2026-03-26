@@ -1462,12 +1462,13 @@ def _reporting_heuristic_plan(question: str, last_state: Optional[dict[str, Any]
 
 
 def _reporting_llm_plan(
+    conn: sqlite3.Connection,
     model: str,
     question: str,
     context_block: str,
     schema_context: str,
 ) -> tuple[Optional[dict[str, Any]], dict[str, Any]]:
-    retrieval_artifacts, retrieval_meta = retrieve_artifacts_with_meta(question, top_k=6)
+    retrieval_artifacts, retrieval_meta = retrieve_artifacts_with_meta(question, top_k=6, conn=conn)
     retrieval_ctx = format_retrieval_context(retrieval_artifacts)
     system = (
         "You convert collection questions into semantic JSON plans. "
@@ -1519,10 +1520,10 @@ def _reporting_semantic_plan(
     heuristic = _reporting_heuristic_plan(question, last_state=last_state)
     learned_hints = _reporting_get_semantic_hints(conn, session_id, question)
     schema_context = _reporting_build_prompt_schema(conn)
-    llm_plan, retrieval_meta = _reporting_llm_plan(planner_model, question, context_block, schema_context)
+    llm_plan, retrieval_meta = _reporting_llm_plan(conn, planner_model, question, context_block, schema_context)
     planner_attempts = 1
     if not isinstance(llm_plan, dict) and retry_model and retry_model != planner_model:
-        retry, retry_retrieval_meta = _reporting_llm_plan(retry_model, question, context_block, schema_context)
+        retry, retry_retrieval_meta = _reporting_llm_plan(conn, retry_model, question, context_block, schema_context)
         planner_attempts = 2
         if isinstance(retry, dict):
             llm_plan = retry

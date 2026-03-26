@@ -127,12 +127,14 @@ Notes:
 
 ## Reporting retrieval (sentence-transformers)
 
-Install dependencies include **`sentence-transformers`** so reporting can use embedding-backed retrieval when configured.
+Install dependencies include **`sentence-transformers`** so reporting can use embedding-backed retrieval.
 
-- **`REPORTING_RETRIEVAL_BACKEND`**: `lexical` (default), `embedding`, `vector`, or `chroma` (see `reporting/retrieval.py` for paths and behavior).
+- **Default (no env, no DB row):** `embedding` (see `DEFAULT_RETRIEVAL_BACKEND` in `reporting/retrieval.py`).
+- **`REPORTING_RETRIEVAL_BACKEND`**: optional; when set, **overrides** both the reporting UI setting and any value stored in `app_meta`. Valid: `lexical`, `embedding`, `vector`, `chroma`.
+- **Admin UI:** Reporting page → **Retrieval runtime (admin)** → **Retrieval backend** + **Save backend** (persisted in `app_meta`).
 - **`REPORTING_RETRIEVAL_EMBED_MODEL`**: defaults to `all-MiniLM-L6-v2` (downloaded on first use).
 
-Use the reporting admin **Reload catalog/index** (or restart the app) after switching backends or changing the artifact catalog.
+Use **Reload catalog/index** after changing the artifact JSON file; backend changes apply on the next question without restart.
 
 ## Notes
 

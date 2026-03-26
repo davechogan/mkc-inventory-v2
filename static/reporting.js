@@ -1,6 +1,9 @@
 const REPORTING_MODEL_KEY = 'mkc_reporting_default_model';
 const DIRECT_LLM_SQL_STATUS_ENDPOINT = '/api/reporting/debug/direct-llm-sql';
 const REPORTING_HINT_PROMOTE_ENDPOINT = '/api/reporting/hints/promote';
+const REPORTING_RETRIEVAL_STATUS_ENDPOINT = '/api/reporting/retrieval/status';
+const REPORTING_RETRIEVAL_RELOAD_ENDPOINT = '/api/reporting/retrieval/reload';
+const REPORTING_RETRIEVAL_BACKEND_ENDPOINT = '/api/reporting/retrieval/backend';
 
 const state = {
   sessionId: null,
@@ -221,6 +224,10 @@ function renderText(result) {
     const rb = String(result.retrieval.effective_backend || result.retrieval.configured_backend || '').trim();
     const fallback = !!result.retrieval.fallback_used;
     if (rb) extra.push(`Retrieval: ${rb}${fallback ? ' (fallback)' : ''}`);
+    const ids = Array.isArray(result.retrieval.artifact_ids) ? result.retrieval.artifact_ids : [];
+    if (ids.length) extra.push(`Grounding artifacts: ${ids.length}`);
+    const reason = String(result.retrieval.fallback_reason || '').trim();
+    if (fallback && reason) extra.push(`Retrieval fallback reason: ${reason}`);
   }
   out.innerHTML = `
     <div>${escapeHtml(result.answer_text || '')}</div>
@@ -513,6 +520,55 @@ function renderHintPromoteStatus(payload, prefix = '') {
     parts.push(`reasons=${reasonText}`);
   }
   statusEl.textContent = parts.join(' | ');
+}
+
+function renderRetrievalRuntimeStatus(payload, prefix = '') {
+  const statusEl = document.getElementById('reportingRetrievalRuntimeStatus');
+  if (!statusEl) return;
+  const retrieval = payload?.retrieval;
+  if (!retrieval || typeof retrieval !== 'object') {
+    statusEl.textContent = `${prefix}No retrieval runtime data returned.`.trim();
+    return;
+  }
+  const parts = [];
+  if (prefix) parts.push(prefix.trim());
+  parts.push(`effective=${String(retrieval.configured_backend || '?')}`);
+  if (retrieval.default_backend != null) parts.push(`default=${String(retrieval.default_backend)}`);
+  if (retrieval.stored_backend) parts.push(`stored=${String(retrieval.stored_backend)}`);
+  if (retrieval.env_override_active) parts.push('env_override=1');
+  parts.push(`source=${String(retrieval.artifact_source || '?')}`);
+  parts.push(`artifacts=${Number(retrieval.artifact_count || 0)}`);
+  if (retrieval.vector_index_path) parts.push(`vector_index=${String(retrieval.vector_index_path)}`);
+  if (retrieval.vector_index_error) parts.push(`vector_error=${String(retrieval.vector_index_error)}`);
+  if (retrieval.artifact_load_error) parts.push(`catalog_error=${String(retrieval.artifact_load_error)}`);
+  statusEl.textContent = parts.join(' | ');
+}
+
+async function loadRetrievalBackendSettings() {
+  const sel = document.getElementById('reportingRetrievalBackendSelect');
+  const hint = document.getElementById('reportingRetrievalBackendHint');
+  if (!sel) return;
+  try {
+    const data = await api(REPORTING_RETRIEVAL_BACKEND_ENDPOINT);
+    const stored = data?.stored_backend;
+    const effective = data?.backend;
+    const pick = data?.env_override_active
+      ? (effective || 'embedding')
+      : (stored || effective || 'embedding');
+    if (Array.from(sel.options).some((o) => o.value === pick)) {
+      sel.value = pick;
+    }
+    if (hint) {
+      hint.textContent = data?.env_override_active
+        ? 'REPORTING_RETRIEVAL_BACKEND is set in the environment; it overrides this dropdown until unset.'
+        : 'Saved in the app database. Takes effect on the next question (no restart).';
+    }
+    sel.disabled = !!data?.env_override_active;
+    const saveBtn = document.getElementById('reportingRetrievalBackendSaveBtn');
+    if (saveBtn) saveBtn.disabled = !!data?.env_override_active;
+  } catch (err) {
+    if (hint) hint.textContent = `Could not load backend settings: ${String(err.message || err)}`;
+  }
 }
 
 async function loadModels() {
@@ -838,6 +894,55 @@ function bindEvents() {
     }
   });
 
+  document.getElementById('reportingRetrievalBackendSaveBtn')?.addEventListener('click', async () => {
+    const sel = document.getElementById('reportingRetrievalBackendSelect');
+    const btn = document.getElementById('reportingRetrievalBackendSaveBtn');
+    if (!sel || sel.disabled) return;
+    if (btn) btn.disabled = true;
+    try {
+      await api(REPORTING_RETRIEVAL_BACKEND_ENDPOINT, {
+        method: 'POST',
+        body: JSON.stringify({ backend: sel.value }),
+      });
+      await loadRetrievalBackendSettings();
+      const payload = await api(REPORTING_RETRIEVAL_STATUS_ENDPOINT);
+      renderRetrievalRuntimeStatus(payload, 'Backend saved.');
+      alert('Retrieval backend saved.');
+    } catch (err) {
+      alert(userFacingError(err));
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  });
+
+  document.getElementById('reportingRetrievalStatusBtn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('reportingRetrievalStatusBtn');
+    if (btn) btn.disabled = true;
+    try {
+      const payload = await api(REPORTING_RETRIEVAL_STATUS_ENDPOINT);
+      renderRetrievalRuntimeStatus(payload, 'Status refreshed.');
+    } catch (err) {
+      alert(userFacingError(err));
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  });
+
+  document.getElementById('reportingRetrievalReloadBtn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('reportingRetrievalReloadBtn');
+    if (btn) btn.disabled = true;
+    try {
+      const payload = await api(REPORTING_RETRIEVAL_RELOAD_ENDPOINT, { method: 'POST' });
+      renderRetrievalRuntimeStatus(payload, 'Reload complete.');
+      await loadRetrievalBackendSettings();
+      alert('Retrieval runtime reloaded.');
+    } catch (err) {
+      alert(userFacingError(err));
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  });
+
   document.getElementById('reportingGridFilter')?.addEventListener('input', () => {
     refreshReportingGrid();
   });
@@ -881,7 +986,19 @@ function bindEvents() {
 
 async function init() {
   bindEvents();
-  await Promise.all([loadModels(), loadTemplates(), loadSavedQueries(), loadDirectLlmSqlMode()]);
+  await Promise.all([
+    loadModels(),
+    loadTemplates(),
+    loadSavedQueries(),
+    loadDirectLlmSqlMode(),
+    loadRetrievalBackendSettings(),
+  ]);
+  try {
+    const payload = await api(REPORTING_RETRIEVAL_STATUS_ENDPOINT);
+    renderRetrievalRuntimeStatus(payload, 'Status loaded.');
+  } catch {
+    // Non-blocking diagnostic panel.
+  }
   await loadSessions();
 }
 

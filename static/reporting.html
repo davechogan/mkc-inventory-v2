@@ -85,6 +85,24 @@
         </div>
         <p id="reportingHintPromoteStatus" class="muted small">Run preview to inspect session hint candidates before apply.</p>
       </div>
+      <div class="reporting-block">
+        <h3>Retrieval runtime (admin)</h3>
+        <label class="full">Retrieval backend
+          <select id="reportingRetrievalBackendSelect" title="Persisted in app database; used on the next question unless env overrides.">
+            <option value="lexical">lexical (token overlap)</option>
+            <option value="embedding">embedding (sentence-transformers)</option>
+            <option value="vector">vector (persisted index file)</option>
+            <option value="chroma">chroma</option>
+          </select>
+        </label>
+        <div class="actions">
+          <button type="button" id="reportingRetrievalBackendSaveBtn" class="secondary">Save backend</button>
+          <button type="button" id="reportingRetrievalStatusBtn" class="secondary">Refresh status</button>
+          <button type="button" id="reportingRetrievalReloadBtn" class="secondary">Reload catalog/index</button>
+        </div>
+        <p id="reportingRetrievalBackendHint" class="muted small"></p>
+        <p id="reportingRetrievalRuntimeStatus" class="muted small">No retrieval status loaded yet.</p>
+      </div>
     </section>
 
     <section class="card reporting-main">
@@ -146,6 +164,6 @@
     </section>
   </main>
 
-  <script src="/static/reporting.js?v=7"></script>
+  <script src="/static/reporting.js?v=9"></script>
 </body>
 </html>

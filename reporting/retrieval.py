@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import sqlite3
 from dataclasses import dataclass
 from typing import Iterable
 
@@ -86,7 +87,39 @@ DEFAULT_RETRIEVAL_ARTIFACTS: tuple[RetrievalArtifact, ...] = (
     ),
 )
 
-RETRIEVAL_BACKEND = (os.environ.get("REPORTING_RETRIEVAL_BACKEND") or "lexical").strip().lower()
+# Stored in app_meta under this key when the UI saves a preference (see ``resolve_retrieval_backend``).
+RETRIEVAL_BACKEND_META_KEY = "reporting_retrieval_backend"
+
+VALID_RETRIEVAL_BACKENDS: tuple[str, ...] = ("lexical", "embedding", "vector", "chroma")
+# Default when no env var and no app_meta row (embedding retrieval for planner grounding).
+DEFAULT_RETRIEVAL_BACKEND = "embedding"
+
+
+def _normalize_backend(name: str) -> str:
+    n = (name or "").strip().lower()
+    return n if n in VALID_RETRIEVAL_BACKENDS else DEFAULT_RETRIEVAL_BACKEND
+
+
+def resolve_retrieval_backend(conn: sqlite3.Connection | None) -> str:
+    """Effective backend for retrieval: env ``REPORTING_RETRIEVAL_BACKEND`` wins, then app_meta, then default."""
+    env_raw = os.environ.get("REPORTING_RETRIEVAL_BACKEND")
+    if env_raw is not None and str(env_raw).strip() != "":
+        return _normalize_backend(str(env_raw).strip().lower())
+    if conn is not None:
+        try:
+            row = conn.execute(
+                "SELECT value FROM app_meta WHERE key = ?",
+                (RETRIEVAL_BACKEND_META_KEY,),
+            ).fetchone()
+            val = row["value"] if isinstance(row, dict) else (row[0] if row else None)
+            if val is not None and str(val).strip():
+                return _normalize_backend(str(val).strip().lower())
+        except Exception:
+            pass
+    return DEFAULT_RETRIEVAL_BACKEND
+
+
+# Back-compat for tests that monkeypatch this name; not used for resolution when unset.
 RETRIEVAL_EMBED_MODEL = (os.environ.get("REPORTING_RETRIEVAL_EMBED_MODEL") or "all-MiniLM-L6-v2").strip()
 RETRIEVAL_ARTIFACTS_PATH = (
     os.environ.get("REPORTING_RETRIEVAL_ARTIFACTS_PATH")
@@ -161,10 +194,28 @@ def _resolve_artifacts() -> tuple[tuple[RetrievalArtifact, ...], str, str | None
 RETRIEVAL_ARTIFACTS, _ARTIFACTS_SOURCE, _ARTIFACTS_LOAD_ERROR = _resolve_artifacts()
 
 
-def get_retrieval_status() -> dict[str, object]:
+def get_retrieval_status(conn: sqlite3.Connection | None = None) -> dict[str, object]:
     """Return retrieval runtime status for diagnostics."""
+    resolved = resolve_retrieval_backend(conn)
+    env_raw = os.environ.get("REPORTING_RETRIEVAL_BACKEND")
+    env_override = env_raw is not None and str(env_raw).strip() != ""
+    stored: str | None = None
+    if conn is not None:
+        try:
+            row = conn.execute(
+                "SELECT value FROM app_meta WHERE key = ?",
+                (RETRIEVAL_BACKEND_META_KEY,),
+            ).fetchone()
+            v = row["value"] if isinstance(row, dict) else (row[0] if row else None)
+            if v is not None and str(v).strip():
+                stored = str(v).strip().lower()
+        except Exception:
+            stored = None
     return {
-        "configured_backend": RETRIEVAL_BACKEND,
+        "configured_backend": resolved,
+        "default_backend": DEFAULT_RETRIEVAL_BACKEND,
+        "stored_backend": stored,
+        "env_override_active": env_override,
         "embed_model": RETRIEVAL_EMBED_MODEL,
         "artifacts_path": RETRIEVAL_ARTIFACTS_PATH,
         "artifact_source": _ARTIFACTS_SOURCE,
@@ -181,7 +232,7 @@ def get_retrieval_status() -> dict[str, object]:
     }
 
 
-def reload_retrieval_artifacts() -> dict[str, object]:
+def reload_retrieval_artifacts(conn: sqlite3.Connection | None = None) -> dict[str, object]:
     """Reload retrieval artifacts from disk and clear derived caches."""
     global RETRIEVAL_ARTIFACTS, _ARTIFACTS_SOURCE, _ARTIFACTS_LOAD_ERROR, _ARTIFACT_VECTORS, _VECTOR_INDEX_LOAD_ERROR, _CHROMA_LAST_ERROR
     RETRIEVAL_ARTIFACTS, _ARTIFACTS_SOURCE, _ARTIFACTS_LOAD_ERROR = _resolve_artifacts()
@@ -189,7 +240,7 @@ def reload_retrieval_artifacts() -> dict[str, object]:
     _ARTIFACT_VECTORS = None
     _VECTOR_INDEX_LOAD_ERROR = None
     _CHROMA_LAST_ERROR = None
-    status = get_retrieval_status()
+    status = get_retrieval_status(conn)
     status["reloaded"] = True
     return status
 
@@ -425,16 +476,22 @@ def _chroma_retrieve(question: str, top_k: int) -> tuple[list[RetrievalArtifact]
 
 
 def retrieve_artifacts_with_meta(
-    question: str, top_k: int = 5, *, backend: str | None = None
+    question: str,
+    top_k: int = 5,
+    *,
+    backend: str | None = None,
+    conn: sqlite3.Connection | None = None,
 ) -> tuple[list[RetrievalArtifact], dict[str, object]]:
     """Retrieve artifacts plus backend metadata for telemetry/debugging.
 
-    When ``backend`` is provided, it overrides :data:`RETRIEVAL_BACKEND` for this
-    call only (used by benchmarks/tests; production callers should omit it).
+    When ``backend`` is provided, it overrides env/app_meta for this call only
+    (benchmarks/tests). Production callers pass ``conn`` so the UI-stored backend applies.
     """
     global _VECTOR_INDEX_LOAD_ERROR, _CHROMA_LAST_ERROR
     k = max(1, int(top_k))
-    configured_backend = (backend or RETRIEVAL_BACKEND).strip().lower()
+    configured_backend = (
+        _normalize_backend(backend) if backend is not None and str(backend).strip() != "" else resolve_retrieval_backend(conn)
+    )
     if configured_backend not in {"embedding", "vector", "chroma"}:
         artifacts = _lexical_retrieve(question, k)
         return artifacts, {
@@ -516,13 +573,19 @@ def retrieve_artifacts_with_meta(
     }
 
 
-def retrieve_artifacts(question: str, top_k: int = 5, *, backend: str | None = None) -> list[RetrievalArtifact]:
+def retrieve_artifacts(
+    question: str,
+    top_k: int = 5,
+    *,
+    backend: str | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> list[RetrievalArtifact]:
     """Retrieve best-fit semantic artifacts for a question.
 
     Retrieval is lexical for now and deterministic. It is intentionally simple
     but establishes the canonical retrieval boundary and artifact contract.
     """
-    artifacts, _meta = retrieve_artifacts_with_meta(question, top_k=top_k, backend=backend)
+    artifacts, _meta = retrieve_artifacts_with_meta(question, top_k=top_k, backend=backend, conn=conn)
     return artifacts
 
 

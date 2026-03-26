@@ -6,8 +6,8 @@ from tools.reporting_retrieval_benchmark import CANONICAL_CASES, run_benchmark
 
 
 def test_retrieve_artifacts_with_meta_backend_override(monkeypatch) -> None:
-    """Explicit ``backend=`` must win over ``RETRIEVAL_BACKEND`` env wiring."""
-    monkeypatch.setattr(retrieval, "RETRIEVAL_BACKEND", "chroma")
+    """Explicit ``backend=`` must win over ``resolve_retrieval_backend``."""
+    monkeypatch.setattr(retrieval, "resolve_retrieval_backend", lambda c: "chroma")
     arts, meta = retrieve_artifacts_with_meta(
         "list the knives in the blackfoot family",
         top_k=4,

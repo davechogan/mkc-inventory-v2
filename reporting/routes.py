@@ -26,12 +26,26 @@ from reporting.domain import (
     ensure_reporting_schema,
     run_reporting_query,
 )
+from reporting.retrieval import (
+    DEFAULT_RETRIEVAL_BACKEND,
+    RETRIEVAL_BACKEND_META_KEY,
+    VALID_RETRIEVAL_BACKENDS,
+    get_retrieval_status,
+    reload_retrieval_artifacts,
+    resolve_retrieval_backend,
+)
 
 
 class DirectLlmSqlToggleIn(BaseModel):
     """POST body for the direct-LLM-SQL toggle; module-scoped for correct FastAPI body binding."""
 
     enabled: bool
+
+
+class RetrievalBackendIn(BaseModel):
+    """POST body for persisted retrieval backend (``app_meta``)."""
+
+    backend: str
 
 
 class PromoteHintsIn(BaseModel):
@@ -170,6 +184,51 @@ def create_reporting_router(
                     (safe_limit,),
                 ).fetchall()
             return {"hints": rows}
+
+    @router.get("/api/reporting/retrieval/status")
+    def reporting_retrieval_status() -> dict[str, Any]:
+        with get_conn() as conn:
+            return {"retrieval": get_retrieval_status(conn)}
+
+    @router.get("/api/reporting/retrieval/backend")
+    def reporting_retrieval_backend_get() -> dict[str, Any]:
+        """Return effective backend, stored value, and whether env overrides UI."""
+        with get_conn() as conn:
+            st = get_retrieval_status(conn)
+            return {
+                "backend": resolve_retrieval_backend(conn),
+                "stored_backend": st.get("stored_backend"),
+                "default_backend": DEFAULT_RETRIEVAL_BACKEND,
+                "valid_backends": sorted(VALID_RETRIEVAL_BACKENDS),
+                "env_override_active": st.get("env_override_active"),
+            }
+
+    @router.post("/api/reporting/retrieval/backend")
+    def reporting_retrieval_backend_set(payload: RetrievalBackendIn) -> dict[str, Any]:
+        b = str(payload.backend or "").strip().lower()
+        if b not in VALID_RETRIEVAL_BACKENDS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"backend must be one of: {', '.join(sorted(VALID_RETRIEVAL_BACKENDS))}",
+            )
+        with get_conn() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)",
+                (RETRIEVAL_BACKEND_META_KEY, b),
+            )
+            st = get_retrieval_status(conn)
+            return {
+                "backend": resolve_retrieval_backend(conn),
+                "stored_backend": b,
+                "default_backend": DEFAULT_RETRIEVAL_BACKEND,
+                "valid_backends": sorted(VALID_RETRIEVAL_BACKENDS),
+                "env_override_active": st.get("env_override_active"),
+            }
+
+    @router.post("/api/reporting/retrieval/reload")
+    def reporting_retrieval_reload() -> dict[str, Any]:
+        with get_conn() as conn:
+            return {"retrieval": reload_retrieval_artifacts(conn)}
 
     @router.post("/api/reporting/feedback")
     def reporting_feedback(payload: ReportingFeedbackIn) -> dict[str, Any]:

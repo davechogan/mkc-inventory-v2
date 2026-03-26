@@ -11,6 +11,10 @@ _TEST_DB_DIR = Path(tempfile.mkdtemp(prefix="mkc_pytest_db_"))
 _TEST_DB_PATH = _TEST_DB_DIR / f"mkc_inventory.test.{uuid.uuid4().hex}.db"
 os.environ["MKC_INVENTORY_DB"] = str(_TEST_DB_PATH)
 
+# Fast unit tests: avoid loading sentence-transformers unless a test sets this env.
+if "REPORTING_RETRIEVAL_BACKEND" not in os.environ:
+    os.environ["REPORTING_RETRIEVAL_BACKEND"] = "lexical"
+
 
 @pytest.fixture(scope="session")
 def invapp():
