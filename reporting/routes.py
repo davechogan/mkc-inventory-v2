@@ -9,6 +9,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 from reporting.domain import (
     REPORTING_ALLOWED_SOURCES,
@@ -21,9 +22,26 @@ from reporting.domain import (
     _reporting_create_session,
     _reporting_feedback_semantic_hints,
     _reporting_iso_now,
+    _reporting_promote_semantic_hints,
     ensure_reporting_schema,
     run_reporting_query,
 )
+
+
+class DirectLlmSqlToggleIn(BaseModel):
+    """POST body for the direct-LLM-SQL toggle; module-scoped for correct FastAPI body binding."""
+
+    enabled: bool
+
+
+class PromoteHintsIn(BaseModel):
+    """POST body for guarded session->global semantic hint promotion."""
+
+    session_id: Optional[str] = None
+    dry_run: bool = True
+    min_confidence: Optional[float] = None
+    min_evidence: Optional[int] = None
+    max_promotions: Optional[int] = None
 
 
 def create_reporting_router(
@@ -102,6 +120,26 @@ def create_reporting_router(
             for r in rows:
                 r["meta"] = json.loads(r["meta_json"]) if r.get("meta_json") else {}
             return {"events": rows}
+
+    @router.get("/api/reporting/debug/direct-llm-sql")
+    def reporting_direct_llm_sql_status() -> dict[str, Any]:
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT value FROM app_meta WHERE key = ?",
+                ("reporting_direct_llm_sql",),
+            ).fetchone()
+            raw = row.get("value") if isinstance(row, dict) else None
+            enabled = str(raw or "").strip().lower() in {"1", "true", "yes", "on"}
+            return {"enabled": enabled}
+
+    @router.post("/api/reporting/debug/direct-llm-sql")
+    def reporting_set_direct_llm_sql(payload: DirectLlmSqlToggleIn) -> dict[str, Any]:
+        with get_conn() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)",
+                ("reporting_direct_llm_sql", "1" if payload.enabled else "0"),
+            )
+            return {"enabled": bool(payload.enabled)}
 
     @router.get("/api/reporting/hints")
     def reporting_hints(limit: int = 100, session_id: Optional[str] = None) -> dict[str, Any]:
@@ -184,6 +222,19 @@ def create_reporting_router(
                 (sid,),
             )
             return {"ok": True, "changed": True, "hint_ids_updated": hint_ids}
+
+    @router.post("/api/reporting/hints/promote")
+    def reporting_promote_hints(payload: PromoteHintsIn) -> dict[str, Any]:
+        with get_conn() as conn:
+            ensure_reporting_schema(conn)
+            return _reporting_promote_semantic_hints(
+                conn,
+                session_id=(payload.session_id.strip() if payload.session_id else None),
+                dry_run=bool(payload.dry_run),
+                min_confidence=payload.min_confidence,
+                min_evidence=payload.min_evidence,
+                max_promotions=payload.max_promotions,
+            )
 
     @router.post("/api/reporting/sessions")
     def reporting_session_create(model: Optional[str] = None) -> dict[str, Any]:

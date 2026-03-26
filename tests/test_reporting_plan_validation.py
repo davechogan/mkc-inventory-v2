@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import reporting.domain as reporting_domain
 from reporting.plan_models import CanonicalReportingPlan, PlanIntent, PlanMetric, PlanScope
 from reporting.plan_validator import parse_planner_raw_text, validate_canonical_structure, validate_canonical_semantics
 
@@ -122,4 +123,22 @@ def test_paraphrase_year_compare_normalizes_equivalently(invapp, monkeypatch) ->
     assert p1.get("intent") == p2.get("intent") == "aggregate"
     assert p1.get("metric") == p2.get("metric") == "total_spend"
     assert p1.get("year_compare") == p2.get("year_compare") == [2024, 2025]
+
+
+def test_explicit_constraints_followup_switches_to_list(invapp) -> None:
+    plan = reporting_domain._reporting_explicit_constraints("list the knives that made up that number")
+    assert plan.get("intent") == "list_inventory"
+
+
+def test_explicit_constraints_extracts_multi_exclusions(invapp) -> None:
+    plan = reporting_domain._reporting_explicit_constraints(
+        "how much have i spent on the blackfoot knives excluding the damascus and traditions versions?"
+    )
+    filters = plan.get("filters") or {}
+    assert filters.get("series_name__not") == "Traditions"
+    text_ex = filters.get("text_search__not")
+    if isinstance(text_ex, list):
+        assert "damascus" in text_ex
+    else:
+        assert text_ex == "damascus"
 

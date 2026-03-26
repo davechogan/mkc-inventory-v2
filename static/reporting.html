@@ -72,6 +72,19 @@
         <label>Value A<input id="reportingCompareA" placeholder="Traditions" /></label>
         <label>Value B<input id="reportingCompareB" placeholder="VIP" /></label>
       </div>
+      <div class="reporting-block">
+        <h3>Mode (debug)</h3>
+        <button type="button" id="reportingDirectLlmSqlToggleBtn" class="secondary">Mode: A (Semantic)</button>
+        <p id="reportingDirectLlmSqlStatus" class="muted small"></p>
+      </div>
+      <div class="reporting-block">
+        <h3>Hint promotion (admin)</h3>
+        <div class="actions">
+          <button type="button" id="reportingHintPromotePreviewBtn" class="secondary">Preview promotion</button>
+          <button type="button" id="reportingHintPromoteApplyBtn" class="secondary">Apply promotion</button>
+        </div>
+        <p id="reportingHintPromoteStatus" class="muted small">Run preview to inspect session hint candidates before apply.</p>
+      </div>
     </section>
 
     <section class="card reporting-main">
@@ -133,6 +146,6 @@
     </section>
   </main>
 
-  <script src="/static/reporting.js?v=5"></script>
+  <script src="/static/reporting.js?v=7"></script>
 </body>
 </html>

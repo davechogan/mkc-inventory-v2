@@ -1,4 +1,6 @@
 const REPORTING_MODEL_KEY = 'mkc_reporting_default_model';
+const DIRECT_LLM_SQL_STATUS_ENDPOINT = '/api/reporting/debug/direct-llm-sql';
+const REPORTING_HINT_PROMOTE_ENDPOINT = '/api/reporting/hints/promote';
 
 const state = {
   sessionId: null,
@@ -461,11 +463,51 @@ function renderFollowups(result) {
   });
 }
 
+async function loadDirectLlmSqlMode() {
+  const btn = document.getElementById('reportingDirectLlmSqlToggleBtn');
+  const statusEl = document.getElementById('reportingDirectLlmSqlStatus');
+  if (!btn || !statusEl) return;
+
+  try {
+    const data = await api(DIRECT_LLM_SQL_STATUS_ENDPOINT);
+    const enabled = !!data?.enabled;
+    btn.dataset.enabled = enabled ? 'true' : 'false';
+    btn.textContent = enabled ? 'Mode: B (Direct LLM SQL)' : 'Mode: A (Semantic planning)';
+    statusEl.textContent = enabled ? 'Debug enabled: bypass semantic planning/compiler.' : 'Default: semantic planner + SQL compiler.';
+  } catch (err) {
+    btn.dataset.enabled = 'false';
+    btn.textContent = 'Mode: A (Semantic planning)';
+    statusEl.textContent = `Debug mode unavailable: ${String(err.message || err)}`;
+  }
+}
+
 function refreshOutputs(result) {
   renderText(result);
   renderGrid(result);
   renderGraph(result);
   renderFollowups(result);
+}
+
+function renderHintPromoteStatus(payload, prefix = '') {
+  const statusEl = document.getElementById('reportingHintPromoteStatus');
+  if (!statusEl) return;
+  if (!payload || typeof payload !== 'object') {
+    statusEl.textContent = `${prefix}No promotion data returned.`.trim();
+    return;
+  }
+  const parts = [];
+  if (prefix) parts.push(prefix.trim());
+  parts.push(`enabled=${!!payload.enabled}`);
+  parts.push(`dry_run=${!!payload.dry_run}`);
+  parts.push(`considered=${Number(payload.considered || 0)}`);
+  parts.push(`promoted=${Number(payload.promoted || 0)}`);
+  parts.push(`skipped=${Number(payload.skipped || 0)}`);
+  const reasons = payload.reasons && typeof payload.reasons === 'object' ? payload.reasons : null;
+  if (reasons && Object.keys(reasons).length) {
+    const reasonText = Object.entries(reasons).map(([k, v]) => `${k}:${v}`).join(', ');
+    parts.push(`reasons=${reasonText}`);
+  }
+  statusEl.textContent = parts.join(' | ');
 }
 
 async function loadModels() {
@@ -735,6 +777,61 @@ function bindEvents() {
     URL.revokeObjectURL(a.href);
   });
 
+  document.getElementById('reportingDirectLlmSqlToggleBtn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('reportingDirectLlmSqlToggleBtn');
+    if (!btn) return;
+    const curEnabled = btn.dataset.enabled === 'true';
+    try {
+      await api(DIRECT_LLM_SQL_STATUS_ENDPOINT, {
+        method: 'POST',
+        body: JSON.stringify({ enabled: !curEnabled }),
+      });
+      await loadDirectLlmSqlMode();
+      alert('Reporting mode updated.');
+    } catch (err) {
+      alert(userFacingError(err));
+    }
+  });
+
+  document.getElementById('reportingHintPromotePreviewBtn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('reportingHintPromotePreviewBtn');
+    if (btn) btn.disabled = true;
+    try {
+      const payload = await api(REPORTING_HINT_PROMOTE_ENDPOINT, {
+        method: 'POST',
+        body: JSON.stringify({
+          session_id: state.sessionId || null,
+          dry_run: true,
+        }),
+      });
+      renderHintPromoteStatus(payload, 'Preview complete.');
+    } catch (err) {
+      alert(userFacingError(err));
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  });
+
+  document.getElementById('reportingHintPromoteApplyBtn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('reportingHintPromoteApplyBtn');
+    if (btn) btn.disabled = true;
+    try {
+      const payload = await api(REPORTING_HINT_PROMOTE_ENDPOINT, {
+        method: 'POST',
+        body: JSON.stringify({
+          session_id: state.sessionId || null,
+          dry_run: false,
+        }),
+      });
+      renderHintPromoteStatus(payload, 'Apply complete.');
+      alert('Hint promotion applied.');
+    } catch (err) {
+      alert(userFacingError(err));
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  });
+
   document.getElementById('reportingGridFilter')?.addEventListener('input', () => {
     refreshReportingGrid();
   });
@@ -778,7 +875,7 @@ function bindEvents() {
 
 async function init() {
   bindEvents();
-  await Promise.all([loadModels(), loadTemplates(), loadSavedQueries()]);
+  await Promise.all([loadModels(), loadTemplates(), loadSavedQueries(), loadDirectLlmSqlMode()]);
   await loadSessions();
 }
 

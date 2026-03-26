@@ -55,6 +55,7 @@ from reporting.regex_contract import (
 )
 from reporting.plan_models import CanonicalReportingPlan
 from reporting.plan_validator import validate_canonical_structure, validate_canonical_semantics
+from reporting.retrieval import format_retrieval_context, retrieve_artifacts
 
 _ConnectionCtx = AbstractContextManager[sqlite3.Connection]
 GetConn = Callable[[], _ConnectionCtx]
@@ -105,6 +106,12 @@ REPORTING_SERIES_ALIASES = {
 }
 REPORTING_METRICS = {"count", "total_spend", "total_estimated_value"}
 REPORTING_HINT_MIN_CONFIDENCE = 0.55
+REPORTING_HINT_PROMOTION_ENABLED = (
+    (os.environ.get("REPORTING_HINT_PROMOTION_ENABLED", "1").strip().lower() in {"1", "true", "yes", "on"})
+)
+REPORTING_HINT_PROMOTION_MIN_CONFIDENCE = float(os.environ.get("REPORTING_HINT_PROMOTION_MIN_CONFIDENCE") or 0.80)
+REPORTING_HINT_PROMOTION_MIN_EVIDENCE = int(os.environ.get("REPORTING_HINT_PROMOTION_MIN_EVIDENCE") or 3)
+REPORTING_HINT_PROMOTION_MAX_PER_RUN = int(os.environ.get("REPORTING_HINT_PROMOTION_MAX_PER_RUN") or 50)
 
 # Debug A/B toggle: when enabled, bypass semantic planning + SQL compiler and
 # ask the LLM to generate SQL directly (while still running SQL through the
@@ -704,6 +711,10 @@ def _reporting_is_contextual_followup(question: str) -> bool:
         "show names",
         "list names",
         "those names",
+        "that made up that number",
+        "made up that number",
+        "cost of each knife",
+        "each knife",
     )
     return any(c in q for c in cues)
 
@@ -943,6 +954,152 @@ def _reporting_learn_semantic_hints(
         )
 
 
+def _reporting_promote_semantic_hints(
+    conn: sqlite3.Connection,
+    *,
+    session_id: Optional[str] = None,
+    dry_run: bool = True,
+    min_confidence: Optional[float] = None,
+    min_evidence: Optional[int] = None,
+    max_promotions: Optional[int] = None,
+) -> dict[str, Any]:
+    """Promote strong session hints into global soft priors.
+
+    Guardrails:
+    - only promotes session-scoped hints
+    - requires confidence/evidence thresholds and positive success signal
+    - skips candidates that conflict with an existing global hint for same cue+dimension
+    """
+    if not REPORTING_HINT_PROMOTION_ENABLED:
+        return {"enabled": False, "considered": 0, "promoted": 0, "skipped": 0, "reasons": ["disabled_by_env"], "candidates": []}
+
+    min_conf = float(min_confidence if min_confidence is not None else REPORTING_HINT_PROMOTION_MIN_CONFIDENCE)
+    min_ev = int(min_evidence if min_evidence is not None else REPORTING_HINT_PROMOTION_MIN_EVIDENCE)
+    max_prom = max(1, int(max_promotions if max_promotions is not None else REPORTING_HINT_PROMOTION_MAX_PER_RUN))
+    filters: list[Any] = [float(min_conf), int(min_ev), max_prom]
+    sql_where = """
+        WHERE scope_type = 'session'
+          AND confidence >= ?
+          AND evidence_count >= ?
+          AND success_count > failure_count
+    """
+    if session_id and session_id.strip():
+        sql_where += " AND scope_id = ?"
+        filters = [float(min_conf), int(min_ev), session_id.strip(), max_prom]
+    candidates = conn.execute(
+        f"""
+        SELECT id, scope_id, entity_norm, cue_word, target_dimension, target_value,
+               confidence, evidence_count, success_count, failure_count
+        FROM reporting_semantic_hints
+        {sql_where}
+        ORDER BY confidence DESC, evidence_count DESC, success_count DESC, id DESC
+        LIMIT ?
+        """
+        ,
+        tuple(filters),
+    ).fetchall()
+    promoted: list[dict[str, Any]] = []
+    skipped = 0
+    reasons: dict[str, int] = {}
+    for row in candidates:
+        ent = str(row.get("entity_norm") or "").strip()
+        cue = str(row.get("cue_word") or "").strip()
+        dim = str(row.get("target_dimension") or "").strip()
+        val = str(row.get("target_value") or "").strip()
+        if not ent or not cue or not dim or not val:
+            skipped += 1
+            reasons["invalid_candidate"] = reasons.get("invalid_candidate", 0) + 1
+            continue
+        conflict = conn.execute(
+            """
+            SELECT id
+            FROM reporting_semantic_hints
+            WHERE scope_type = 'global'
+              AND scope_id IS NULL
+              AND entity_norm = ?
+              AND cue_word = ?
+              AND target_dimension = ?
+              AND lower(target_value) <> lower(?)
+            LIMIT 1
+            """,
+            (ent, cue, dim, val),
+        ).fetchone()
+        if conflict:
+            skipped += 1
+            reasons["conflict_global_value"] = reasons.get("conflict_global_value", 0) + 1
+            continue
+        promoted_conf = min(0.90, max(0.60, float(row.get("confidence") or min_conf) - 0.03))
+        item = {
+            "source_hint_id": int(row.get("id")),
+            "source_session_id": row.get("scope_id"),
+            "entity_norm": ent,
+            "cue_word": cue,
+            "target_dimension": dim,
+            "target_value": val,
+            "promoted_confidence": promoted_conf,
+            "evidence_count": int(row.get("evidence_count") or 0),
+        }
+        promoted.append(item)
+        if dry_run:
+            continue
+        existing = conn.execute(
+            """
+            SELECT id, confidence, evidence_count
+            FROM reporting_semantic_hints
+            WHERE scope_type = 'global'
+              AND scope_id IS NULL
+              AND entity_norm = ?
+              AND cue_word = ?
+              AND target_dimension = ?
+              AND lower(target_value) = lower(?)
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (ent, cue, dim, val),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                """
+                UPDATE reporting_semantic_hints
+                SET confidence = ?,
+                    evidence_count = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (
+                    min(0.95, max(float(existing.get("confidence") or 0.0), promoted_conf)),
+                    max(int(existing.get("evidence_count") or 0), int(row.get("evidence_count") or 1)),
+                    int(existing.get("id")),
+                ),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO reporting_semantic_hints
+                (scope_type, scope_id, entity_norm, cue_word, target_dimension, target_value,
+                 confidence, evidence_count, success_count, failure_count, created_at, updated_at, last_used_at)
+                VALUES ('global', NULL, ?, ?, ?, ?, ?, ?, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+                """,
+                (
+                    ent,
+                    cue,
+                    dim,
+                    val,
+                    promoted_conf,
+                    int(row.get("evidence_count") or 1),
+                ),
+            )
+    return {
+        "enabled": True,
+        "dry_run": bool(dry_run),
+        "considered": len(candidates),
+        "promoted": len(promoted),
+        "skipped": skipped,
+        "reasons": reasons,
+        "candidates": promoted,
+    }
+
+
 def _reporting_normalize_filter_value(key: str, value: str) -> str:
     base_key = key[:-5] if str(key).endswith("__not") else key
     v = " ".join(str(value or "").strip().lower().split())
@@ -998,6 +1155,13 @@ def _reporting_explicit_constraints(question: str) -> dict[str, Any]:
         out["intent"] = "aggregate"
         out["metric"] = "count"
     elif ("verify" in q or "name" in q) and ("list" in q or "show" in q or "what are" in q or "verify" in q):
+        out["intent"] = "list_inventory"
+    elif (
+        "list the knives that made up that number" in q
+        or "made up that number" in q
+        or "cost of each knife" in q
+        or "list the knives that made up" in q
+    ):
         out["intent"] = "list_inventory"
 
     group_by = _reporting_extract_dimension_from_text(q)
@@ -1060,32 +1224,41 @@ def _reporting_explicit_constraints(question: str) -> dict[str, Any]:
             out["filters"]["text_search"] = term
             break
 
-    # Negation / exclusion phrases (soft, generalized):
+    # Negation / exclusion phrases:
     # - "except Speedgoat"
     # - "without traditions"
-    # - "except tactical knives"
-    neg_patterns = [
-        r"\bexcept\s+([a-z0-9][a-z0-9 -]+?)(?:\s+knives?|\s+models?)?\b",
-        r"\bwithout\s+([a-z0-9][a-z0-9 -]+?)(?:\s+knives?|\s+models?)?\b",
-    ]
-    for pat in neg_patterns:
-        m = re.search(pat, q)
-        if not m:
-            continue
-        raw = m.group(1).strip()
-        norm = _reporting_normalize_filter_value("text_search", raw)
-        if not norm:
-            continue
-        # Prefer explicit controlled dimensions when obvious.
-        series_norm = _reporting_normalize_filter_value("series_name", norm)
-        if series_norm and series_norm in REPORTING_SERIES_ALIASES.values():
-            out["filters"]["series_name__not"] = series_norm
-            break
-        if norm in {"tactical", "hunting"}:
-            out["filters"]["knife_type__not"] = norm.title()
-            break
-        out["filters"]["text_search__not"] = norm
-        break
+    # - "excluding the Damascus and Traditions versions"
+    m_ex = re.search(r"\b(?:except|without|exclude|excluding)\s+(.+)$", q)
+    if m_ex:
+        raw_tail = m_ex.group(1).strip()
+        raw_tail = re.sub(r"[?.!,;:]+$", "", raw_tail).strip()
+        raw_tail = re.sub(r"\b(versions?|models?|knives?|ones?)\b", " ", raw_tail).strip()
+        parts = [p.strip(" -") for p in re.split(r"\s+(?:and|or)\s+|,", raw_tail) if p.strip(" -")]
+        series_ex: list[str] = []
+        type_ex: list[str] = []
+        text_ex: list[str] = []
+        for part in parts:
+            norm = _reporting_normalize_filter_value("text_search", part)
+            if not norm:
+                continue
+            series_norm = _reporting_normalize_filter_value("series_name", norm)
+            if series_norm and series_norm in REPORTING_SERIES_ALIASES.values():
+                if series_norm not in series_ex:
+                    series_ex.append(series_norm)
+                continue
+            if norm in {"tactical", "hunting"}:
+                val = norm.title()
+                if val not in type_ex:
+                    type_ex.append(val)
+                continue
+            if norm not in text_ex:
+                text_ex.append(norm)
+        if series_ex:
+            out["filters"]["series_name__not"] = series_ex if len(series_ex) > 1 else series_ex[0]
+        if type_ex:
+            out["filters"]["knife_type__not"] = type_ex if len(type_ex) > 1 else type_ex[0]
+        if text_ex:
+            out["filters"]["text_search__not"] = text_ex if len(text_ex) > 1 else text_ex[0]
 
     # Family extraction only for explicit missing-family phrasing; avoid broad false captures.
     family_patterns = [
@@ -1294,6 +1467,7 @@ def _reporting_llm_plan(
     context_block: str,
     schema_context: str,
 ) -> Optional[dict[str, Any]]:
+    retrieval_ctx = format_retrieval_context(retrieve_artifacts(question, top_k=6))
     system = (
         "You convert collection questions into semantic JSON plans. "
         "Return JSON only with keys: intent, filters, group_by, metric, limit, date_start, date_end, year_compare. "
@@ -1306,6 +1480,7 @@ def _reporting_llm_plan(
     )
     user = (
         f"Schema:\n{schema_context}\n\n"
+        f"Retrieved grounding:\n{retrieval_ctx or '(none)'}\n\n"
         f"Context:\n{context_block or '(none)'}\n\n"
         f"Question:\n{question}\n"
     )
@@ -1392,6 +1567,9 @@ def _reporting_semantic_plan(
         plan["intent"] = explicit["intent"]
     if explicit.get("metric") in REPORTING_METRICS:
         plan["metric"] = explicit["metric"]
+    # Follow-up list/detail prompts should not carry aggregate-only metrics forward.
+    if plan.get("intent") == "list_inventory" and plan.get("metric") not in {"count", "total_estimated_value"}:
+        plan["metric"] = "count"
     if explicit.get("scope") in {"inventory", "catalog"}:
         plan["scope"] = explicit["scope"]
     if explicit.get("group_by") in REPORTING_GROUPABLE_DIMENSIONS.values():
@@ -1475,6 +1653,11 @@ def _reporting_plan_to_sql_legacy(
             return f"lower(COALESCE({k}, '')) = lower('{ev}')"
         return f"lower(COALESCE({k}, '')) LIKE lower('%{ev}%')"
 
+    def values_of(v: Any) -> list[str]:
+        if isinstance(v, list):
+            return [str(x) for x in v if str(x).strip()]
+        return [str(v)] if str(v or "").strip() else []
+
     model_filter_cols = {
         "series_name", "family_name", "knife_type", "form_name", "collaborator_name", "steel", "text_search",
         "series_name__not", "family_name__not", "knife_type__not", "form_name__not", "collaborator_name__not", "steel__not", "text_search__not",
@@ -1495,31 +1678,34 @@ def _reporting_plan_to_sql_legacy(
             if catalog_style and base_k in {"condition", "location"}:
                 continue
             if base_k == "text_search":
-                ev = esc(v)
-                if catalog_style:
-                    expr = (
-                        "("
-                        "lower(COALESCE(official_name, '')) LIKE lower('%" + ev + "%') OR "
-                        "lower(COALESCE(family_name, '')) LIKE lower('%" + ev + "%') OR "
-                        "lower(COALESCE(form_name, '')) LIKE lower('%" + ev + "%') OR "
-                        "lower(COALESCE(series_name, '')) LIKE lower('%" + ev + "%') OR "
-                        "lower(COALESCE(collaborator_name, '')) LIKE lower('%" + ev + "%')"
-                        ")"
-                    )
-                else:
-                    expr = (
-                        "("
-                        "lower(COALESCE(knife_name, '')) LIKE lower('%" + ev + "%') OR "
-                        "lower(COALESCE(family_name, '')) LIKE lower('%" + ev + "%') OR "
-                        "lower(COALESCE(form_name, '')) LIKE lower('%" + ev + "%') OR "
-                        "lower(COALESCE(series_name, '')) LIKE lower('%" + ev + "%') OR "
-                        "lower(COALESCE(collaborator_name, '')) LIKE lower('%" + ev + "%')"
-                        ")"
-                    )
-                w.append(f"NOT {expr}" if negate else expr)
+                vals = values_of(v)
+                for raw_val in vals:
+                    ev = esc(raw_val)
+                    if catalog_style:
+                        expr = (
+                            "("
+                            "lower(COALESCE(official_name, '')) LIKE lower('%" + ev + "%') OR "
+                            "lower(COALESCE(family_name, '')) LIKE lower('%" + ev + "%') OR "
+                            "lower(COALESCE(form_name, '')) LIKE lower('%" + ev + "%') OR "
+                            "lower(COALESCE(series_name, '')) LIKE lower('%" + ev + "%') OR "
+                            "lower(COALESCE(collaborator_name, '')) LIKE lower('%" + ev + "%')"
+                            ")"
+                        )
+                    else:
+                        expr = (
+                            "("
+                            "lower(COALESCE(knife_name, '')) LIKE lower('%" + ev + "%') OR "
+                            "lower(COALESCE(family_name, '')) LIKE lower('%" + ev + "%') OR "
+                            "lower(COALESCE(form_name, '')) LIKE lower('%" + ev + "%') OR "
+                            "lower(COALESCE(series_name, '')) LIKE lower('%" + ev + "%') OR "
+                            "lower(COALESCE(collaborator_name, '')) LIKE lower('%" + ev + "%')"
+                            ")"
+                        )
+                    w.append(f"NOT {expr}" if negate else expr)
                 continue
-            expr = cond(base_k, v, exact=(base_k in {"series_name", "knife_type", "condition"}))
-            w.append(f"NOT ({expr})" if negate else expr)
+            for raw_val in values_of(v):
+                expr = cond(base_k, raw_val, exact=(base_k in {"series_name", "knife_type", "condition"}))
+                w.append(f"NOT ({expr})" if negate else expr)
         return w
 
     if intent == "completion_cost":
@@ -1530,19 +1716,21 @@ def _reporting_plan_to_sql_legacy(
             negate = k.endswith("__not")
             base_k = k[:-5] if negate else k
             if base_k == "text_search":
-                ev = esc(v)
-                expr = (
-                    "("
-                    "lower(COALESCE(m.official_name, '')) LIKE lower('%" + ev + "%') OR "
-                    "lower(COALESCE(m.family_name, '')) LIKE lower('%" + ev + "%') OR "
-                    "lower(COALESCE(m.form_name, '')) LIKE lower('%" + ev + "%') OR "
-                    "lower(COALESCE(m.series_name, '')) LIKE lower('%" + ev + "%')"
-                    ")"
-                )
-                where.append(f"NOT {expr}" if negate else expr)
+                for raw_val in values_of(v):
+                    ev = esc(raw_val)
+                    expr = (
+                        "("
+                        "lower(COALESCE(m.official_name, '')) LIKE lower('%" + ev + "%') OR "
+                        "lower(COALESCE(m.family_name, '')) LIKE lower('%" + ev + "%') OR "
+                        "lower(COALESCE(m.form_name, '')) LIKE lower('%" + ev + "%') OR "
+                        "lower(COALESCE(m.series_name, '')) LIKE lower('%" + ev + "%')"
+                        ")"
+                    )
+                    where.append(f"NOT {expr}" if negate else expr)
                 continue
-            expr = cond(f"m.{base_k}", v, exact=(base_k in {"series_name", "knife_type"}))
-            where.append(f"NOT ({expr})" if negate else expr)
+            for raw_val in values_of(v):
+                expr = cond(f"m.{base_k}", raw_val, exact=(base_k in {"series_name", "knife_type"}))
+                where.append(f"NOT ({expr})" if negate else expr)
         sql = (
             "SELECT "
             "COUNT(*) AS missing_models_count, "
@@ -1563,19 +1751,21 @@ def _reporting_plan_to_sql_legacy(
             negate = k.endswith("__not")
             base_k = k[:-5] if negate else k
             if base_k == "text_search":
-                ev = esc(v)
-                expr = (
-                    "("
-                    "lower(COALESCE(m.official_name, '')) LIKE lower('%" + ev + "%') OR "
-                    "lower(COALESCE(m.family_name, '')) LIKE lower('%" + ev + "%') OR "
-                    "lower(COALESCE(m.form_name, '')) LIKE lower('%" + ev + "%') OR "
-                    "lower(COALESCE(m.series_name, '')) LIKE lower('%" + ev + "%')"
-                    ")"
-                )
-                where.append(f"NOT {expr}" if negate else expr)
+                for raw_val in values_of(v):
+                    ev = esc(raw_val)
+                    expr = (
+                        "("
+                        "lower(COALESCE(m.official_name, '')) LIKE lower('%" + ev + "%') OR "
+                        "lower(COALESCE(m.family_name, '')) LIKE lower('%" + ev + "%') OR "
+                        "lower(COALESCE(m.form_name, '')) LIKE lower('%" + ev + "%') OR "
+                        "lower(COALESCE(m.series_name, '')) LIKE lower('%" + ev + "%')"
+                        ")"
+                    )
+                    where.append(f"NOT {expr}" if negate else expr)
                 continue
-            expr = cond(f"m.{base_k}", v, exact=(base_k in {"series_name", "knife_type"}))
-            where.append(f"NOT ({expr})" if negate else expr)
+            for raw_val in values_of(v):
+                expr = cond(f"m.{base_k}", raw_val, exact=(base_k in {"series_name", "knife_type"}))
+                where.append(f"NOT ({expr})" if negate else expr)
         sql = (
             "SELECT m.model_id, m.official_name, m.knife_type, m.family_name, m.form_name, "
             "m.series_name, m.collaborator_name, m.record_status, COALESCE(inv.total_qty, 0) AS inventory_quantity "
