@@ -198,3 +198,98 @@ class CanonicalReportingPlan(BaseModel):
             "needs_clarification": self.needs_clarification,
             "clarification_reason": self.clarification_reason,
         }
+
+    @classmethod
+    def from_legacy_semantic_plan(cls, plan: dict[str, Any]) -> "CanonicalReportingPlan":
+        """Adapt the current legacy semantic-plan dict to canonical typed shape."""
+        raw_intent = str(plan.get("intent") or "list_inventory").strip().lower()
+        intent_map = {
+            "list_inventory": PlanIntent.LIST,
+            "aggregate": PlanIntent.AGGREGATE,
+            "missing_models": PlanIntent.MISSING_MODELS,
+            "compare": PlanIntent.COMPARE,
+            "completion_cost": PlanIntent.COMPLETION_COST,
+            "list": PlanIntent.LIST,
+        }
+        intent = intent_map.get(raw_intent, PlanIntent.LIST)
+
+        raw_metric = str(plan.get("metric") or "count").strip().lower()
+        metric_map = {
+            "count": PlanMetric.COUNT,
+            "total_spend": PlanMetric.TOTAL_SPEND,
+            "total_estimated_value": PlanMetric.ESTIMATED_VALUE,
+            "estimated_value": PlanMetric.ESTIMATED_VALUE,
+            "msrp": PlanMetric.MSRP,
+        }
+        metric = metric_map.get(raw_metric, PlanMetric.COUNT)
+
+        group_by_values: list[PlanDimension] = []
+        group_raw = plan.get("group_by")
+        if isinstance(group_raw, str) and group_raw.strip():
+            try:
+                group_by_values = [PlanDimension(group_raw.strip())]
+            except ValueError:
+                group_by_values = []
+        elif isinstance(group_raw, list):
+            for item in group_raw:
+                try:
+                    group_by_values.append(PlanDimension(str(item).strip()))
+                except ValueError:
+                    continue
+
+        filters: list[FilterClause] = []
+        exclusions: list[FilterClause] = []
+        for key, value in dict(plan.get("filters") or {}).items():
+            if value is None:
+                continue
+            base_key = str(key).strip()
+            negate = base_key.endswith("__not")
+            field_name = base_key[:-5] if negate else base_key
+            try:
+                field = PlanField(field_name)
+            except ValueError:
+                continue
+            clause = FilterClause(
+                field=field,
+                op=FilterOp.EQ,
+                value=value,
+            )
+            if negate:
+                exclusions.append(clause)
+            else:
+                filters.append(clause)
+
+        time_range = None
+        if plan.get("date_start") or plan.get("date_end") or plan.get("date_label"):
+            time_range = TimeRange(
+                start=(str(plan.get("date_start")) if plan.get("date_start") else None),
+                end=(str(plan.get("date_end")) if plan.get("date_end") else None),
+                label=(str(plan.get("date_label")) if plan.get("date_label") else None),
+            )
+
+        years: list[int] = []
+        for y in list(plan.get("year_compare") or []):
+            try:
+                years.append(int(str(y)))
+            except (TypeError, ValueError):
+                continue
+
+        scope_raw = str(plan.get("scope") or "inventory").strip().lower()
+        scope = PlanScope.CATALOG if scope_raw == "catalog" else PlanScope.INVENTORY
+
+        return cls(
+            intent=intent,
+            scope=scope,
+            metric=metric,
+            group_by=group_by_values,
+            filters=filters,
+            exclusions=exclusions,
+            time_range=time_range,
+            year_compare=years,
+            sort=None,
+            limit=plan.get("limit"),
+            needs_clarification=bool(plan.get("needs_clarification")),
+            clarification_reason=(
+                str(plan.get("clarification_reason")).strip() if plan.get("clarification_reason") else None
+            ),
+        )

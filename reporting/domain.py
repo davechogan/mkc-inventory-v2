@@ -53,6 +53,8 @@ from reporting.regex_contract import (
     clean_llm_sql_fences,
     extract_first_json_object,
 )
+from reporting.plan_models import CanonicalReportingPlan
+from reporting.plan_validator import validate_canonical_structure, validate_canonical_semantics
 
 _ConnectionCtx = AbstractContextManager[sqlite3.Connection]
 GetConn = Callable[[], _ConnectionCtx]
@@ -103,6 +105,25 @@ REPORTING_SERIES_ALIASES = {
 }
 REPORTING_METRICS = {"count", "total_spend", "total_estimated_value"}
 REPORTING_HINT_MIN_CONFIDENCE = 0.55
+
+# Debug A/B toggle: when enabled, bypass semantic planning + SQL compiler and
+# ask the LLM to generate SQL directly (while still running SQL through the
+# existing safety validator + executor).
+REPORTING_DIRECT_LLM_SQL_META_KEY = "reporting_direct_llm_sql"
+
+
+def _reporting_direct_llm_sql_enabled(conn: sqlite3.Connection) -> bool:
+    """
+    Read the current debug toggle from `app_meta`.
+
+    Stored as a string value; truthy values match `reporting_scope_preprocessing_enabled()`.
+    """
+    row = conn.execute(
+        "SELECT value FROM app_meta WHERE key = ?",
+        (REPORTING_DIRECT_LLM_SQL_META_KEY,),
+    ).fetchone()
+    raw = (row.get("value") if row else None) if isinstance(row, dict) else None
+    return reporting_scope_preprocessing_enabled(raw)
 
 def reporting_scope_preprocessing_enabled(raw: Optional[str]) -> bool:
     """Parse ``REPORTING_SCOPE_PREPROCESSING``. Unset/empty -> False (matches legacy ``if False and …``)."""
@@ -1399,11 +1420,26 @@ def _reporting_semantic_plan(
     if plan["scope"] not in {"inventory", "catalog"}:
         plan["scope"] = "inventory"
 
-    return plan, {
+    canonical_candidate = CanonicalReportingPlan.from_legacy_semantic_plan(plan)
+    structural = validate_canonical_structure(canonical_candidate.model_dump())
+    if not structural.valid:
+        err = "; ".join(structural.errors[:3]) or "Invalid canonical plan."
+        raise HTTPException(status_code=400, detail=f"Planner produced invalid plan structure: {err}")
+    canonical_valid = structural.canonical_plan
+    if canonical_valid is None:
+        raise HTTPException(status_code=400, detail="Planner produced invalid canonical plan structure.")
+    # Semantic validation is performed in run_reporting_query before compilation.
+    normalized_plan = canonical_valid.to_legacy_semantic_plan()
+
+    return normalized_plan, {
         "mode": mode,
         "planner_attempts": planner_attempts,
         "hint_ids": learned_hints.get("hint_ids") or [],
         "hints": learned_hints.get("hints") or [],
+        "plan_validation": {
+            "structural": structural.classification,
+            "semantic": "pending",
+        },
     }
 
 
@@ -2319,6 +2355,10 @@ def run_reporting_query(
         sql_meta: dict[str, Any] = {}
         hint_ids_used: list[int] = []
 
+        # Test / A/B mode: bypass semantic planning + deterministic SQL compiler.
+        # Keep SQL safety validation/execution exactly the same.
+        direct_llm_sql = _reporting_direct_llm_sql_enabled(conn)
+
         # Explicit compare mode remains template-backed for predictable behavior.
         if payload.compare_dimension and payload.compare_value_a and payload.compare_value_b:
             sql, sql_meta = _reporting_template_sql(
@@ -2329,6 +2369,18 @@ def run_reporting_query(
                 compare_a=payload.compare_value_a,
                 compare_b=payload.compare_value_b,
             )
+        elif direct_llm_sql:
+            # Skip _reporting_semantic_plan() and _reporting_plan_to_sql().
+            # Let the LLM generate SQL directly from the question + schema/context.
+            sql, llm_meta = _reporting_call_llm_for_sql(
+                conn,
+                planner_model,
+                question,
+                context_block,
+                date_start,
+                date_end,
+            )
+            sql_meta = {**llm_meta, "mode": "direct_llm_sql"}
         else:
             semantic_plan, semantic_meta = _reporting_semantic_plan(
                 conn,
