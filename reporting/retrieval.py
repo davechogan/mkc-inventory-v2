@@ -6,6 +6,7 @@ execute SQL or bypass canonical planning/validation boundaries.
 
 from __future__ import annotations
 
+import json
 import math
 import os
 from dataclasses import dataclass
@@ -20,7 +21,7 @@ class RetrievalArtifact:
     tags: tuple[str, ...] = ()
 
 
-RETRIEVAL_ARTIFACTS: tuple[RetrievalArtifact, ...] = (
+DEFAULT_RETRIEVAL_ARTIFACTS: tuple[RetrievalArtifact, ...] = (
     RetrievalArtifact(
         artifact_id="intent.aggregate.value_by_family",
         kind="intent",
@@ -87,10 +88,110 @@ RETRIEVAL_ARTIFACTS: tuple[RetrievalArtifact, ...] = (
 
 RETRIEVAL_BACKEND = (os.environ.get("REPORTING_RETRIEVAL_BACKEND") or "lexical").strip().lower()
 RETRIEVAL_EMBED_MODEL = (os.environ.get("REPORTING_RETRIEVAL_EMBED_MODEL") or "all-MiniLM-L6-v2").strip()
+RETRIEVAL_ARTIFACTS_PATH = (
+    os.environ.get("REPORTING_RETRIEVAL_ARTIFACTS_PATH")
+    or os.path.join(os.path.dirname(__file__), "retrieval_artifacts.json")
+).strip()
+RETRIEVAL_VECTOR_INDEX_PATH = (
+    os.environ.get("REPORTING_RETRIEVAL_VECTOR_INDEX_PATH")
+    or os.path.join(os.path.dirname(__file__), "retrieval_vector_index.json")
+).strip()
+RETRIEVAL_CHROMA_PATH = (
+    os.environ.get("REPORTING_RETRIEVAL_CHROMA_PATH")
+    or os.path.join(os.path.dirname(__file__), ".chroma")
+).strip()
+RETRIEVAL_CHROMA_COLLECTION = (os.environ.get("REPORTING_RETRIEVAL_CHROMA_COLLECTION") or "reporting_retrieval_artifacts").strip()
 
 _EMBEDDER = None
 _EMBEDDER_INIT_ERROR: str | None = None
 _ARTIFACT_VECTORS: list[tuple[RetrievalArtifact, list[float]]] | None = None
+_ARTIFACTS_LOAD_ERROR: str | None = None
+_ARTIFACTS_SOURCE: str = "builtin_default"
+_VECTOR_INDEX_LOAD_ERROR: str | None = None
+_CHROMA_CLIENT = None
+_CHROMA_INIT_ERROR: str | None = None
+_CHROMA_LAST_ERROR: str | None = None
+
+
+def _validate_artifact_payload(payload: object) -> tuple[tuple[RetrievalArtifact, ...], str | None]:
+    if not isinstance(payload, list):
+        return (), "catalog payload must be a list"
+    out: list[RetrievalArtifact] = []
+    for idx, item in enumerate(payload):
+        if not isinstance(item, dict):
+            return (), f"artifact[{idx}] must be an object"
+        artifact_id = str(item.get("artifact_id") or "").strip()
+        kind = str(item.get("kind") or "").strip()
+        content = str(item.get("content") or "").strip()
+        tags_in = item.get("tags") or []
+        if not artifact_id or not kind or not content:
+            return (), f"artifact[{idx}] missing required fields"
+        if not isinstance(tags_in, list):
+            return (), f"artifact[{idx}].tags must be a list"
+        tags = tuple(str(t).strip().lower() for t in tags_in if str(t).strip())
+        out.append(
+            RetrievalArtifact(
+                artifact_id=artifact_id,
+                kind=kind,
+                content=content,
+                tags=tags,
+            )
+        )
+    if not out:
+        return (), "catalog is empty"
+    return tuple(out), None
+
+
+def _load_artifacts_from_file(path: str) -> tuple[tuple[RetrievalArtifact, ...], str | None]:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except Exception as exc:
+        return (), f"unable to read artifact catalog: {exc}"
+    return _validate_artifact_payload(payload)
+
+
+def _resolve_artifacts() -> tuple[tuple[RetrievalArtifact, ...], str, str | None]:
+    loaded, err = _load_artifacts_from_file(RETRIEVAL_ARTIFACTS_PATH)
+    if loaded:
+        return loaded, f"file:{RETRIEVAL_ARTIFACTS_PATH}", None
+    return DEFAULT_RETRIEVAL_ARTIFACTS, "builtin_default", err
+
+
+RETRIEVAL_ARTIFACTS, _ARTIFACTS_SOURCE, _ARTIFACTS_LOAD_ERROR = _resolve_artifacts()
+
+
+def get_retrieval_status() -> dict[str, object]:
+    """Return retrieval runtime status for diagnostics."""
+    return {
+        "configured_backend": RETRIEVAL_BACKEND,
+        "embed_model": RETRIEVAL_EMBED_MODEL,
+        "artifacts_path": RETRIEVAL_ARTIFACTS_PATH,
+        "artifact_source": _ARTIFACTS_SOURCE,
+        "artifact_load_error": _ARTIFACTS_LOAD_ERROR,
+        "artifact_count": len(RETRIEVAL_ARTIFACTS),
+        "vector_index_path": RETRIEVAL_VECTOR_INDEX_PATH,
+        "vector_index_error": _VECTOR_INDEX_LOAD_ERROR,
+        "chroma_path": RETRIEVAL_CHROMA_PATH,
+        "chroma_collection": RETRIEVAL_CHROMA_COLLECTION,
+        "chroma_ready": _CHROMA_CLIENT is not None and _CHROMA_INIT_ERROR is None,
+        "chroma_error": (_CHROMA_LAST_ERROR or _CHROMA_INIT_ERROR),
+        "embedder_ready": _EMBEDDER is not None and _EMBEDDER_INIT_ERROR is None,
+        "embedder_error": _EMBEDDER_INIT_ERROR,
+    }
+
+
+def reload_retrieval_artifacts() -> dict[str, object]:
+    """Reload retrieval artifacts from disk and clear derived caches."""
+    global RETRIEVAL_ARTIFACTS, _ARTIFACTS_SOURCE, _ARTIFACTS_LOAD_ERROR, _ARTIFACT_VECTORS, _VECTOR_INDEX_LOAD_ERROR, _CHROMA_LAST_ERROR
+    RETRIEVAL_ARTIFACTS, _ARTIFACTS_SOURCE, _ARTIFACTS_LOAD_ERROR = _resolve_artifacts()
+    # Force re-embedding with current catalog on next embedding retrieval call.
+    _ARTIFACT_VECTORS = None
+    _VECTOR_INDEX_LOAD_ERROR = None
+    _CHROMA_LAST_ERROR = None
+    status = get_retrieval_status()
+    status["reloaded"] = True
+    return status
 
 
 def _tokens(text: str) -> set[str]:
@@ -181,48 +282,247 @@ def _embedding_retrieve(question: str, top_k: int) -> list[RetrievalArtifact]:
         return _lexical_retrieve(question, top_k)
 
 
-def retrieve_artifacts_with_meta(question: str, top_k: int = 5) -> tuple[list[RetrievalArtifact], dict[str, object]]:
-    """Retrieve artifacts plus backend metadata for telemetry/debugging."""
+def _save_vector_index(path: str, *, vectors: list[tuple[RetrievalArtifact, list[float]]], model_name: str) -> str | None:
+    payload = {
+        "model": model_name,
+        "artifacts_path": RETRIEVAL_ARTIFACTS_PATH,
+        "artifact_source": _ARTIFACTS_SOURCE,
+        "entries": [{"artifact_id": art.artifact_id, "vector": vec} for art, vec in vectors],
+    }
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+        return None
+    except Exception as exc:
+        return str(exc)
+
+
+def _load_vector_index(path: str) -> tuple[list[tuple[RetrievalArtifact, list[float]]] | None, str | None]:
+    if not os.path.exists(path):
+        return None, "index_missing"
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except Exception as exc:
+        return None, f"index_read_error: {exc}"
+    if not isinstance(payload, dict):
+        return None, "index_payload_invalid"
+    if str(payload.get("model") or "") != RETRIEVAL_EMBED_MODEL:
+        return None, "index_model_mismatch"
+    entries = payload.get("entries")
+    if not isinstance(entries, list):
+        return None, "index_entries_invalid"
+    by_id = {a.artifact_id: a for a in RETRIEVAL_ARTIFACTS}
+    loaded: list[tuple[RetrievalArtifact, list[float]]] = []
+    for item in entries:
+        if not isinstance(item, dict):
+            continue
+        aid = str(item.get("artifact_id") or "")
+        vec = item.get("vector")
+        art = by_id.get(aid)
+        if art is None or not isinstance(vec, list):
+            continue
+        try:
+            loaded.append((art, [float(x) for x in vec]))
+        except Exception:
+            continue
+    if not loaded:
+        return None, "index_empty_or_incompatible"
+    return loaded, None
+
+
+def _ensure_vector_index() -> tuple[list[tuple[RetrievalArtifact, list[float]]] | None, str | None]:
+    global _ARTIFACT_VECTORS
+    if _ARTIFACT_VECTORS is not None:
+        return _ARTIFACT_VECTORS, None
+    loaded, err = _load_vector_index(RETRIEVAL_VECTOR_INDEX_PATH)
+    if loaded is not None:
+        _ARTIFACT_VECTORS = loaded
+        return loaded, None
+    embedder = _get_embedder()
+    if embedder is None:
+        return None, (_EMBEDDER_INIT_ERROR or err or "embedder_unavailable")
+    try:
+        texts = [_artifact_text(a) for a in RETRIEVAL_ARTIFACTS]
+        vecs_raw = embedder.encode(texts, normalize_embeddings=True)
+        built: list[tuple[RetrievalArtifact, list[float]]] = []
+        for art, v in zip(RETRIEVAL_ARTIFACTS, vecs_raw):
+            built.append((art, [float(x) for x in list(v)]))
+        _ARTIFACT_VECTORS = built
+        write_err = _save_vector_index(RETRIEVAL_VECTOR_INDEX_PATH, vectors=built, model_name=RETRIEVAL_EMBED_MODEL)
+        return built, write_err
+    except Exception as exc:
+        return None, str(exc)
+
+
+def _vector_retrieve(question: str, top_k: int) -> tuple[list[RetrievalArtifact], str | None]:
+    vectors, err = _ensure_vector_index()
+    if not vectors:
+        return _lexical_retrieve(question, top_k), err
+    embedder = _get_embedder()
+    if embedder is None:
+        return _lexical_retrieve(question, top_k), (_EMBEDDER_INIT_ERROR or "embedder_unavailable")
+    try:
+        q_vec_raw = embedder.encode([question], normalize_embeddings=True)[0]
+        q_vec = [float(x) for x in list(q_vec_raw)]
+        scored: list[tuple[float, RetrievalArtifact]] = []
+        for art, vec in vectors:
+            scored.append((_cosine(q_vec, vec), art))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        selected = [a for score, a in scored[:top_k] if score > -0.5]
+        return selected or _lexical_retrieve(question, top_k), err
+    except Exception as exc:
+        return _lexical_retrieve(question, top_k), str(exc)
+
+
+def _get_chroma_client():
+    global _CHROMA_CLIENT, _CHROMA_INIT_ERROR
+    if _CHROMA_CLIENT is not None:
+        return _CHROMA_CLIENT, None
+    if _CHROMA_INIT_ERROR is not None:
+        return None, _CHROMA_INIT_ERROR
+    try:
+        import chromadb  # type: ignore
+
+        _CHROMA_CLIENT = chromadb.PersistentClient(path=RETRIEVAL_CHROMA_PATH)
+        return _CHROMA_CLIENT, None
+    except Exception as exc:
+        _CHROMA_INIT_ERROR = str(exc)
+        return None, _CHROMA_INIT_ERROR
+
+
+def _chroma_retrieve(question: str, top_k: int) -> tuple[list[RetrievalArtifact], str | None]:
+    client, err = _get_chroma_client()
+    if client is None:
+        return _lexical_retrieve(question, top_k), err
+    by_id = {a.artifact_id: a for a in RETRIEVAL_ARTIFACTS}
+    try:
+        collection = client.get_or_create_collection(name=RETRIEVAL_CHROMA_COLLECTION)
+        ids = [a.artifact_id for a in RETRIEVAL_ARTIFACTS]
+        docs = [_artifact_text(a) for a in RETRIEVAL_ARTIFACTS]
+        metas = [{"kind": a.kind} for a in RETRIEVAL_ARTIFACTS]
+        embedder = _get_embedder()
+        if embedder is not None:
+            embeds_raw = embedder.encode(docs, normalize_embeddings=True)
+            embeds = [[float(x) for x in list(v)] for v in embeds_raw]
+            collection.upsert(ids=ids, documents=docs, embeddings=embeds, metadatas=metas)
+            q_vec_raw = embedder.encode([question], normalize_embeddings=True)[0]
+            q_vec = [float(x) for x in list(q_vec_raw)]
+            res = collection.query(query_embeddings=[q_vec], n_results=max(1, int(top_k)))
+        else:
+            # Chroma can run with its own embedding function; this keeps sentence-transformers optional.
+            collection.upsert(ids=ids, documents=docs, metadatas=metas)
+            res = collection.query(query_texts=[question], n_results=max(1, int(top_k)))
+        out_ids = (((res or {}).get("ids") or [[]])[0]) if isinstance(res, dict) else []
+        selected: list[RetrievalArtifact] = []
+        for aid in out_ids:
+            art = by_id.get(str(aid))
+            if art and art not in selected:
+                selected.append(art)
+        return selected or _lexical_retrieve(question, top_k), None
+    except Exception as exc:
+        return _lexical_retrieve(question, top_k), str(exc)
+
+
+def retrieve_artifacts_with_meta(
+    question: str, top_k: int = 5, *, backend: str | None = None
+) -> tuple[list[RetrievalArtifact], dict[str, object]]:
+    """Retrieve artifacts plus backend metadata for telemetry/debugging.
+
+    When ``backend`` is provided, it overrides :data:`RETRIEVAL_BACKEND` for this
+    call only (used by benchmarks/tests; production callers should omit it).
+    """
+    global _VECTOR_INDEX_LOAD_ERROR, _CHROMA_LAST_ERROR
     k = max(1, int(top_k))
-    configured_backend = RETRIEVAL_BACKEND
-    if configured_backend != "embedding":
+    configured_backend = (backend or RETRIEVAL_BACKEND).strip().lower()
+    if configured_backend not in {"embedding", "vector", "chroma"}:
         artifacts = _lexical_retrieve(question, k)
         return artifacts, {
+            "artifact_source": _ARTIFACTS_SOURCE,
             "configured_backend": configured_backend,
             "effective_backend": "lexical",
             "embedder_ready": False,
             "fallback_used": False,
             "artifact_ids": [a.artifact_id for a in artifacts],
+            "artifact_load_error": _ARTIFACTS_LOAD_ERROR,
+            "vector_index_path": RETRIEVAL_VECTOR_INDEX_PATH,
+            "vector_index_error": _VECTOR_INDEX_LOAD_ERROR,
+            "chroma_path": RETRIEVAL_CHROMA_PATH,
+            "chroma_collection": RETRIEVAL_CHROMA_COLLECTION,
+            "chroma_error": (_CHROMA_LAST_ERROR or _CHROMA_INIT_ERROR),
+        }
+    if configured_backend == "chroma":
+        artifacts, chroma_err = _chroma_retrieve(question, k)
+        _CHROMA_LAST_ERROR = chroma_err
+        return artifacts, {
+            "artifact_source": _ARTIFACTS_SOURCE,
+            "configured_backend": "chroma",
+            "effective_backend": ("chroma" if not chroma_err else "lexical"),
+            "embedder_ready": _EMBEDDER is not None and _EMBEDDER_INIT_ERROR is None,
+            "fallback_used": bool(chroma_err),
+            "fallback_reason": (chroma_err or "")[:240] if chroma_err else None,
+            "chroma_path": RETRIEVAL_CHROMA_PATH,
+            "chroma_collection": RETRIEVAL_CHROMA_COLLECTION,
+            "chroma_error": (_CHROMA_LAST_ERROR or _CHROMA_INIT_ERROR),
+            "embed_model": RETRIEVAL_EMBED_MODEL,
+            "artifact_ids": [a.artifact_id for a in artifacts],
+            "artifact_load_error": _ARTIFACTS_LOAD_ERROR,
+            "vector_index_path": RETRIEVAL_VECTOR_INDEX_PATH,
+            "vector_index_error": _VECTOR_INDEX_LOAD_ERROR,
+        }
+    if configured_backend == "vector":
+        artifacts, vector_err = _vector_retrieve(question, k)
+        _VECTOR_INDEX_LOAD_ERROR = vector_err
+        return artifacts, {
+            "artifact_source": _ARTIFACTS_SOURCE,
+            "configured_backend": "vector",
+            "effective_backend": ("vector" if not vector_err else "lexical"),
+            "embedder_ready": _EMBEDDER is not None and _EMBEDDER_INIT_ERROR is None,
+            "fallback_used": bool(vector_err),
+            "fallback_reason": (vector_err or "")[:240] if vector_err else None,
+            "vector_index_path": RETRIEVAL_VECTOR_INDEX_PATH,
+            "vector_index_error": _VECTOR_INDEX_LOAD_ERROR,
+            "embed_model": RETRIEVAL_EMBED_MODEL,
+            "artifact_ids": [a.artifact_id for a in artifacts],
+            "artifact_load_error": _ARTIFACTS_LOAD_ERROR,
         }
     embedder = _get_embedder()
     if embedder is None:
         artifacts = _lexical_retrieve(question, k)
         return artifacts, {
+            "artifact_source": _ARTIFACTS_SOURCE,
             "configured_backend": "embedding",
             "effective_backend": "lexical",
             "embedder_ready": False,
             "fallback_used": True,
             "fallback_reason": (_EMBEDDER_INIT_ERROR or "embedder_unavailable")[:240],
             "artifact_ids": [a.artifact_id for a in artifacts],
+            "artifact_load_error": _ARTIFACTS_LOAD_ERROR,
+            "vector_index_path": RETRIEVAL_VECTOR_INDEX_PATH,
+            "vector_index_error": _VECTOR_INDEX_LOAD_ERROR,
         }
     artifacts = _embedding_retrieve(question, k)
     return artifacts, {
+        "artifact_source": _ARTIFACTS_SOURCE,
         "configured_backend": "embedding",
         "effective_backend": "embedding",
         "embedder_ready": True,
         "fallback_used": False,
         "embed_model": RETRIEVAL_EMBED_MODEL,
         "artifact_ids": [a.artifact_id for a in artifacts],
+        "artifact_load_error": _ARTIFACTS_LOAD_ERROR,
+        "vector_index_path": RETRIEVAL_VECTOR_INDEX_PATH,
+        "vector_index_error": _VECTOR_INDEX_LOAD_ERROR,
     }
 
 
-def retrieve_artifacts(question: str, top_k: int = 5) -> list[RetrievalArtifact]:
+def retrieve_artifacts(question: str, top_k: int = 5, *, backend: str | None = None) -> list[RetrievalArtifact]:
     """Retrieve best-fit semantic artifacts for a question.
 
     Retrieval is lexical for now and deterministic. It is intentionally simple
     but establishes the canonical retrieval boundary and artifact contract.
     """
-    artifacts, _meta = retrieve_artifacts_with_meta(question, top_k=top_k)
+    artifacts, _meta = retrieve_artifacts_with_meta(question, top_k=top_k, backend=backend)
     return artifacts
 
 

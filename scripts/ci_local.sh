@@ -34,6 +34,7 @@ fi
 "$PY" -m py_compile routes/admin_routes.py
 "$PY" -m py_compile sqlite_schema.py
 "$PY" -m py_compile tools/reporting_eval_harness.py
+"$PY" -m py_compile tools/reporting_retrieval_benchmark.py
 "$PY" -m pytest -q
 
 if [[ "${VERIFY_IMPORT_APP:-}" == "1" ]]; then
