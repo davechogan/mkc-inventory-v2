@@ -29,6 +29,7 @@ fi
 "$PY" -m py_compile routes/normalized_routes.py
 "$PY" -m py_compile routes/legacy_catalog_routes.py
 "$PY" -m py_compile routes/ai_routes.py
+"$PY" -m py_compile routes/static_pages_routes.py
 "$PY" -m py_compile sqlite_schema.py
 "$PY" -m py_compile tools/reporting_eval_harness.py
 "$PY" -m pytest -q

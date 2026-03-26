@@ -39,6 +39,7 @@ jobs:
           python -m py_compile routes/normalized_routes.py
           python -m py_compile routes/legacy_catalog_routes.py
           python -m py_compile routes/ai_routes.py
+          python -m py_compile routes/static_pages_routes.py
           python -m py_compile sqlite_schema.py
           python -m py_compile tools/reporting_eval_harness.py
           python -m pytest -q

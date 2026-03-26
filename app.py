@@ -41,7 +41,7 @@ import blade_ai
 import identifier_outline_sync
 import normalized_model
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 from sqlite_schema import column_exists
@@ -55,6 +55,7 @@ from reporting.routes import create_reporting_router
 from routes.ai_routes import create_ai_router
 from routes.legacy_catalog_routes import create_legacy_catalog_router
 from routes.normalized_routes import create_normalized_router
+from routes.static_pages_routes import create_static_pages_router
 from routes.v2_routes import create_v2_router
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -2215,21 +2216,8 @@ class IdentifierQuery(BaseModel):
 app = FastAPI(title="MKC Inventory Manager")
 init_db()
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+app.include_router(create_static_pages_router(static_dir=STATIC_DIR))
 
-
-@app.get("/")
-def root():
-    return FileResponse(STATIC_DIR / "index.html")
-
-
-@app.get("/identify")
-def identify_page():
-    return FileResponse(STATIC_DIR / "identify.html")
-
-
-@app.get("/master")
-def master_page():
-    return FileResponse(STATIC_DIR / "master.html")
 
 @app.get("/api/admin/silhouettes/status")
 def admin_silhouettes_status():
