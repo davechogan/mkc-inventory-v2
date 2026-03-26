@@ -21,5 +21,4 @@ Project documentation lives under `docs/` (root `README.md` stays at the reposit
 
 ## Reference (`docs/reference/`)
 
-- [SWAGGER_LIKE_API_REFERENCE.md](reference/SWAGGER_LIKE_API_REFERENCE.md)
 - [REPORTING_EVAL_QUESTION_SET.md](reference/REPORTING_EVAL_QUESTION_SET.md)
