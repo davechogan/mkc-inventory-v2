@@ -79,6 +79,11 @@ def test_run_reporting_query_blocks_semantically_invalid_plan(invapp, monkeypatc
         )
 
     monkeypatch.setattr(reporting_domain, "_reporting_semantic_plan", fake_semantic_plan)
+    monkeypatch.setattr(
+        reporting_domain,
+        "_reporting_plan_to_sql",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Compiler should not run for invalid plans")),
+    )
 
     payload = ReportingQueryIn(question="count catalog by condition")
     try:
@@ -87,4 +92,34 @@ def test_run_reporting_query_blocks_semantically_invalid_plan(invapp, monkeypatc
     except Exception as exc:
         detail = getattr(exc, "detail", str(exc))
         assert "Invalid semantic plan" in str(detail)
+
+
+def test_paraphrase_year_compare_normalizes_equivalently(invapp, monkeypatch) -> None:
+    import reporting.domain as reporting_domain
+    from reporting.domain import ReportingQueryIn, run_reporting_query
+
+    # Keep planner output deterministic so equivalence is tested at normalized plan boundary.
+    def fake_ollama_chat(model, system, user_text, images_b64=None, timeout=180.0):
+        if "convert collection questions into semantic JSON plans" in system:
+            return (
+                '{"intent":"aggregate","filters":{},"group_by":"family_name",'
+                '"metric":"total_spend","limit":50,"year_compare":["2024","2025"]}'
+            )
+        if "concise collection reporting assistant" in system:
+            raise RuntimeError("force deterministic fallback")
+        return "{}"
+
+    monkeypatch.setattr(reporting_domain.blade_ai, "ollama_chat", fake_ollama_chat)
+
+    q1 = ReportingQueryIn(question="show me how much i spent in 2024 vs 2025", max_rows=50)
+    q2 = ReportingQueryIn(question="compare my spend in 2024 and 2025", max_rows=50)
+
+    r1 = run_reporting_query(q1, get_conn=invapp.get_conn)
+    r2 = run_reporting_query(q2, get_conn=invapp.get_conn)
+
+    p1 = r1.get("semantic_plan") or {}
+    p2 = r2.get("semantic_plan") or {}
+    assert p1.get("intent") == p2.get("intent") == "aggregate"
+    assert p1.get("metric") == p2.get("metric") == "total_spend"
+    assert p1.get("year_compare") == p2.get("year_compare") == [2024, 2025]
 
