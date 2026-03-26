@@ -1,0 +1,48 @@
+---
+description: Route non-release artifacts to shared Artifacts repo
+alwaysApply: true
+---
+
+# Artifacts Routing Policy
+
+Use `https://github.com/davechogan/Artifacts.git` for non-release assets.
+
+## Decision rule
+
+- If a file is required for app runtime, build, or CI: keep it in this app repo.
+- If a file is historical, investigative, environment-specific, or snapshot data: store it in `Artifacts.git`.
+
+## Artifact mapping (required)
+
+| Artifact type | Target in Artifacts repo |
+|---|---|
+| Architecture plans, implementation specs | `projects/<project-slug>/plans/` |
+| Investigation notes, postmortems | `projects/<project-slug>/plans/` |
+| One-off helper scripts (non-runtime) | `projects/<project-slug>/scripts/` |
+| DB snapshots/backups (compressed) | `projects/<project-slug>/db_snapshots/<YYYY-MM-DD>/` |
+| Exports (CSV/JSON), ad hoc reports | `projects/<project-slug>/exports/<YYYY-MM-DD>/` |
+| Diagnostic logs | `projects/<project-slug>/logs/<YYYY-MM-DD>/` |
+| Provenance/checksums/restore metadata | `projects/<project-slug>/metadata/` |
+
+## Required controls for DB snapshots
+
+- Prefer compressed snapshots (`.zst`/`.gz`), not raw DB when possible.
+- Include `SHA256SUMS.txt` for each snapshot batch.
+- Include provenance metadata (`source repo`, `commit`, `timestamp`, `author`, `artifact list`).
+- Never store secrets/credentials.
+
+## New project onboarding
+
+When creating artifacts for a new project:
+
+1. Clone/open `Artifacts.git`.
+2. Run scaffold:
+   - `scripts/new_project.sh <project-slug> [source-repo-url]`
+3. Add first artifacts under `projects/<project-slug>/...`.
+4. Commit and push in `Artifacts.git`.
+
+## Do not commit to app repo
+
+- `data/*.db`, backup DB snapshots, local logs, exported CSV/JSON artifacts.
+- Machine-local workspace files and worktree internals.
+- Any artifact that is not needed to run/test/release the app.

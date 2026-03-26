@@ -2,14 +2,22 @@
 __pycache__/
 *.py[cod]
 .DS_Store
+.worktrees/
+*.code-workspace
 
 # Local runtime artifacts
 data/*.log
 data/*.db
 data/mkc_inventory.db.backup.*
+data/data._untracked_bak_*/
+data/*.empty-broken.*
 *.db
 *.sqlite
 
 # Machine-local workspace: exports, scratch copies, personal artifacts (see local/README.md)
 /local/**
 !/local/README.md
+
+# Artifact policy reference:
+# Non-release artifacts belong in Artifacts.git per:
+# .cursor/rules/artifacts-repo-workflow.mdc
