@@ -67,7 +67,7 @@ This document tracks alignment with project Cursor rules under `.cursor/rules/` 
 
 | Step | Done | Notes |
 |------|------|--------|
-| Split remaining `app.py` by domain routers | **~** | **`reporting/routes.py`**, **`routes/v2_routes.py`**, **`routes/normalized_routes.py`**, **`routes/legacy_catalog_routes.py`**, **`routes/ai_routes.py`**, **`routes/static_pages_routes.py`** (`/`, `/identify`, `/master`). **Next:** admin/silhouette routes, remaining `app.py` surface. |
+| Split remaining `app.py` by domain routers | **~** | **`reporting/routes.py`**, **`routes/v2_routes.py`**, **`routes/normalized_routes.py`**, **`routes/legacy_catalog_routes.py`**, **`routes/ai_routes.py`**, **`routes/static_pages_routes.py`**, **`routes/admin_routes.py`** (legacy silhouette + distinguishing-features admin). **Next:** remaining `app.py` surface. |
 
 ### Phase 6 — Harness in CI (optional)
 
@@ -105,3 +105,4 @@ This document tracks alignment with project Cursor rules under `.cursor/rules/` 
 | 2026-03-26 | Phase 5 (incremental): `routes/legacy_catalog_routes.py` — legacy catalog + inventory + options API; mounted from `app.py` after `INVENTORY_CSV_COLUMNS`. |
 | 2026-03-26 | Phase 5 (incremental): `routes/ai_routes.py` — Ollama + vision identify; `create_v2_router` returns `(router, run_v2_identify)` for injection; reporting uses returned `ollama_check`. |
 | 2026-03-26 | Phase 5 (incremental): `routes/static_pages_routes.py` — HTML shells for `/`, `/identify`, `/master`; `/static` mount stays on `app`. |
+| 2026-03-26 | Phase 5 (incremental): `routes/admin_routes.py` — `/api/admin/silhouettes/*`, `/api/admin/distinguishing-features/*`; `recompute_silhouettes_for_masters_without_hu` + `DistinguishingFeaturesRecomputeBody` for `init_db` / v2. |
