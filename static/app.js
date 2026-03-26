@@ -283,11 +283,12 @@ function mapV2ModelToMasterRow(r) {
 }
 
 /** Turn FastAPI `detail` (string | object | array of validation errors) into a readable message. */
-function formatApiErrorDetail(detail) {
-  if (detail == null || detail === '') return 'Request failed';
+function formatApiErrorDetail(detail, fallback) {
+  const fb = fallback != null && fallback !== '' ? String(fallback) : 'Request failed';
+  if (detail == null || detail === '') return fb;
   if (typeof detail === 'string') return detail;
   if (Array.isArray(detail)) {
-    return detail
+    const lines = detail
       .map((item) => {
         if (typeof item === 'string') return item;
         if (item && typeof item === 'object') {
@@ -295,6 +296,11 @@ function formatApiErrorDetail(detail) {
           const loc = Array.isArray(item.loc) ? item.loc.filter(Boolean).join(' → ') : '';
           if (msg && loc) return `${loc}: ${msg}`;
           if (msg) return msg;
+          try {
+            return JSON.stringify(item);
+          } catch {
+            return String(item);
+          }
         }
         try {
           return JSON.stringify(item);
@@ -302,17 +308,42 @@ function formatApiErrorDetail(detail) {
           return String(item);
         }
       })
-      .join('\n');
+      .filter(Boolean);
+    if (lines.length) return lines.join('\n');
+    return fb;
   }
   if (typeof detail === 'object') {
     if (detail.msg != null) return String(detail.msg);
     try {
-      return JSON.stringify(detail);
+      const s = JSON.stringify(detail);
+      return s === '{}' ? fb : s;
     } catch {
       return String(detail);
     }
   }
   return String(detail);
+}
+
+/** Safe string for alerts / UI when catch receives Error or plain API body. */
+function userFacingError(err) {
+  if (err == null) return 'Unknown error';
+  if (typeof err === 'string') return err;
+  if (err instanceof Error) {
+    const m = err.message;
+    if (typeof m === 'string' && m.length > 0 && m !== '[object Object]') return m;
+  }
+  if (typeof err === 'object' && err !== null && err.detail != null) {
+    return formatApiErrorDetail(err.detail);
+  }
+  if (typeof err === 'object' && err !== null && typeof err.message === 'string') {
+    const m = err.message;
+    if (m && m !== '[object Object]') return m;
+  }
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return String(err);
+  }
 }
 
 async function api(path, options = {}) {
@@ -325,8 +356,19 @@ async function api(path, options = {}) {
     headers,
   });
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
-    throw new Error(formatApiErrorDetail(error.detail) || 'Request failed');
+    const statusFallback = `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`;
+    const text = await response.text();
+    let parsed = {};
+    if (text) {
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        parsed = { detail: text.length > 600 ? `${text.slice(0, 600)}…` : text };
+      }
+    }
+    const rawDetail = parsed.detail !== undefined ? parsed.detail : parsed.message;
+    const msg = formatApiErrorDetail(rawDetail, statusFallback);
+    throw new Error(msg || statusFallback);
   }
   if (response.status === 204) return null;
   return response.json();
@@ -347,7 +389,7 @@ async function checkOllamaBeforeRecompute() {
     }
     return true;
   } catch (err) {
-    alert(`Cannot reach Ollama: ${err.message}`);
+    alert(`Cannot reach Ollama: ${userFacingError(err)}`);
     return false;
   }
 }
@@ -1068,7 +1110,7 @@ async function showInventoryForm(item = null, preSelectedMasterId = null, preSel
         const newItem = state.inventory.find((x) => x.id === created.id);
         if (newItem) showInventoryForm(newItem);
       } catch (err) {
-        alert(err.message);
+        alert(userFacingError(err));
       }
     });
   }
@@ -1080,7 +1122,7 @@ async function showInventoryForm(item = null, preSelectedMasterId = null, preSel
         closeInventoryModal();
         await loadInventoryData();
       } catch (err) {
-        alert(err.message);
+        alert(userFacingError(err));
       }
     });
   }
@@ -1122,7 +1164,7 @@ async function showInventoryForm(item = null, preSelectedMasterId = null, preSel
       closeInventoryModal();
       await loadInventoryData();
     } catch (err) {
-      alert(err.message);
+      alert(userFacingError(err));
     }
   });
 
@@ -1253,7 +1295,7 @@ async function addInlineOption(form, optionType, selectName) {
       body: JSON.stringify({ name: value }),
     });
   } catch (err) {
-    alert(err.message);
+    alert(userFacingError(err));
     return;
   }
   const fresh = await api('/api/v2/options');
@@ -1427,7 +1469,7 @@ async function openMasterPanel(item = null) {
         closeMasterPanel();
         await loadMasterData();
       } catch (err) {
-        alert(err.message);
+        alert(userFacingError(err));
       }
     });
   }
@@ -1442,7 +1484,7 @@ async function openMasterPanel(item = null) {
         const fresh = state.masterKnives.find((x) => x.id === resolved.id);
         void openMasterPanel(fresh || null);
       } catch (err) {
-        alert(err.message);
+        alert(userFacingError(err));
       }
     });
   }
@@ -1513,7 +1555,7 @@ async function openMasterPanel(item = null) {
         closeMasterPanel();
       }
     } catch (err) {
-      alert(err.message);
+      alert(userFacingError(err));
     }
   });
 
@@ -1836,7 +1878,7 @@ document.addEventListener('click', async (e) => {
       await loadMasterData();
     }
   } catch (err) {
-    alert(err.message);
+    alert(userFacingError(err));
   }
 });
 
@@ -1909,7 +1951,7 @@ function initInventoryPage() {
     }
   }).catch((err) => {
     console.error(err);
-    alert(`Failed to load app data: ${err.message}`);
+    alert(`Failed to load app data: ${userFacingError(err)}`);
   });
 }
 
@@ -1937,7 +1979,7 @@ function initIdentifyPage() {
       const result = await api('/api/v2/identify', { method: 'POST', body: JSON.stringify(payload) });
       renderIdentifierResults(result.results || []);
     } catch (err) {
-      alert(err.message);
+      alert(userFacingError(err));
     }
   });
 
@@ -2014,7 +2056,7 @@ function initIdentifyPage() {
       renderAiIdentifyResult(data);
       status.textContent = `Finished using ${data.model} at ${data.ollama_host}`;
     } catch (err) {
-      status.textContent = err.message;
+      status.textContent = userFacingError(err);
       document.getElementById('aiIdentifyOutput')?.classList.add('hidden');
     } finally {
       if (btn) btn.disabled = false;
@@ -2023,7 +2065,7 @@ function initIdentifyPage() {
 
   loadInventoryData().catch((err) => {
     console.error(err);
-    alert(`Failed to load app data: ${err.message}`);
+    alert(`Failed to load app data: ${userFacingError(err)}`);
   });
 }
 
@@ -2112,7 +2154,7 @@ function initMasterPage() {
         input.value = '';
         await loadMasterData();
       } catch (err) {
-        alert(err.message);
+        alert(userFacingError(err));
       }
     });
   });
@@ -2137,7 +2179,7 @@ function initMasterPage() {
       await loadMasterData();
     } catch (err) {
       msg.classList.remove('hidden');
-      msg.textContent = err.message;
+      msg.textContent = userFacingError(err);
     }
   });
 
@@ -2166,7 +2208,7 @@ function initMasterPage() {
         huReportEl.innerHTML = html;
         huReportEl.classList.remove('hidden');
       } catch (err) {
-        huReportEl.innerHTML = `<p class="error">${err.message}</p>`;
+        huReportEl.innerHTML = `<p class="error">${escapeHtml(userFacingError(err))}</p>`;
         huReportEl.classList.remove('hidden');
       }
     });
@@ -2180,7 +2222,7 @@ function initMasterPage() {
         if (data.updated > 0) await loadMasterData();
         if (checkHuBtn) checkHuBtn.click();
       } catch (err) {
-        alert(err.message);
+        alert(userFacingError(err));
       }
     });
   }
@@ -2249,7 +2291,7 @@ function initMasterPage() {
         distReportEl.innerHTML = html;
         distReportEl.classList.remove('hidden');
       } catch (err) {
-        distReportEl.innerHTML = `<p class="error">${err.message}</p>`;
+        distReportEl.innerHTML = `<p class="error">${escapeHtml(userFacingError(err))}</p>`;
         distReportEl.classList.remove('hidden');
       }
     });
@@ -2266,7 +2308,7 @@ function initMasterPage() {
         if (data.updated > 0) await loadMasterData();
         if (checkDistBtn) checkDistBtn.click();
       } catch (err) {
-        alert(err.message);
+        alert(userFacingError(err));
       } finally {
         setDistRecomputeRunning(false);
       }
@@ -2284,7 +2326,7 @@ function initMasterPage() {
         if (data.updated > 0) await loadMasterData();
         if (checkDistBtn) checkDistBtn.click();
       } catch (err) {
-        alert(err.message);
+        alert(userFacingError(err));
       } finally {
         setDistRecomputeRunning(false);
       }
@@ -2307,7 +2349,7 @@ function initMasterPage() {
         if (data.updated > 0) await loadMasterData();
         if (checkDistBtn) checkDistBtn.click();
       } catch (err) {
-        alert(err.message);
+        alert(userFacingError(err));
       } finally {
         setDistRecomputeRunning(false);
       }
@@ -2316,7 +2358,7 @@ function initMasterPage() {
 
   loadMasterData().catch((err) => {
     console.error(err);
-    alert(`Failed to load master data: ${err.message}`);
+    alert(`Failed to load master data: ${userFacingError(err)}`);
   });
 }
 

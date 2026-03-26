@@ -22,11 +22,11 @@ function escapeHtml(s) {
 
 /** FastAPI `detail` may be a string, object, or list of validation errors — avoid `[object Object]` in Error.message. */
 function formatApiErrorDetail(detail, fallback) {
-  const fb = fallback || 'Request failed';
+  const fb = fallback != null && fallback !== '' ? String(fallback) : 'Request failed';
   if (detail == null || detail === '') return fb;
   if (typeof detail === 'string') return detail;
   if (Array.isArray(detail)) {
-    return detail
+    const lines = detail
       .map((item) => {
         if (typeof item === 'string') return item;
         if (item && typeof item === 'object') {
@@ -34,6 +34,11 @@ function formatApiErrorDetail(detail, fallback) {
           const loc = Array.isArray(item.loc) ? item.loc.filter(Boolean).join(' → ') : '';
           if (msg && loc) return `${loc}: ${msg}`;
           if (msg) return msg;
+          try {
+            return JSON.stringify(item);
+          } catch {
+            return String(item);
+          }
         }
         try {
           return JSON.stringify(item);
@@ -41,12 +46,15 @@ function formatApiErrorDetail(detail, fallback) {
           return String(item);
         }
       })
-      .join('\n');
+      .filter(Boolean);
+    if (lines.length) return lines.join('\n');
+    return fb;
   }
   if (typeof detail === 'object') {
     if (detail.msg != null) return String(detail.msg);
     try {
-      return JSON.stringify(detail);
+      const s = JSON.stringify(detail);
+      return s === '{}' ? fb : s;
     } catch {
       return String(detail);
     }
@@ -54,14 +62,45 @@ function formatApiErrorDetail(detail, fallback) {
   return String(detail);
 }
 
+function userFacingError(err) {
+  if (err == null) return 'Unknown error';
+  if (typeof err === 'string') return err;
+  if (err instanceof Error) {
+    const m = err.message;
+    if (typeof m === 'string' && m.length > 0 && m !== '[object Object]') return m;
+  }
+  if (typeof err === 'object' && err !== null && err.detail != null) {
+    return formatApiErrorDetail(err.detail);
+  }
+  if (typeof err === 'object' && err !== null && typeof err.message === 'string') {
+    const m = err.message;
+    if (m && m !== '[object Object]') return m;
+  }
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return String(err);
+  }
+}
+
 async function api(path, opts = {}) {
   const res = await fetch(path, {
     headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
     ...opts,
   });
-  const data = await res.json().catch(() => ({}));
+  const text = await res.text();
+  let data = {};
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { detail: text.length > 600 ? `${text.slice(0, 600)}…` : text };
+    }
+  }
   if (!res.ok) {
-    throw new Error(formatApiErrorDetail(data.detail, `${res.status} ${res.statusText}`));
+    const statusFallback = `HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''}`;
+    const rawDetail = data.detail !== undefined ? data.detail : data.message;
+    throw new Error(formatApiErrorDetail(rawDetail, statusFallback));
   }
   return data;
 }
@@ -616,7 +655,7 @@ async function runQuery() {
     await loadSessions();
     await loadSessionDetail(state.sessionId);
   } catch (err) {
-    alert(err.message || String(err));
+    alert(userFacingError(err));
     await loadSessionDetail(state.sessionId);
   }
 }
@@ -732,7 +771,7 @@ function bindEvents() {
       });
       await loadSessionDetail(state.sessionId);
     } catch (err) {
-      alert(err.message || String(err));
+      alert(userFacingError(err));
     }
   });
 }
