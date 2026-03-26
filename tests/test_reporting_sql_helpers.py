@@ -68,3 +68,32 @@ def test_plan_to_sql_rejects_unvalidated_dict(invapp):
     with pytest.raises(TypeError):
         invapp._reporting_plan_to_sql({"intent": "aggregate"}, date_start=None, date_end=None, max_rows=50)
 
+
+def test_plan_to_sql_list_inventory_orders_by_purchase_price_when_sort_set(invapp):
+    plan = CanonicalReportingPlan.from_legacy_semantic_plan(
+        {
+            "intent": "list_inventory",
+            "metric": "count",
+            "scope": "inventory",
+            "group_by": None,
+            "filters": {},
+            "limit": 10,
+            "sort": {"field": "purchase_price", "direction": "desc"},
+        }
+    )
+    sql, meta = invapp._reporting_plan_to_sql(plan, date_start=None, date_end=None, max_rows=50)
+    assert "COALESCE(purchase_price, 0)" in sql
+    assert "DESC" in sql
+    assert meta.get("mode") == "semantic_compiled_list_inventory"
+
+
+def test_legacy_plan_repair_fixes_completion_cost_for_ranked_purchases(invapp):
+    from reporting.domain import _reporting_legacy_plan_from_llm_dict
+
+    q = "What are my top 10 most expensive purchases?"
+    raw = {"intent": "completion_cost", "metric": "count", "filters": {}, "scope": "inventory"}
+    fixed = _reporting_legacy_plan_from_llm_dict(raw, q)
+    assert fixed["intent"] == "list_inventory"
+    assert fixed.get("sort") == {"field": "purchase_price", "direction": "desc"}
+    assert fixed.get("limit") == 10
+
