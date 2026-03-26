@@ -20,13 +20,49 @@ function escapeHtml(s) {
     .replaceAll("'", '&#39;');
 }
 
+/** FastAPI `detail` may be a string, object, or list of validation errors — avoid `[object Object]` in Error.message. */
+function formatApiErrorDetail(detail, fallback) {
+  const fb = fallback || 'Request failed';
+  if (detail == null || detail === '') return fb;
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => {
+        if (typeof item === 'string') return item;
+        if (item && typeof item === 'object') {
+          const msg = item.msg != null ? String(item.msg) : '';
+          const loc = Array.isArray(item.loc) ? item.loc.filter(Boolean).join(' → ') : '';
+          if (msg && loc) return `${loc}: ${msg}`;
+          if (msg) return msg;
+        }
+        try {
+          return JSON.stringify(item);
+        } catch {
+          return String(item);
+        }
+      })
+      .join('\n');
+  }
+  if (typeof detail === 'object') {
+    if (detail.msg != null) return String(detail.msg);
+    try {
+      return JSON.stringify(detail);
+    } catch {
+      return String(detail);
+    }
+  }
+  return String(detail);
+}
+
 async function api(path, opts = {}) {
   const res = await fetch(path, {
     headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
     ...opts,
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.detail || `${res.status} ${res.statusText}`);
+  if (!res.ok) {
+    throw new Error(formatApiErrorDetail(data.detail, `${res.status} ${res.statusText}`));
+  }
   return data;
 }
 

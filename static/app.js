@@ -282,6 +282,39 @@ function mapV2ModelToMasterRow(r) {
   };
 }
 
+/** Turn FastAPI `detail` (string | object | array of validation errors) into a readable message. */
+function formatApiErrorDetail(detail) {
+  if (detail == null || detail === '') return 'Request failed';
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => {
+        if (typeof item === 'string') return item;
+        if (item && typeof item === 'object') {
+          const msg = item.msg != null ? String(item.msg) : '';
+          const loc = Array.isArray(item.loc) ? item.loc.filter(Boolean).join(' → ') : '';
+          if (msg && loc) return `${loc}: ${msg}`;
+          if (msg) return msg;
+        }
+        try {
+          return JSON.stringify(item);
+        } catch {
+          return String(item);
+        }
+      })
+      .join('\n');
+  }
+  if (typeof detail === 'object') {
+    if (detail.msg != null) return String(detail.msg);
+    try {
+      return JSON.stringify(detail);
+    } catch {
+      return String(detail);
+    }
+  }
+  return String(detail);
+}
+
 async function api(path, options = {}) {
   const headers = { ...options.headers };
   if (options.body && typeof options.body === 'string' && !headers['Content-Type']) {
@@ -293,7 +326,7 @@ async function api(path, options = {}) {
   });
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'Request failed' }));
-    throw new Error(error.detail || 'Request failed');
+    throw new Error(formatApiErrorDetail(error.detail) || 'Request failed');
   }
   if (response.status === 204) return null;
   return response.json();
@@ -1201,7 +1234,7 @@ async function postMasterReferenceUpload(knifeId, file) {
   if (visionModel) fd.set('model', visionModel);
   const res = await fetch(`/api/v2/models/${knifeId}/image`, { method: 'POST', body: fd });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.detail || 'Upload failed');
+  if (!res.ok) throw new Error(formatApiErrorDetail(data.detail, 'Upload failed'));
   return data;
 }
 
@@ -1977,7 +2010,7 @@ function initIdentifyPage() {
     try {
       const response = await fetch('/api/ai/identify', { method: 'POST', body: fd });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.detail || 'Request failed');
+      if (!response.ok) throw new Error(formatApiErrorDetail(data.detail, 'Request failed'));
       renderAiIdentifyResult(data);
       status.textContent = `Finished using ${data.model} at ${data.ollama_host}`;
     } catch (err) {
@@ -2096,7 +2129,7 @@ function initMasterPage() {
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(data.detail || 'Import failed');
+        throw new Error(formatApiErrorDetail(data.detail, 'Import failed'));
       }
       msg.classList.remove('hidden');
       msg.textContent = `Imported: ${data.inserted} new, ${data.updated} updated.`;
