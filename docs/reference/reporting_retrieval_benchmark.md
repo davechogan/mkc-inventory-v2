@@ -20,7 +20,7 @@ Useful flags:
 - `--backends lexical,embedding` — subset of backends
 - `--json` — machine-readable output
 - `--enforce` — exit non-zero unless **lexical** hits every case (suitable for CI)
-- `--enforce-all` — every selected backend must hit every case (needs optional deps)
+- `--enforce-all` — every selected backend must hit every case (requires a full install: `sentence-transformers`, `chromadb`, etc., per `requirements.txt`)
 - `--strict` — fail if a non-lexical backend falls back to lexical
 
 ## Editing cases

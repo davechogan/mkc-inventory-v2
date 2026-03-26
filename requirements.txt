@@ -4,3 +4,6 @@ python-multipart>=0.0.9,<1.0
 httpx>=0.27,<1.0
 numpy>=1.26,<3.0
 opencv-python-headless>=4.9,<5.0
+chromadb
+# Reporting retrieval: embedding + vector index + Chroma upsert/query when REPORTING_RETRIEVAL_BACKEND is embedding|vector|chroma
+sentence-transformers>=2.2.0,<4.0

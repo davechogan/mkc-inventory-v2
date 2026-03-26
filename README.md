@@ -93,6 +93,47 @@ python tools/import_legacy_data.py
 
 Long-form plans, API reference, and reporting eval materials are in [`docs/`](docs/README.md). This file (repository root) remains the project entrypoint.
 
+## Local-first release workflow (recommended)
+
+To avoid editing a live runtime folder on a remote volume, do day-to-day development in a local clone, then push tested releases to the Mac Studio runtime path.
+
+Script:
+
+```bash
+scripts/push_release_to_macstudio.sh --dry-run
+scripts/push_release_to_macstudio.sh --release
+```
+
+Required environment variables:
+
+```bash
+export DEPLOY_HOST="macstudio"
+export DEPLOY_USER="your_user"
+export DEPLOY_PATH="/absolute/path/to/runtime/repo"
+```
+
+Optional:
+
+```bash
+export DEPLOY_PORT="22"
+export DEPLOY_RESTART_CMD="./scripts/run.sh"
+export DEPLOY_SKIP_BACKUP="0"
+```
+
+Notes:
+- The script runs `./scripts/backup_mkc_db.sh` on the remote target before syncing (unless skipped).
+- Sync uses `rsync --delete`, so the runtime folder mirrors the local release state.
+- `.venv`, `.git`, caches, and SQLite WAL/journal artifacts are excluded from sync.
+
+## Reporting retrieval (sentence-transformers)
+
+Install dependencies include **`sentence-transformers`** so reporting can use embedding-backed retrieval when configured.
+
+- **`REPORTING_RETRIEVAL_BACKEND`**: `lexical` (default), `embedding`, `vector`, or `chroma` (see `reporting/retrieval.py` for paths and behavior).
+- **`REPORTING_RETRIEVAL_EMBED_MODEL`**: defaults to `all-MiniLM-L6-v2` (downloaded on first use).
+
+Use the reporting admin **Reload catalog/index** (or restart the app) after switching backends or changing the artifact catalog.
+
 ## Notes
 
 This is a bridge build, not a total rewrite. The old UI and endpoints still exist, but the new normalized tables give you a much cleaner foundation for the next iteration.
