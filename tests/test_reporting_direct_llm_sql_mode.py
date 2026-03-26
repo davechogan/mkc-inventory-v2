@@ -130,6 +130,7 @@ def test_reporting_direct_llm_sql_toggle_does_not_bypass_planner(invapp, monkeyp
         assert "FROM reporting_inventory" in result["sql_executed"]
         assert "Found 2 rows. First row" in result["answer_text"]
         assert f"knife_name={knife_new}" in result["answer_text"]
+        assert isinstance(result.get("retrieval"), dict)
 
         # Sanity: planner prompt called, direct SQL generation prompt was not.
         assert any("convert collection questions into semantic JSON plans" in s for s in systems_seen)

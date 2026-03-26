@@ -217,6 +217,11 @@ function renderText(result) {
   if (result.execution_ms != null) extra.push(`Execution: ${result.execution_ms}ms`);
   if (result.limitations) extra.push(`Limitations: ${result.limitations}`);
   if (result.generation_mode) extra.push(`Mode: ${result.generation_mode}`);
+  if (result.retrieval && typeof result.retrieval === 'object') {
+    const rb = String(result.retrieval.effective_backend || result.retrieval.configured_backend || '').trim();
+    const fallback = !!result.retrieval.fallback_used;
+    if (rb) extra.push(`Retrieval: ${rb}${fallback ? ' (fallback)' : ''}`);
+  }
   out.innerHTML = `
     <div>${escapeHtml(result.answer_text || '')}</div>
     ${extra.length ? `<p class="muted small">${escapeHtml(extra.join(' | '))}</p>` : ''}
@@ -591,6 +596,7 @@ async function loadSessionDetail(sessionId) {
         limitations: assistant.meta?.limitations,
         execution_ms: assistant.meta?.execution_ms,
         generation_mode: assistant.meta?.generation_mode,
+        retrieval: assistant.meta?.retrieval || null,
       }
     : null;
   renderMessages();

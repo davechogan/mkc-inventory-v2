@@ -181,16 +181,49 @@ def _embedding_retrieve(question: str, top_k: int) -> list[RetrievalArtifact]:
         return _lexical_retrieve(question, top_k)
 
 
+def retrieve_artifacts_with_meta(question: str, top_k: int = 5) -> tuple[list[RetrievalArtifact], dict[str, object]]:
+    """Retrieve artifacts plus backend metadata for telemetry/debugging."""
+    k = max(1, int(top_k))
+    configured_backend = RETRIEVAL_BACKEND
+    if configured_backend != "embedding":
+        artifacts = _lexical_retrieve(question, k)
+        return artifacts, {
+            "configured_backend": configured_backend,
+            "effective_backend": "lexical",
+            "embedder_ready": False,
+            "fallback_used": False,
+            "artifact_ids": [a.artifact_id for a in artifacts],
+        }
+    embedder = _get_embedder()
+    if embedder is None:
+        artifacts = _lexical_retrieve(question, k)
+        return artifacts, {
+            "configured_backend": "embedding",
+            "effective_backend": "lexical",
+            "embedder_ready": False,
+            "fallback_used": True,
+            "fallback_reason": (_EMBEDDER_INIT_ERROR or "embedder_unavailable")[:240],
+            "artifact_ids": [a.artifact_id for a in artifacts],
+        }
+    artifacts = _embedding_retrieve(question, k)
+    return artifacts, {
+        "configured_backend": "embedding",
+        "effective_backend": "embedding",
+        "embedder_ready": True,
+        "fallback_used": False,
+        "embed_model": RETRIEVAL_EMBED_MODEL,
+        "artifact_ids": [a.artifact_id for a in artifacts],
+    }
+
+
 def retrieve_artifacts(question: str, top_k: int = 5) -> list[RetrievalArtifact]:
     """Retrieve best-fit semantic artifacts for a question.
 
     Retrieval is lexical for now and deterministic. It is intentionally simple
     but establishes the canonical retrieval boundary and artifact contract.
     """
-    k = max(1, int(top_k))
-    if RETRIEVAL_BACKEND == "embedding":
-        return _embedding_retrieve(question, k)
-    return _lexical_retrieve(question, k)
+    artifacts, _meta = retrieve_artifacts_with_meta(question, top_k=top_k)
+    return artifacts
 
 
 def format_retrieval_context(artifacts: Iterable[RetrievalArtifact]) -> str:

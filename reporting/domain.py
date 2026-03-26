@@ -55,7 +55,7 @@ from reporting.regex_contract import (
 )
 from reporting.plan_models import CanonicalReportingPlan
 from reporting.plan_validator import validate_canonical_structure, validate_canonical_semantics
-from reporting.retrieval import format_retrieval_context, retrieve_artifacts
+from reporting.retrieval import format_retrieval_context, retrieve_artifacts_with_meta
 
 _ConnectionCtx = AbstractContextManager[sqlite3.Connection]
 GetConn = Callable[[], _ConnectionCtx]
@@ -1466,8 +1466,9 @@ def _reporting_llm_plan(
     question: str,
     context_block: str,
     schema_context: str,
-) -> Optional[dict[str, Any]]:
-    retrieval_ctx = format_retrieval_context(retrieve_artifacts(question, top_k=6))
+) -> tuple[Optional[dict[str, Any]], dict[str, Any]]:
+    retrieval_artifacts, retrieval_meta = retrieve_artifacts_with_meta(question, top_k=6)
+    retrieval_ctx = format_retrieval_context(retrieval_artifacts)
     system = (
         "You convert collection questions into semantic JSON plans. "
         "Return JSON only with keys: intent, filters, group_by, metric, limit, date_start, date_end, year_compare. "
@@ -1499,9 +1500,9 @@ def _reporting_llm_plan(
                     parsed = json.loads(braced)
                 except Exception:
                     parsed = None
-        return parsed if isinstance(parsed, dict) else None
+        return (parsed if isinstance(parsed, dict) else None), retrieval_meta
     except Exception:
-        return None
+        return None, retrieval_meta
 
 
 def _reporting_semantic_plan(
@@ -1518,13 +1519,14 @@ def _reporting_semantic_plan(
     heuristic = _reporting_heuristic_plan(question, last_state=last_state)
     learned_hints = _reporting_get_semantic_hints(conn, session_id, question)
     schema_context = _reporting_build_prompt_schema(conn)
-    llm_plan = _reporting_llm_plan(planner_model, question, context_block, schema_context)
+    llm_plan, retrieval_meta = _reporting_llm_plan(planner_model, question, context_block, schema_context)
     planner_attempts = 1
     if not isinstance(llm_plan, dict) and retry_model and retry_model != planner_model:
-        retry = _reporting_llm_plan(retry_model, question, context_block, schema_context)
+        retry, retry_retrieval_meta = _reporting_llm_plan(retry_model, question, context_block, schema_context)
         planner_attempts = 2
         if isinstance(retry, dict):
             llm_plan = retry
+            retrieval_meta = retry_retrieval_meta
     plan = dict(heuristic)
     mode = "semantic_heuristic"
     if isinstance(llm_plan, dict):
@@ -1614,6 +1616,7 @@ def _reporting_semantic_plan(
         "planner_attempts": planner_attempts,
         "hint_ids": learned_hints.get("hint_ids") or [],
         "hints": learned_hints.get("hints") or [],
+        "retrieval": retrieval_meta or {},
         "plan_validation": {
             "structural": structural.classification,
             "semantic": "pending",
@@ -2798,6 +2801,7 @@ def run_reporting_query(
             "semantic_plan": semantic_plan,
             "timestamp": _reporting_iso_now(),
             "semantic_hints": sql_meta.get("hints") or [],
+            "retrieval": sql_meta.get("retrieval") or {},
         }
         assistant_message_id = _reporting_store_message(
             conn,
@@ -2833,6 +2837,7 @@ def run_reporting_query(
                 "has_compare_mode": bool(payload.compare_dimension and payload.compare_value_a and payload.compare_value_b),
                 "semantic_plan": semantic_plan,
                 "semantic_hints": sql_meta.get("hints") or [],
+                "retrieval": sql_meta.get("retrieval") or {},
             },
         )
 
@@ -2854,4 +2859,5 @@ def run_reporting_query(
             "assistant_message_id": assistant_message_id,
             # Top-level for clients and reporting_eval_harness brittle/plan-equiv checks (also in stored meta).
             "semantic_plan": semantic_plan,
+            "retrieval": sql_meta.get("retrieval") or {},
         }
