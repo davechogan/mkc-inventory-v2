@@ -1443,7 +1443,7 @@ def _reporting_semantic_plan(
     }
 
 
-def _reporting_plan_to_sql(
+def _reporting_plan_to_sql_legacy(
     plan: dict[str, Any],
     date_start: Optional[str],
     date_end: Optional[str],
@@ -1673,6 +1673,27 @@ def _reporting_plan_to_sql(
             f"LIMIT {limit}"
         )
     return sql, {"mode": "semantic_compiled_list_inventory"}
+
+
+def _reporting_plan_to_sql(
+    plan: CanonicalReportingPlan,
+    date_start: Optional[str],
+    date_end: Optional[str],
+    max_rows: int,
+) -> tuple[Optional[str], dict[str, Any]]:
+    """Compile SQL only from validated canonical plans.
+
+    The legacy dict compiler remains as an internal adapter during migration,
+    but external callers must pass ``CanonicalReportingPlan``.
+    """
+    if not isinstance(plan, CanonicalReportingPlan):
+        raise TypeError("Compiler requires CanonicalReportingPlan input.")
+    return _reporting_plan_to_sql_legacy(
+        plan.to_legacy_semantic_plan(),
+        date_start,
+        date_end,
+        max_rows,
+    )
 
 
 def _reporting_template_sql(
@@ -2356,10 +2377,6 @@ def run_reporting_query(
         sql_meta: dict[str, Any] = {}
         hint_ids_used: list[int] = []
 
-        # Test / A/B mode: bypass semantic planning + deterministic SQL compiler.
-        # Keep SQL safety validation/execution exactly the same.
-        direct_llm_sql = _reporting_direct_llm_sql_enabled(conn)
-
         # Explicit compare mode remains template-backed for predictable behavior.
         if payload.compare_dimension and payload.compare_value_a and payload.compare_value_b:
             sql, sql_meta = _reporting_template_sql(
@@ -2370,18 +2387,6 @@ def run_reporting_query(
                 compare_a=payload.compare_value_a,
                 compare_b=payload.compare_value_b,
             )
-        elif direct_llm_sql:
-            # Skip _reporting_semantic_plan() and _reporting_plan_to_sql().
-            # Let the LLM generate SQL directly from the question + schema/context.
-            sql, llm_meta = _reporting_call_llm_for_sql(
-                conn,
-                planner_model,
-                question,
-                context_block,
-                date_start,
-                date_end,
-            )
-            sql_meta = {**llm_meta, "mode": "direct_llm_sql"}
         else:
             semantic_plan, semantic_meta = _reporting_semantic_plan(
                 conn,
@@ -2445,7 +2450,7 @@ def run_reporting_query(
                 )
                 raise HTTPException(status_code=400, detail=f"Invalid semantic plan: {reason}")
             sql, compile_meta = _reporting_plan_to_sql(
-                semantic_plan,
+                semantic_plan_validated,
                 date_start,
                 date_end,
                 payload.max_rows,
@@ -2456,32 +2461,11 @@ def run_reporting_query(
                 "semantic": semantic_check.classification,
             }
             hint_ids_used = [int(x) for x in (semantic_meta.get("hint_ids") or []) if isinstance(x, int) or str(x).isdigit()]
-
-        # Fallback path for robustness with old behavior.
-        if not sql:
-            sql, sql_meta = _reporting_template_sql(
-                question,
-                date_start,
-                date_end,
-                compare_dimension=payload.compare_dimension,
-                compare_a=payload.compare_value_a,
-                compare_b=payload.compare_value_b,
-            )
-        if not sql:
-            sql, llm_meta = _reporting_call_llm_for_sql(
-                conn,
-                planner_model,
-                question,
-                context_block,
-                date_start,
-                date_end,
-            )
-            sql_meta = {**sql_meta, **llm_meta}
         if not sql:
             _log_error("no_sql", f"Could not derive SQL. {sql_meta.get('error') or ''}".strip(), mode=sql_meta.get("mode"), semantic_intent=(semantic_plan or {}).get("intent"))
             raise HTTPException(
                 status_code=400,
-                detail=f"Could not derive a safe SQL query. {sql_meta.get('error') or ''}".strip(),
+                detail=f"Could not derive SQL from validated semantic plan. {sql_meta.get('error') or ''}".strip(),
             )
 
         try:
@@ -2503,12 +2487,18 @@ def run_reporting_query(
         if not substantive and semantic_plan:
             relaxed = _reporting_relax_ambiguous_plan(semantic_plan, question)
             if relaxed:
-                relaxed_sql, relaxed_meta = _reporting_plan_to_sql(
-                    relaxed,
-                    date_start,
-                    date_end,
-                    payload.max_rows,
-                )
+                relaxed_validated = CanonicalReportingPlan.from_legacy_semantic_plan(relaxed)
+                relaxed_check = validate_canonical_semantics(relaxed_validated)
+                if not relaxed_check.valid:
+                    relaxed_sql = None
+                    relaxed_meta = {}
+                else:
+                    relaxed_sql, relaxed_meta = _reporting_plan_to_sql(
+                        relaxed_validated,
+                        date_start,
+                        date_end,
+                        payload.max_rows,
+                    )
                 if relaxed_sql:
                     try:
                         cols2, rows2, exec2 = _reporting_exec_sql(conn, relaxed_sql, payload.max_rows)
