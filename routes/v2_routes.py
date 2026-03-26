@@ -6,6 +6,7 @@ import csv
 import io
 import json
 import sqlite3
+from collections.abc import Callable
 from typing import Any, Optional, Type
 
 import blade_ai
@@ -29,7 +30,7 @@ def create_v2_router(
     option_in_model: Type[BaseModel],
     identifier_query_model: Type[BaseModel],
     distinguishing_recompute_body: Type[BaseModel],
-) -> APIRouter:
+) -> tuple[APIRouter, Callable[[Any], dict[str, Any]]]:
     router = APIRouter(tags=["v2"])
     def _v2_inventory_base_sql() -> str:
         """Base SQL for flattened inventory from v2 tables with model dimension joins."""
@@ -1654,4 +1655,5 @@ def create_v2_router(
                 )
         results.sort(key=lambda item: (-item["score"], item["name"].lower()))
         return {"source": "v2_catalog", "results": results[:10]}
-    return router
+
+    return router, v2_identify_knives
