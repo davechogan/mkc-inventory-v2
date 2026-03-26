@@ -22,6 +22,7 @@ if [[ -f "${ROOT}/requirements-dev.txt" ]]; then
   "$PIP" install -q -r requirements-dev.txt
 fi
 "$PY" -m py_compile app.py
+"$PY" -m py_compile mkc_csv_columns.py
 "$PY" -m py_compile reporting/domain.py
 "$PY" -m py_compile reporting/regex_contract.py
 "$PY" -m py_compile reporting/routes.py

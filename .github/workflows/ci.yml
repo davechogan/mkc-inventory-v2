@@ -32,6 +32,7 @@ jobs:
       - name: Python compile checks
         run: |
           python -m py_compile app.py
+          python -m py_compile mkc_csv_columns.py
           python -m py_compile reporting/domain.py
           python -m py_compile reporting/regex_contract.py
           python -m py_compile reporting/routes.py

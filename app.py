@@ -39,6 +39,7 @@ import httpx
 import blade_ai
 import identifier_outline_sync
 import normalized_model
+from mkc_csv_columns import INVENTORY_CSV_COLUMNS, MASTER_CSV_COLUMNS
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
@@ -2176,84 +2177,6 @@ app.include_router(
 )
 
 
-MASTER_CSV_COLUMNS = [
-    "id",
-    "name",
-    "canonical_slug",
-    "family",
-    "record_type",
-    "category",
-    "catalog_line",
-    "catalog_status",
-    "confidence",
-    "evidence_summary",
-    "collector_notes",
-    "default_blade_length",
-    "default_steel",
-    "default_blade_finish",
-    "default_blade_color",
-    "default_handle_color",
-    "is_collab",
-    "collaboration_name",
-    "status",
-    "notes",
-    "blade_profile",
-    "has_ring",
-    "is_filleting_knife",
-    "is_hatchet",
-    "is_kitchen",
-    "is_tactical",
-    "identifier_keywords",
-    "identifier_distinguishing_features",
-    "identifier_product_url",
-    "identifier_image_mime",
-    "identifier_silhouette_hu_json",
-    "msrp",
-    "first_release_date",
-    "last_seen_date",
-    "is_discontinued",
-    "is_current_catalog",
-    "blade_shape",
-    "tip_style",
-    "grind_style",
-    "size_class",
-    "primary_use_case",
-    "spine_profile",
-    "is_fillet",
-    "default_product_url",
-    "primary_image_url",
-]
-
-
-INVENTORY_CSV_COLUMNS = [
-    "id",
-    "knife_name",
-    "knife_family",
-    "master_knife_id",
-    "nickname",
-    "quantity",
-    "acquired_date",
-    "mkc_order_number",
-    "purchase_price",
-    "estimated_value",
-    "condition",
-    "handle_color",
-    "blade_steel",
-    "blade_finish",
-    "blade_color",
-    "blade_length",
-    "is_collab",
-    "collaboration_name",
-    "serial_number",
-    "location",
-    "purchase_source",
-    "last_sharpened",
-    "notes",
-    "created_at",
-    "updated_at",
-]
-
-
 v2_router, run_v2_identify = create_v2_router(
     get_conn=get_conn,
     ollama_vision_model=OLLAMA_VISION_MODEL,
@@ -2293,16 +2216,6 @@ app.include_router(
         option_in_model=OptionIn,
     )
 )
-
-
-def _identify_catalog_blurb(row: dict[str, Any]) -> Optional[str]:
-    """Short line from Knife Master / catalog text for result cards."""
-    for key in ("evidence_summary", "collector_notes", "catalog_status"):
-        raw = row.get(key)
-        if raw and str(raw).strip():
-            s = " ".join(str(raw).split())
-            return s if len(s) <= 180 else s[:179] + "…"
-    return None
 
 
 ai_router, ollama_check = create_ai_router(

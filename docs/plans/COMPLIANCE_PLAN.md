@@ -20,7 +20,7 @@ This document tracks alignment with project Cursor rules under `.cursor/rules/` 
 
 | Area | Target rule files | Status (baseline) |
 |------|-------------------|-------------------|
-| Monolith / layers | `engineering-standards.mdc` | **Gap** — `app.py` is still a large monolith; domain split mainly `normalized_model`, `blade_ai`, … (order–inventory gap tooling lives under `archive/order-inventory-gap/`). |
+| Monolith / layers | `engineering-standards.mdc` | **Partial** — HTTP surface split into domain routers; `app.py` still holds `init_db`, Pydantic request models, and app wiring. CSV column lists in **`mkc_csv_columns.py`**. Further extraction (DB bootstrap, schemas) is optional. |
 | Canonical reporting vs regex | `engineering-standards.mdc` | **Partial** — semantic plan + SQL compiler exist; regex grouped + documented in `reporting/regex_contract.py`; extend plan fields before new question regex. |
 | Scope preprocessing | `engineering-standards.mdc` | **Done** — `REPORTING_SCOPE_PREPROCESSING` in `reporting/domain.py`; default **off** (legacy `if False`); set `1`/`true`/`yes`/`on` to enable. |
 | Automated tests | `testing-and-nlp-quality.mdc` | **Improved** — `pytest tests/` in CI + `scripts/ci_local.sh`; SQL helper tests + scope-env parsing tests. |
@@ -67,13 +67,13 @@ This document tracks alignment with project Cursor rules under `.cursor/rules/` 
 
 | Step | Done | Notes |
 |------|------|--------|
-| Split remaining `app.py` by domain routers | **~** | **`reporting/routes.py`**, **`routes/v2_routes.py`**, **`routes/normalized_routes.py`**, **`routes/legacy_catalog_routes.py`**, **`routes/ai_routes.py`**, **`routes/static_pages_routes.py`**, **`routes/admin_routes.py`** (legacy silhouette + distinguishing-features admin). **Next:** remaining `app.py` surface. |
+| Split remaining `app.py` by domain routers | **[x]** (HTTP) | Routers above + **`mkc_csv_columns.py`** for shared CSV field lists. **`app.py`**: `init_db`, models, `include_router` wiring. Optional later: move bootstrap/schemas to packages. |
 
 ### Phase 6 — Harness in CI (optional)
 
 | Step | Done | Notes |
 |------|------|--------|
-| Run harness subset when `REPORTING_EVAL_BASE_URL` available | [ ] | Self-hosted job already exists. |
+| Run harness subset when `REPORTING_EVAL_BASE_URL` available | **[x]** | **`reporting-smoke-local`** job runs `tools/reporting_eval_harness.py --suite smoke` when secret is set; skips if unset. Hosted `checks` job stays compile+pytest only (no live API). |
 
 ---
 
@@ -106,3 +106,4 @@ This document tracks alignment with project Cursor rules under `.cursor/rules/` 
 | 2026-03-26 | Phase 5 (incremental): `routes/ai_routes.py` — Ollama + vision identify; `create_v2_router` returns `(router, run_v2_identify)` for injection; reporting uses returned `ollama_check`. |
 | 2026-03-26 | Phase 5 (incremental): `routes/static_pages_routes.py` — HTML shells for `/`, `/identify`, `/master`; `/static` mount stays on `app`. |
 | 2026-03-26 | Phase 5 (incremental): `routes/admin_routes.py` — `/api/admin/silhouettes/*`, `/api/admin/distinguishing-features/*`; `recompute_silhouettes_for_masters_without_hu` + `DistinguishingFeaturesRecomputeBody` for `init_db` / v2. |
+| 2026-03-26 | Phase 5: `mkc_csv_columns.py` — `MASTER_CSV_COLUMNS` / `INVENTORY_CSV_COLUMNS`; removed unused `_identify_catalog_blurb`. Phase 6: document self-hosted reporting smoke as implemented. |
