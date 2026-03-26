@@ -60,3 +60,31 @@ def test_semantic_validation_rejects_catalog_inventory_only_field() -> None:
     assert result.valid is False
     assert any("Catalog scope does not support field 'condition'" in e for e in result.errors)
 
+
+def test_run_reporting_query_blocks_semantically_invalid_plan(invapp, monkeypatch) -> None:
+    import reporting.domain as reporting_domain
+    from reporting.domain import ReportingQueryIn, run_reporting_query
+
+    def fake_semantic_plan(*args, **kwargs):
+        return (
+            {
+                "intent": "aggregate",
+                "scope": "catalog",
+                "metric": "count",
+                "group_by": None,
+                "filters": {"condition": "Like New"},
+                "limit": 50,
+            },
+            {"mode": "semantic_test"},
+        )
+
+    monkeypatch.setattr(reporting_domain, "_reporting_semantic_plan", fake_semantic_plan)
+
+    payload = ReportingQueryIn(question="count catalog by condition")
+    try:
+        run_reporting_query(payload, get_conn=invapp.get_conn)
+        assert False, "Expected semantic plan validation to block execution"
+    except Exception as exc:
+        detail = getattr(exc, "detail", str(exc))
+        assert "Invalid semantic plan" in str(detail)
+

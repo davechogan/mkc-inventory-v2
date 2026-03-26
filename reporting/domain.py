@@ -2351,6 +2351,7 @@ def run_reporting_query(
             raise HTTPException(status_code=400, detail=safe_msg)
 
         semantic_plan: Optional[dict[str, Any]] = None
+        semantic_plan_validated: Optional[CanonicalReportingPlan] = None
         sql: Optional[str] = None
         sql_meta: dict[str, Any] = {}
         hint_ids_used: list[int] = []
@@ -2390,6 +2391,59 @@ def run_reporting_query(
                 context_block,
                 retry_model=retry_model,
             )
+            semantic_plan_validated = CanonicalReportingPlan.from_legacy_semantic_plan(semantic_plan)
+            semantic_check = validate_canonical_semantics(semantic_plan_validated)
+            if not semantic_check.valid:
+                reason = "; ".join(semantic_check.errors[:2]) or "Plan validation failed."
+                if semantic_check.classification == "clarification_needed":
+                    assistant_message_id = _reporting_store_message(
+                        conn,
+                        session_id,
+                        "assistant",
+                        reason,
+                        meta={"clarification_needed": True, "validation_stage": "semantic"},
+                    )
+                    total_ms = round((time.perf_counter() - started) * 1000.0, 2)
+                    _reporting_log_query_event(
+                        conn,
+                        session_id=session_id,
+                        question=question,
+                        planner_model=planner_model,
+                        responder_model=responder_model,
+                        generation_mode="clarification_semantic",
+                        semantic_intent=(semantic_plan or {}).get("intent"),
+                        sql_excerpt=None,
+                        row_count=0,
+                        execution_ms=None,
+                        total_ms=total_ms,
+                        status="clarification_needed",
+                        error_detail=reason,
+                        meta={"validation_stage": "semantic"},
+                    )
+                    return {
+                        "session_id": session_id,
+                        "model": responder_model,
+                        "planner_model": planner_model,
+                        "answer_text": reason,
+                        "columns": [],
+                        "rows": [],
+                        "chart_spec": None,
+                        "sql_executed": None,
+                        "follow_ups": [],
+                        "confidence": None,
+                        "limitations": "Semantic plan requested clarification.",
+                        "generation_mode": "clarification_semantic",
+                        "execution_ms": None,
+                        "date_window": {"start": date_start, "end": date_end, "label": date_label},
+                        "assistant_message_id": assistant_message_id,
+                    }
+                _log_error(
+                    "invalid_plan",
+                    reason,
+                    mode="semantic_invalid",
+                    semantic_intent=(semantic_plan or {}).get("intent"),
+                )
+                raise HTTPException(status_code=400, detail=f"Invalid semantic plan: {reason}")
             sql, compile_meta = _reporting_plan_to_sql(
                 semantic_plan,
                 date_start,
@@ -2397,6 +2451,10 @@ def run_reporting_query(
                 payload.max_rows,
             )
             sql_meta = {**semantic_meta, **compile_meta}
+            sql_meta["plan_validation"] = {
+                "structural": (semantic_meta.get("plan_validation") or {}).get("structural", "ok"),
+                "semantic": semantic_check.classification,
+            }
             hint_ids_used = [int(x) for x in (semantic_meta.get("hint_ids") or []) if isinstance(x, int) or str(x).isdigit()]
 
         # Fallback path for robustness with old behavior.
