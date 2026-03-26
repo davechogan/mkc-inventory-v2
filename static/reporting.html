@@ -89,10 +89,10 @@
         <h3>Retrieval runtime (admin)</h3>
         <label class="full">Retrieval backend
           <select id="reportingRetrievalBackendSelect" title="Persisted in app database; used on the next question unless env overrides.">
-            <option value="lexical">lexical (token overlap)</option>
-            <option value="embedding">embedding (sentence-transformers)</option>
-            <option value="vector">vector (persisted index file)</option>
-            <option value="chroma">chroma</option>
+            <option value="lexical">Lexical — token overlap only (baseline)</option>
+            <option value="chroma">Sentence-transformers + Chroma (target architecture)</option>
+            <option value="embedding">In-process embeddings only (sentence-transformers; no Chroma)</option>
+            <option value="vector">Local vector index file (sentence-transformers + on-disk index)</option>
           </select>
         </label>
         <div class="actions">
@@ -164,6 +164,6 @@
     </section>
   </main>
 
-  <script src="/static/reporting.js?v=9"></script>
+  <script src="/static/reporting.js?v=10"></script>
 </body>
 </html>

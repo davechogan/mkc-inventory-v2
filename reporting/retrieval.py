@@ -443,6 +443,7 @@ def _get_chroma_client():
 
 
 def _chroma_retrieve(question: str, top_k: int) -> tuple[list[RetrievalArtifact], str | None]:
+    """Target architecture path: Chroma collection with sentence-transformer embeddings when available."""
     client, err = _get_chroma_client()
     if client is None:
         return _lexical_retrieve(question, top_k), err

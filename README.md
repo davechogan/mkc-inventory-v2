@@ -127,11 +127,11 @@ Notes:
 
 ## Reporting retrieval (sentence-transformers)
 
-Install dependencies include **`sentence-transformers`** so reporting can use embedding-backed retrieval.
+Install dependencies include **`sentence-transformers`** and **`chromadb`** so you can run the **target** path: **sentence-transformer embeddings with Chroma** as the vector store (`backend` value **`chroma`** in code and env).
 
-- **Default (no env, no DB row):** `embedding` (see `DEFAULT_RETRIEVAL_BACKEND` in `reporting/retrieval.py`).
-- **`REPORTING_RETRIEVAL_BACKEND`**: optional; when set, **overrides** both the reporting UI setting and any value stored in `app_meta`. Valid: `lexical`, `embedding`, `vector`, `chroma`.
-- **Admin UI:** Reporting page → **Retrieval runtime (admin)** → **Retrieval backend** + **Save backend** (persisted in `app_meta`).
+- **Default (no env, no DB row):** `embedding` (in-process vectors only; see `DEFAULT_RETRIEVAL_BACKEND` in `reporting/retrieval.py`). For the **end-state architecture**, set the admin UI to **Sentence-transformers + Chroma** (or export `REPORTING_RETRIEVAL_BACKEND=chroma`).
+- **`REPORTING_RETRIEVAL_BACKEND`**: optional; when set, **overrides** both the reporting UI setting and any value stored in `app_meta`. Valid: `lexical`, `embedding`, `vector`, `chroma` (Chroma uses sentence-transformers when installed; otherwise Chroma’s built-in embedder).
+- **Admin UI:** Reporting page → **Retrieval runtime (admin)** → **Retrieval backend** + **Save backend** (persisted in `app_meta`). Options are labeled so **Chroma** is clearly paired with sentence-transformers, not a separate “mystery” stack.
 - **`REPORTING_RETRIEVAL_EMBED_MODEL`**: defaults to `all-MiniLM-L6-v2` (downloaded on first use).
 
 Use **Reload catalog/index** after changing the artifact JSON file; backend changes apply on the next question without restart.
