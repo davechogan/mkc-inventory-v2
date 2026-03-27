@@ -427,7 +427,6 @@ def _reporting_extract_hint_entities(question: str) -> list[tuple[str, str]]:
             g2 = _reporting_norm_entity(m.group(2))
             cue = g1 if g1 in cues else g2
             ent = g2 if cue == g1 else g1
-            ent = _reporting_normalize_filter_value("text_search", ent)
             # Trim conversational scaffolding so we keep just the entity phrase.
             while True:
                 new_ent = stop_prefix.sub("", ent).strip()

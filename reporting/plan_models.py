@@ -139,9 +139,13 @@ class CanonicalReportingPlan(BaseModel):
     needs_clarification: bool = False
     clarification_reason: Optional[str] = None
 
-    @field_validator("year_compare")
+    @field_validator("year_compare", mode="before")
     @classmethod
-    def _validate_year_compare(cls, years: list[int]) -> list[int]:
+    def _validate_year_compare(cls, years: object) -> list[int]:
+        if years is None:
+            return []
+        if not isinstance(years, list):
+            raise ValueError("year_compare must be a list or null.")
         if years and len(years) != 2:
             raise ValueError("year_compare must contain exactly two years when present.")
         for year in years:

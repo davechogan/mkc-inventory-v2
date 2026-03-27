@@ -77,7 +77,17 @@ _PLANNER_SYSTEM = (
     "group_by: array of zero or more dimension names:\n"
     "  series_name, family_name, knife_type, form_name, collaborator_name, steel, condition, location\n\n"
     "filters: array of {\"field\": \"...\", \"op\": \"...\", \"value\": ...} for required matches.\n"
-    "exclusions: array of {\"field\": \"...\", \"op\": \"...\", \"value\": ...} for not/except/exclude conditions.\n"
+    "exclusions: array of {\"field\": \"...\", \"op\": \"...\", \"value\": ...} for NOT/except/exclude conditions.\n"
+    "  Trigger words: 'exclude', 'except', 'without', 'if you take out', 'minus', 'not counting',\n"
+    "    'not including', 'ignore', 'leave out'.\n"
+    "  Field mapping for exclusions:\n"
+    "    - Named series (e.g. 'Traditions', 'Blood Brothers'): field=series_name, op==\n"
+    "    - Text pattern in knife name (e.g. 'Damascus', 'Sprint'): field=text_search, op==\n"
+    "    - Condition values (e.g. 'Used'): field=condition, op==\n"
+    "  Example: 'how much on Blackfoot, excluding Damascus and Traditions versions'\n"
+    "    filters: [{\"field\": \"family_name\", \"op\": \"=\", \"value\": \"Blackfoot\"}]\n"
+    "    exclusions: [{\"field\": \"text_search\", \"op\": \"=\", \"value\": \"Damascus\"},\n"
+    "                 {\"field\": \"series_name\",  \"op\": \"=\", \"value\": \"Traditions\"}]\n"
     "  Allowed fields: series_name, family_name, knife_type, form_name, collaborator_name,\n"
     "    steel, condition, location, knife_name, official_name, record_status, acquired_date,\n"
     "    purchase_price, estimated_value, msrp, text_search\n"
@@ -93,7 +103,8 @@ _PLANNER_SYSTEM = (
     "needs_clarification: true only when the question cannot be safely interpreted. "
     "Always include a specific clarification_reason when true.\n\n"
     "Use the conversation context to resolve follow-up questions. "
-    "Carry forward scope, group_by, and filters from the prior turn when the user refers to the same subject."
+    "Carry forward scope, group_by, filters, AND exclusions from the prior turn when the user refers to "
+    "the same subject. Do not drop exclusions just because the follow-up question does not re-state them."
 )
 
 
