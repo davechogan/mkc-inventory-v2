@@ -139,6 +139,26 @@ class CanonicalReportingPlan(BaseModel):
     needs_clarification: bool = False
     clarification_reason: Optional[str] = None
 
+    @field_validator("intent", mode="before")
+    @classmethod
+    def _coerce_intent(cls, v: object) -> object:
+        return v if v is not None else PlanIntent.LIST
+
+    @field_validator("scope", mode="before")
+    @classmethod
+    def _coerce_scope(cls, v: object) -> object:
+        return v if v is not None else PlanScope.INVENTORY
+
+    @field_validator("group_by", "filters", "exclusions", mode="before")
+    @classmethod
+    def _coerce_list_fields(cls, v: object) -> object:
+        return v if v is not None else []
+
+    @field_validator("needs_clarification", mode="before")
+    @classmethod
+    def _coerce_needs_clarification(cls, v: object) -> object:
+        return v if v is not None else False
+
     @field_validator("year_compare", mode="before")
     @classmethod
     def _validate_year_compare(cls, years: object) -> list[int]:
