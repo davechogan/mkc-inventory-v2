@@ -1,4 +1,8 @@
-"""Natural-language reporting: schema, semantic planning, SQL compilation, sessions.
+"""Natural-language reporting orchestrator: session management, hint tracking, and query execution.
+
+Constants live in ``reporting.constants``.
+SQL compilation lives in ``reporting.compiler``.
+Semantic planning lives in ``reporting.planner``.
 
 Env:
   ``REPORTING_SCOPE_PREPROCESSING`` — when ``1``/``true``/``yes``/``on``, enable scope-status
@@ -79,8 +83,6 @@ from reporting.planner import (
 )
 from reporting.retrieval import format_retrieval_context, retrieve_artifacts_with_meta
 
-
-# REPORTING_SCOPE_PREPROCESSING → reporting.planner
 
 
 def ensure_reporting_schema(conn: sqlite3.Connection) -> None:
@@ -244,8 +246,6 @@ _REPORTING_META_ANSWER = (
     "'which knives have an msrp above $300?'."
 )
 
-
-# _reporting_validate_sql, _reporting_exec_sql → reporting.compiler
 
 
 def _reporting_build_drill_link(row: dict[str, Any], intent: Optional[str] = None) -> Optional[str]:
@@ -726,9 +726,6 @@ def _reporting_promote_semantic_hints(
         "reasons": reasons,
         "candidates": promoted,
     }
-
-
-# _REPORTING_LLM_FILTER_KEYS → reporting.planner
 
 
 def _reporting_semantic_plan(
