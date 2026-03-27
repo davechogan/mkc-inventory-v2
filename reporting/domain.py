@@ -16,8 +16,6 @@ import re
 import sqlite3
 import time
 import uuid
-from collections.abc import Callable
-from contextlib import AbstractContextManager
 from datetime import date, datetime, timedelta
 from typing import Any, Optional
 from urllib.parse import urlencode
@@ -55,70 +53,31 @@ from reporting.regex_contract import (
     clean_llm_sql_fences,
     extract_first_json_object,
 )
+from reporting.constants import (
+    REPORTING_ALLOWED_SOURCES,
+    REPORTING_DEFAULT_MODEL,
+    REPORTING_DIRECT_LLM_SQL_META_KEY,
+    REPORTING_FORBIDDEN_SQL,
+    REPORTING_GROUPABLE_DIMENSIONS,
+    REPORTING_HINT_MIN_CONFIDENCE,
+    REPORTING_HINT_PROMOTION_ENABLED,
+    REPORTING_HINT_PROMOTION_MAX_PER_RUN,
+    REPORTING_HINT_PROMOTION_MIN_CONFIDENCE,
+    REPORTING_HINT_PROMOTION_MIN_EVIDENCE,
+    REPORTING_INTENTS,
+    REPORTING_MAX_ROWS_DEFAULT,
+    REPORTING_MAX_ROWS_HARD,
+    REPORTING_METRICS,
+    REPORTING_PLANNER_MODEL,
+    REPORTING_PLANNER_RETRY_MODEL,
+    REPORTING_RESPONDER_MODEL,
+    REPORTING_SERIES_ALIASES,
+    GetConn,
+    _ConnectionCtx,
+)
 from reporting.plan_models import CanonicalReportingPlan
 from reporting.plan_validator import validate_canonical_structure, validate_canonical_semantics
 from reporting.retrieval import format_retrieval_context, retrieve_artifacts_with_meta
-
-_ConnectionCtx = AbstractContextManager[sqlite3.Connection]
-GetConn = Callable[[], _ConnectionCtx]
-
-REPORTING_DEFAULT_MODEL = "qwen2.5:7b-instruct"
-REPORTING_PLANNER_MODEL = (os.environ.get("REPORTING_PLANNER_MODEL") or "qwen2.5:32b-instruct").strip() or "qwen2.5:32b-instruct"
-REPORTING_RESPONDER_MODEL = (os.environ.get("REPORTING_RESPONDER_MODEL") or "qwen2.5:7b-instruct").strip() or "qwen2.5:7b-instruct"
-REPORTING_PLANNER_RETRY_MODEL = (os.environ.get("REPORTING_PLANNER_RETRY_MODEL") or "").strip() or None
-REPORTING_MAX_ROWS_DEFAULT = 200
-REPORTING_MAX_ROWS_HARD = 1000
-REPORTING_ALLOWED_SOURCES = {"reporting_inventory", "reporting_models"}
-REPORTING_FORBIDDEN_SQL = (
-    "insert",
-    "update",
-    "delete",
-    "drop",
-    "alter",
-    "create",
-    "replace",
-    "truncate",
-    "attach",
-    "detach",
-    "pragma",
-    "vacuum",
-    "reindex",
-)
-REPORTING_INTENTS = {"missing_models", "list_inventory", "aggregate", "completion_cost"}
-REPORTING_GROUPABLE_DIMENSIONS = {
-    "series": "series_name",
-    "series_name": "series_name",
-    "family": "family_name",
-    "family_name": "family_name",
-    "type": "knife_type",
-    "knife_type": "knife_type",
-    "form": "form_name",
-    "form_name": "form_name",
-    "collaborator": "collaborator_name",
-    "collaborator_name": "collaborator_name",
-    "steel": "steel",
-    "condition": "condition",
-    "location": "location",
-}
-REPORTING_SERIES_ALIASES = {
-    "traditions": "Traditions",
-    "vip": "VIP",
-    "ultra": "Ultra",
-    "blood brothers": "Blood Brothers",
-}
-REPORTING_METRICS = {"count", "total_spend", "total_estimated_value"}
-REPORTING_HINT_MIN_CONFIDENCE = 0.55
-REPORTING_HINT_PROMOTION_ENABLED = (
-    (os.environ.get("REPORTING_HINT_PROMOTION_ENABLED", "1").strip().lower() in {"1", "true", "yes", "on"})
-)
-REPORTING_HINT_PROMOTION_MIN_CONFIDENCE = float(os.environ.get("REPORTING_HINT_PROMOTION_MIN_CONFIDENCE") or 0.80)
-REPORTING_HINT_PROMOTION_MIN_EVIDENCE = int(os.environ.get("REPORTING_HINT_PROMOTION_MIN_EVIDENCE") or 3)
-REPORTING_HINT_PROMOTION_MAX_PER_RUN = int(os.environ.get("REPORTING_HINT_PROMOTION_MAX_PER_RUN") or 50)
-
-# Debug A/B toggle: when enabled, bypass semantic planning + SQL compiler and
-# ask the LLM to generate SQL directly (while still running SQL through the
-# existing safety validator + executor).
-REPORTING_DIRECT_LLM_SQL_META_KEY = "reporting_direct_llm_sql"
 
 
 def _reporting_direct_llm_sql_enabled(conn: sqlite3.Connection) -> bool:
