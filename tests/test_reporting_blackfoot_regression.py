@@ -16,6 +16,8 @@ def test_blackfoot_followup_chain_preserves_exclusions_and_lists_items(invapp, m
     inserted_model_ids: list[int] = []
     inserted_inventory_ids: list[int] = []
 
+    call_count = [0]
+
     def fake_ollama_chat(
         model: str,
         system: str,
@@ -23,20 +25,47 @@ def test_blackfoot_followup_chain_preserves_exclusions_and_lists_items(invapp, m
         images_b64: Optional[list[str]] = None,
         timeout: float = 180.0,
     ) -> str:
-        if "convert collection questions into semantic JSON plans" in system:
-            # Keep planner deterministic and compatible with the canonical path.
-            return json.dumps(
-                {
+        if "canonical JSON plan" in system:
+            call_count[0] += 1
+            # Turn 1: aggregate with family filter + series/text exclusions.
+            # Turn 2: LLM carries forward context → list intent, same filters.
+            if call_count[0] == 1:
+                return json.dumps({
                     "intent": "aggregate",
-                    "filters": {"family_name": "Blackfoot"},
-                    "group_by": None,
+                    "scope": "inventory",
                     "metric": "total_spend",
+                    "group_by": [],
+                    "filters": [{"field": "family_name", "op": "=", "value": "Blackfoot"}],
+                    "exclusions": [
+                        {"field": "series_name", "op": "=", "value": "Traditions"},
+                        {"field": "text_search", "op": "=", "value": "Damascus"},
+                    ],
+                    "time_range": None,
+                    "year_compare": [],
+                    "sort": None,
                     "limit": 50,
-                    "date_start": None,
-                    "date_end": None,
-                    "year_compare": None,
-                }
-            )
+                    "needs_clarification": False,
+                    "clarification_reason": None,
+                })
+            else:
+                # Follow-up: list the contributing items, preserve exclusions.
+                return json.dumps({
+                    "intent": "list",
+                    "scope": "inventory",
+                    "metric": "count",
+                    "group_by": [],
+                    "filters": [{"field": "family_name", "op": "=", "value": "Blackfoot"}],
+                    "exclusions": [
+                        {"field": "series_name", "op": "=", "value": "Traditions"},
+                        {"field": "text_search", "op": "=", "value": "Damascus"},
+                    ],
+                    "time_range": None,
+                    "year_compare": [],
+                    "sort": None,
+                    "limit": 50,
+                    "needs_clarification": False,
+                    "clarification_reason": None,
+                })
         if "concise collection reporting assistant" in system:
             raise RuntimeError("force deterministic fallback")
         return "{}"
