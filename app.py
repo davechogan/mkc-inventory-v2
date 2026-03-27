@@ -1357,6 +1357,30 @@ class IdentifierQuery(BaseModel):
 app = FastAPI(title="MKC Inventory Manager")
 init_db()
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+# ---------------------------------------------------------------------------
+# Version endpoint — reads git info once at startup
+# ---------------------------------------------------------------------------
+
+def _read_git_version() -> dict[str, str]:
+    try:
+        commit = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"], cwd=BASE_DIR, text=True
+        ).strip()
+        dt_raw = subprocess.check_output(
+            ["git", "log", "-1", "--format=%ci"], cwd=BASE_DIR, text=True
+        ).strip()
+        # dt_raw is "YYYY-MM-DD HH:MM:SS ±HHMM" — trim timezone for display
+        dt = dt_raw[:16] if len(dt_raw) >= 16 else dt_raw
+        return {"commit": commit, "committed_at": dt}
+    except Exception:
+        return {"commit": "unknown", "committed_at": ""}
+
+_GIT_VERSION = _read_git_version()
+
+@app.get("/api/version", tags=["meta"])
+def get_version() -> dict[str, str]:
+    return _GIT_VERSION
 app.include_router(create_static_pages_router(static_dir=STATIC_DIR))
 app.include_router(
     create_admin_router(

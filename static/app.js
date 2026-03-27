@@ -2144,3 +2144,9 @@ if (PAGE === 'inventory') {
 } else if (PAGE === 'master') {
   initMasterPage();
 }
+
+// Version footer
+fetch('/api/version').then(r => r.json()).then(d => {
+  const el = document.getElementById('app-version-footer');
+  if (el && d.commit) el.textContent = d.commit + (d.committed_at ? ' · ' + d.committed_at : '');
+}).catch(() => {});

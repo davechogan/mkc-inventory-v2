@@ -1111,3 +1111,18 @@ th.sortable.sort-desc::after {
     grid-template-columns: 1fr;
   }
 }
+
+/* App version footer */
+#app-version-footer {
+  position: fixed;
+  bottom: 0.5rem;
+  right: 0.75rem;
+  font-size: 0.7rem;
+  color: #888;
+  opacity: 0.6;
+  pointer-events: none;
+  user-select: none;
+  z-index: 9999;
+  font-family: monospace;
+  letter-spacing: 0.02em;
+}
