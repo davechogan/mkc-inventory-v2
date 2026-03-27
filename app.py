@@ -1394,7 +1394,6 @@ app.include_router(
 )
 
 ai_router, ollama_check = create_ai_router(
-    get_conn=get_conn,
     run_identify=run_v2_identify,
     identifier_query_model=IdentifierQuery,
 )

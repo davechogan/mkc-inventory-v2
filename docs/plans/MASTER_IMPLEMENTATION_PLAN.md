@@ -223,8 +223,7 @@ Commit at each meaningful milestone with a descriptive message. When the phase i
 - [ ] Phase B branch merged to main with tag — pending commit
 
 **Known remaining legacy table reads (not blocking for Phase B):**
-- `admin_routes.py` distinguishing-features functions: `identifier_distinguishing_features` column only exists on `master_knives`; needs v2 column addition in Phase D
-- `ai_routes.py` LLM rerank: uses `master_knives` columns (`blade_profile`, `identifier_distinguishing_features`, etc.) not yet in v2
+- `admin_routes.py` distinguishing-features functions: query `master_knives.identifier_distinguishing_features` and `identifier_image_blob`; v2 equivalent is `knife_model_descriptors.distinguishing_features` + `knife_model_images.image_blob` — fixed as part of Phase B cleanup
 - `app.py` `init_db()`: several `ensure_*` helper functions still defined in app.py and called at startup; migration code cleanup is ongoing
 
 ---
@@ -385,7 +384,44 @@ All work must comply with `AI_Coding_Standards_and_Rules.md`. The most relevant 
 
 ---
 
-## 8. What a new agent session should do first
+## 8. Deferred Features
+
+Features that were scoped, understood, and explicitly deferred for future work. Each entry records what the feature does, why it was deferred, and what needs to happen to resume it.
+
+### DF-001 — Image-based knife identification (AI / Photo)
+
+**What it does:**
+POST `/api/ai/identify` — given an uploaded photo and/or text description, the pipeline:
+1. Extracts an OpenCV Hu silhouette vector from the image
+2. Compares against Hu vectors stored in `knife_model_images.silhouette_hu_json` for an early-exit match
+3. Calls a local Ollama vision model to produce a structured description (blade shape, handle material, distinguishing details)
+4. Runs keyword search with the vision output against the catalog
+5. If results are ambiguous, calls Ollama again to rerank the top candidates using full catalog data
+
+**Why deferred:**
+- The feature was never usable in production — LLM identification quality was too low to be reliable
+- The LLM rerank step referenced legacy `master_knives` columns (`blade_profile`, `collector_notes`, `evidence_summary`, `identifier_keywords`, `identifier_distinguishing_features`) that do not exist in v2 tables
+- Rather than migrate these columns to v2 just to support an unproven feature, the decision was made to remove it cleanly and revisit later
+
+**What was removed:**
+- `POST /api/ai/identify` endpoint and `_keyword_results_to_parsed` helper from `routes/ai_routes.py`
+- `GET /api/blade-shapes` route (only used by the AI identify UI)
+- AI tab (`#aiPanel`) from `static/identify.html`
+- `loadOllamaUi()`, `updateOllamaDefaultBtnState()`, `updateOllamaModelCheck()`, `renderAiIdentifyResult()` from `static/app.js`
+- Photo handling + `aiIdentifyForm` submit handler from `initIdentifyPage()` in `static/app.js`
+
+**What must be built to resume:**
+- Migrate `identifier_keywords`, `identifier_distinguishing_features`, `evidence_summary`, `collector_notes` to `knife_model_descriptors` (or a new `knife_model_identifier_data` table)
+- Migrate `identifier_image_blob` to `knife_model_images.image_blob` (column exists; data migration needed)
+- Rewrite the LLM rerank prompt builder (`blade_ai.build_rerank_prompt`) to use v2 columns
+- Evaluate LLM identification quality more rigorously before shipping
+- Restore the UI tab and endpoints once quality bar is met
+
+**Code reference:** See git history for `routes/ai_routes.py` prior to Phase B cleanup commit for the full original implementation.
+
+---
+
+## 9. What a new agent session should do first
 
 1. Read this file completely.
 2. Read `reporting/Reporting_AI_Architecture_vNext.md` — canonical pipeline spec.

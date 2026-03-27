@@ -95,24 +95,30 @@ def recompute_distinguishing_features(
             placeholders = ",".join("?" * len(knife_ids))
             rows = conn.execute(
                 """
-                SELECT id, name, identifier_image_blob
-                FROM master_knives
-                WHERE id IN (""" + placeholders + """)
-                  AND identifier_image_blob IS NOT NULL
-                  AND length(identifier_image_blob) > 0
+                SELECT km.id, km.official_name AS name, kmi.image_blob
+                FROM knife_models_v2 km
+                JOIN knife_model_images kmi ON kmi.knife_model_id = km.id
+                WHERE km.id IN (""" + placeholders + """)
+                  AND kmi.image_blob IS NOT NULL
+                  AND length(kmi.image_blob) > 0
                 """,
                 knife_ids,
             ).fetchall()
         else:
-            cond = "AND (identifier_distinguishing_features IS NULL OR trim(identifier_distinguishing_features) = '')" if missing_only else ""
+            missing_cond = (
+                "AND (d.distinguishing_features IS NULL OR trim(d.distinguishing_features) = '')"
+                if missing_only else ""
+            )
             rows = conn.execute(
                 f"""
-                SELECT id, name, identifier_image_blob
-                FROM master_knives
-                WHERE identifier_image_blob IS NOT NULL
-                  AND length(identifier_image_blob) > 0
-                {cond}
-                ORDER BY name COLLATE NOCASE
+                SELECT km.id, km.official_name AS name, kmi.image_blob
+                FROM knife_models_v2 km
+                JOIN knife_model_images kmi ON kmi.knife_model_id = km.id
+                LEFT JOIN knife_model_descriptors d ON d.knife_model_id = km.id
+                WHERE kmi.image_blob IS NOT NULL
+                  AND length(kmi.image_blob) > 0
+                {missing_cond}
+                ORDER BY km.official_name COLLATE NOCASE
                 """,
             ).fetchall()
     # Connection released; run LLM calls without holding DB
@@ -120,7 +126,7 @@ def recompute_distinguishing_features(
     failed: list[dict[str, Any]] = []
     total = len(rows)
     for i, r in enumerate(rows, 1):
-        blob = r["identifier_image_blob"]
+        blob = r["image_blob"]
         if not blob:
             continue
         app_logger.info("[dist-features] Processing %s/%s: %s...", i, total, r["name"])
@@ -140,11 +146,13 @@ def recompute_distinguishing_features(
         for features, kid in to_update:
             conn.execute(
                 """
-                UPDATE master_knives
-                SET identifier_distinguishing_features = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
+                INSERT INTO knife_model_descriptors (knife_model_id, distinguishing_features, updated_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(knife_model_id) DO UPDATE SET
+                    distinguishing_features = excluded.distinguishing_features,
+                    updated_at = CURRENT_TIMESTAMP
                 """,
-                (features, kid),
+                (kid, features),
             )
 
     return {
@@ -231,17 +239,19 @@ def create_admin_router(
         with get_conn() as conn:
             rows = conn.execute(
                 """
-                SELECT id, name,
-                       (identifier_image_blob IS NOT NULL AND length(identifier_image_blob) > 0) AS has_image,
-                       identifier_distinguishing_features
-                FROM master_knives
-                ORDER BY name COLLATE NOCASE
+                SELECT km.id, km.official_name AS name,
+                       (kmi.image_blob IS NOT NULL AND length(kmi.image_blob) > 0) AS has_image,
+                       d.distinguishing_features
+                FROM knife_models_v2 km
+                LEFT JOIN knife_model_images kmi ON kmi.knife_model_id = km.id
+                LEFT JOIN knife_model_descriptors d ON d.knife_model_id = km.id
+                ORDER BY km.official_name COLLATE NOCASE
                 """
             ).fetchall()
         result: list[dict[str, Any]] = []
         missing: list[dict[str, Any]] = []
         for r in rows:
-            dist = (r.get("identifier_distinguishing_features") or "").strip()
+            dist = (r.get("distinguishing_features") or "").strip()
             has_dist = bool(dist)
             entry = {"id": r["id"], "name": r["name"], "has_image": bool(r["has_image"]), "has_features": has_dist}
             if dist:

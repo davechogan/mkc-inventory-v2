@@ -21,17 +21,12 @@
   <header class="app-header">
     <div>
       <h1>Identify a knife</h1>
-      <p>Not sure what model you have? Search by keywords or use AI with a photo — both match against the MKC catalog.</p>
+      <p>Not sure what model you have? Search by keywords — matches against the MKC catalog.</p>
     </div>
   </header>
 
   <main class="layout">
-    <div class="identify-tabs">
-      <button type="button" class="tab-btn active" data-tab="keyword" aria-selected="true">Keyword search</button>
-      <button type="button" class="tab-btn" data-tab="ai" aria-selected="false">AI / Photo</button>
-    </div>
-
-    <section class="card identify-tab-panel" id="keywordPanel" aria-hidden="false">
+    <section class="card" id="keywordPanel">
       <div class="section-header">
         <div>
           <h2>Keyword search</h2>
@@ -74,55 +69,8 @@
       </form>
       <div id="identifierResults" class="identifier-results empty-state">No matches yet. Enter keywords or filters above.</div>
     </section>
-
-    <section class="card identify-tab-panel hidden" id="aiPanel" aria-hidden="true">
-      <div class="section-header">
-        <div>
-          <h2>AI identify (Ollama)</h2>
-          <div class="muted">
-            Local LLM on <span id="ollamaHostDisplay" class="mono">…</span> — describe the knife or upload a photo.
-            Vision models (llava, moondream) work best with photos. Silhouette comparison runs automatically.
-          </div>
-        </div>
-      </div>
-      <form id="aiIdentifyForm" class="grid-form" enctype="multipart/form-data">
-        <label class="full">Ollama model
-          <div class="ollama-model-row">
-            <select name="model" id="ollamaModelSelect"></select>
-            <button type="button" id="ollamaDefaultBtn" class="ollama-default-btn" title="Set as default model" aria-label="Set as default model">★</button>
-          </div>
-          <span id="ollamaCheckStatus" class="muted small" style="margin-top: 0.25rem; display: block;"></span>
-        </label>
-        <label class="full">What you see (markings, handle, blade shape, size, context)
-          <textarea name="description" id="aiDescription" rows="4" placeholder="e.g. orange G10, black PVD, ring on pommel, ~3.5&quot; blade…"></textarea>
-        </label>
-        <div class="ai-photo-section full">
-          <label class="ai-photo-label">Photo (optional — take one or pick from gallery)</label>
-          <div class="ai-photo-zone" id="aiPhotoZone">
-            <input type="file" name="image" id="aiPhotoInput" accept="image/*" />
-            <div class="ai-photo-placeholder" id="aiPhotoPlaceholder">
-              <span class="ai-photo-icon" aria-hidden="true">📷</span>
-              <span class="ai-photo-text">Tap to take photo or choose image</span>
-            </div>
-            <div class="ai-photo-preview hidden" id="aiPhotoPreview">
-              <img id="aiPhotoPreviewImg" src="" alt="Selected knife photo" />
-              <button type="button" class="ai-photo-remove" id="aiPhotoRemoveBtn" aria-label="Remove photo">Remove</button>
-            </div>
-          </div>
-        </div>
-        <label class="checkbox-label full ai-shape-hint-opt muted small">
-          OpenCV silhouette comparison runs automatically when you upload a photo.
-          If you add a ruler, place it along the blade (guard to tip) — we match blade length only, not overall.
-        </label>
-        <div class="form-actions full">
-          <button type="submit" id="aiSubmitBtn">Run identification</button>
-        </div>
-      </form>
-      <div id="aiIdentifyStatus" class="muted hidden"></div>
-      <div id="aiIdentifyOutput" class="ai-output hidden"></div>
-    </section>
   </main>
 
-  <script src="/static/app.js?v=7"></script>
+  <script src="/static/app.js?v=8"></script>
 </body>
 </html>
