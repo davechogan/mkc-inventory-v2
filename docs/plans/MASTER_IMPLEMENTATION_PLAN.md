@@ -260,30 +260,27 @@ Commit at each meaningful milestone with a descriptive message. When the phase i
 
 ---
 
-### Phase D — reporting/domain.py modularization
+### Phase D — reporting/domain.py modularization ✅ COMPLETE (tag: phase-D-complete)
 
 **Goal:** Split the 3128-line god module into focused modules per the coding standards §2.2 (No Monolithic Growth) and §2.3 (Separation of Concerns).
 
-**Proposed module split:**
+**Completed module split:**
 ```
 reporting/
-  planner.py        — _reporting_semantic_plan, _reporting_llm_plan, _reporting_heuristic_plan, _reporting_explicit_constraints, _reporting_apply_followup_carryover
-  compiler.py       — _reporting_plan_to_sql (canonical only), _reporting_validate_sql, _reporting_exec_sql
-  session.py        — session/message CRUD, _reporting_context_block
-  hints.py          — hint learning, promotion, feedback
-  synthesizer.py    — _reporting_generate_answer, _reporting_infer_chart, _reporting_default_followups
-  domain.py         — thin orchestrator that imports from above; eventually becomes routes-only glue
+  constants.py  — all shared constants and type aliases (NEW)
+  compiler.py   — compile_plan (canonical-only boundary), validate_sql, exec_sql (NEW)
+  planner.py    — 31 semantic/heuristic planning functions (NEW)
+  domain.py     — orchestrator: sessions, hints, run_reporting_query (1635 lines, down from 3279)
 ```
 
-**Important:** The `_reporting_plan_to_sql_legacy` path should be retired during this phase. Once the canonical `_reporting_plan_to_sql` is the single compiler, the legacy adapter is removed.
+**Deferred to a future phase** (no circular-import-safe path today): session.py, hints.py, synthesizer.py extraction.
 
-**Approach:** Move functions one module at a time, updating imports, running tests after each move. Do not do all modules in one commit.
-
-**Acceptance criteria for Phase D:**
-- [ ] `domain.py` is an orchestrator, not a library — it imports from specialized modules
-- [ ] `_reporting_plan_to_sql_legacy` is removed
-- [ ] All tests pass with no behavioral change
-- [ ] Phase D branch merged to main with tag
+**Acceptance criteria — all met:**
+- [x] `domain.py` is an orchestrator, not a library — it imports from specialized modules
+- [x] `_reporting_plan_to_sql_legacy` removed; dead code `_reporting_call_llm_for_sql` also removed
+- [x] `compile_plan()` enforces canonical-plan-only contract (raises `TypeError` otherwise)
+- [x] All 104 tests pass with no behavioral change
+- [x] Phase D branch merged to main with tag `phase-D-complete`
 
 ---
 
