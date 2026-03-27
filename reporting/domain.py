@@ -483,6 +483,62 @@ def _reporting_is_scope_status_question(question: str) -> bool:
     return asks_scope
 
 
+def _reporting_is_meta_question(question: str) -> bool:
+    """Return True for questions about the system's data model or capabilities.
+
+    These questions ask *about* the data fields or how the system works, not
+    *about* the knife collection data itself.  Routing them to the SQL planner
+    produces a confusing inventory listing (RPT-003).
+    """
+    q = " ".join((question or "").strip().lower().split())
+    if not q:
+        return False
+    patterns = (
+        "what field",
+        "which field",
+        "what fields",
+        "which fields",
+        "what column",
+        "which column",
+        "what data",
+        "what information do you",
+        "what are you using for",
+        "what do you use for",
+        "how do you calculate",
+        "how do you determine",
+        "how is cost",
+        "how is spend",
+        "how is value",
+        "what is your cost",
+        "what is the cost field",
+        "what does cost mean",
+        "what does spend mean",
+        "what does value mean",
+        "what metrics",
+        "what types of questions",
+        "what can you answer",
+        "what can you tell",
+        "what kinds of questions",
+    )
+    return any(p in q for p in patterns)
+
+
+_REPORTING_META_ANSWER = (
+    "Here is how I calculate cost and value fields:\n\n"
+    "• **purchase_price** — what you actually paid when you acquired the knife "
+    "(from your inventory record). This is used for 'total spend' or 'how much did I spend' questions.\n"
+    "• **estimated_value** — your current estimated resale or market value "
+    "(from your inventory record). This is used for 'estimated value' or 'what is my collection worth' questions.\n"
+    "• **msrp** — the manufacturer's suggested retail price from the catalog. "
+    "This is catalog data and is used for 'msrp' or 'retail price' questions.\n\n"
+    "For any spend question I use **purchase_price**. "
+    "For value questions I use **estimated_value**. "
+    "You can ask me things like: 'how much did I spend by series?', "
+    "'what is the estimated value of my Blackfoot knives?', or "
+    "'which knives have an msrp above $300?'."
+)
+
+
 def _reporting_validate_sql(sql: str) -> str:
     if not sql or not str(sql).strip():
         raise HTTPException(status_code=400, detail="No SQL generated for this question.")
@@ -540,7 +596,21 @@ def _reporting_exec_sql(
     return cols, rows, elapsed_ms
 
 
-def _reporting_build_drill_link(row: dict[str, Any]) -> Optional[str]:
+def _reporting_build_drill_link(row: dict[str, Any], intent: Optional[str] = None) -> Optional[str]:
+    """Build a drill-through URL for a result row.
+
+    For ``missing_models`` intent the row describes a model that is NOT in the
+    user's inventory.  Linking to the inventory view produces an empty list,
+    which is confusing (RPT-005).  Instead, link to the master catalog page with
+    the model name pre-filled in the search field so the user can inspect or add
+    it from there.
+    """
+    if intent == "missing_models":
+        name = str(row.get("official_name") or row.get("knife_name") or "").strip()
+        if name:
+            return f"/master.html?{urlencode({'search': name})}"
+        return None
+
     mapping = [
         ("knife_name", "search"),
         ("knife_type", "type"),
@@ -1285,16 +1355,39 @@ def _reporting_explicit_constraints(question: str) -> dict[str, Any]:
 
 def _reporting_prune_conflicting_filters(question: str, filters: dict[str, Any]) -> dict[str, Any]:
     """
-    Resolve ambiguous identity filters that can over-constrain results.
+    Resolve ambiguous or contradictory filters that would over-constrain results to zero rows.
 
-    Example: prompts with "Traditions knives" should not accidentally enforce both
-    series_name=Traditions and family_name=Traditions unless family is explicitly requested.
+    Two cases are handled:
+
+    1. Same-field contradiction (RPT-001): a positive filter and its negation for the same
+       field (e.g. series_name="Blood Brothers" and series_name__not="Blood Brothers") produce
+       a SQL WHERE clause that can never be satisfied.  Drop the exclusion when the positive
+       and negative values are equal under normalization.
+
+    2. Cross-dimension ambiguity: series_name, family_name, and knife_type carrying the same
+       normalized value simultaneously (e.g. from a heuristic that stamped the same entity
+       into multiple dimensions).  Drop the redundant dimensions unless the user explicitly
+       requested a breakdown by that dimension.
     """
     q = " ".join((question or "").strip().lower().split())
     out = dict(filters or {})
     if not out:
         return out
 
+    # --- Case 1: same-field positive+negative contradiction ---
+    for key in list(out.keys()):
+        if key.endswith("__not"):
+            base = key[:-5]
+            pos_val = out.get(base)
+            neg_val = out[key]
+            if pos_val is not None:
+                norm_pos = _reporting_normalize_filter_value(base, pos_val)
+                norm_neg = _reporting_normalize_filter_value(base, neg_val)
+                if norm_pos and norm_neg and norm_pos.lower() == norm_neg.lower():
+                    # Drop the exclusion; the positive filter is the user's intent.
+                    out.pop(key)
+
+    # --- Case 2: cross-dimension ambiguity ---
     series_val = out.get("series_name")
     if series_val:
         norm_series = _reporting_normalize_filter_value("series_name", series_val)
@@ -1622,6 +1715,12 @@ def _reporting_apply_followup_carryover(
 ) -> None:
     """For contextual follow-ups, carry forward prior filters and reshape list-after-aggregate prompts."""
     if not last_state or not _reporting_is_followup(question):
+        return
+    # Do not carry forward filters from a prior turn that returned zero rows.
+    # Those filters are likely contradictory or over-constrained; inheriting them
+    # locks the conversation into an unrecoverable empty state (RPT-002).
+    prior_row_count = last_state.get("_result_row_count")
+    if prior_row_count is not None and prior_row_count == 0:
         return
     q = " ".join(question.strip().lower().split())
     prev_f = dict(last_state.get("filters") or {})
@@ -2858,6 +2957,57 @@ def run_reporting_query(
             _log_error("guardrail_reject", unsafe_reason, mode="guardrail", semantic_intent=None, classification="invalid_request")
             raise HTTPException(status_code=400, detail=safe_msg)
 
+        # Short-circuit for meta/schema questions (RPT-003).
+        # These ask about the system's data model or field definitions, not about
+        # collection data.  Routing them to the SQL planner produces a confusing
+        # inventory listing.  Return a canned explanation instead.
+        if _reporting_is_meta_question(question):
+            assistant_message_id = _reporting_store_message(
+                conn,
+                session_id,
+                "assistant",
+                _REPORTING_META_ANSWER,
+                meta={"generation_mode": "meta_explanation"},
+            )
+            total_ms = round((time.perf_counter() - started) * 1000.0, 2)
+            _reporting_log_query_event(
+                conn,
+                session_id=session_id,
+                question=question,
+                planner_model=planner_model,
+                responder_model=responder_model,
+                generation_mode="meta_explanation",
+                semantic_intent=None,
+                sql_excerpt=None,
+                row_count=0,
+                execution_ms=None,
+                total_ms=total_ms,
+                status="ok",
+                error_detail=None,
+                meta={},
+            )
+            return {
+                "session_id": session_id,
+                "model": responder_model,
+                "planner_model": planner_model,
+                "answer_text": _REPORTING_META_ANSWER,
+                "columns": [],
+                "rows": [],
+                "chart_spec": None,
+                "sql_executed": None,
+                "follow_ups": [
+                    "How much have I spent total?",
+                    "What is the estimated value of my collection?",
+                    "Show me knives with an msrp above $300.",
+                ],
+                "confidence": 1.0,
+                "limitations": None,
+                "generation_mode": "meta_explanation",
+                "execution_ms": None,
+                "date_window": {"start": date_start, "end": date_end, "label": date_label},
+                "assistant_message_id": assistant_message_id,
+            }
+
         semantic_plan: Optional[dict[str, Any]] = None
         semantic_plan_validated: Optional[CanonicalReportingPlan] = None
         sql: Optional[str] = None
@@ -2974,15 +3124,14 @@ def run_reporting_query(
                 classification="internal_failure",
             )
             raise
+        primary_intent = (semantic_plan or {}).get("intent")
         rows_out = []
         for r in rows:
             row = dict(r)
-            drill = _reporting_build_drill_link(row)
+            drill = _reporting_build_drill_link(row, intent=primary_intent)
             if drill:
                 row["_drill_link"] = drill
             rows_out.append(row)
-
-        primary_intent = (semantic_plan or {}).get("intent")
         substantive = _reporting_has_substantive_rows(primary_intent, rows_out)
 
         # Learn and feedback hint confidence from final outcome.
@@ -3076,7 +3225,9 @@ def run_reporting_query(
             meta=meta,
         )
         if semantic_plan:
-            _reporting_set_last_query_state(conn, session_id, semantic_plan)
+            _reporting_set_last_query_state(
+                conn, session_id, {**semantic_plan, "_result_row_count": len(rows_out)}
+            )
         _reporting_update_summary(conn, session_id)
 
         total_ms = round((time.perf_counter() - started) * 1000.0, 2)

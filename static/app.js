@@ -2371,7 +2371,14 @@ function initMasterPage() {
     });
   }
 
-  loadMasterData().catch((err) => {
+  loadMasterData().then(() => {
+    const params = new URLSearchParams(window.location.search);
+    const search = params.get('search');
+    if (search) {
+      const el = document.getElementById('masterSearch');
+      if (el) { el.value = search; renderMasterTable(); }
+    }
+  }).catch((err) => {
     console.error(err);
     alert(`Failed to load master data: ${userFacingError(err)}`);
   });
