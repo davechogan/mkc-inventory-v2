@@ -19,10 +19,17 @@
       "catalog",
       "full catalog",
       "mkc made",
+      "mkc has",
+      "mkc offers",
+      "mkc makes",
+      "mkc produces",
+      "mkc carries",
+      "does mkc make",
+      "available",
       "all models",
       "every model"
     ],
-    "content": "catalog scope means questions about the full MKC model universe, including models not owned. Phrases like 'full catalog', 'what has MKC made', 'all models', or missing-model questions imply catalog or a comparison against catalog.",
+    "content": "catalog scope means the subject is MKC's product line, not the user's possessions. Use catalog when the user says 'MKC has', 'MKC offers', 'MKC makes', 'MKC produces', 'MKC carries', 'does MKC make', 'are available', 'what has MKC made', 'all models', or any phrasing where MKC (not the user) is the subject. inventory scope when the user says 'I have', 'my collection', 'I own', 'I bought'.",
     "canonical_scope": "catalog"
   }
 ]

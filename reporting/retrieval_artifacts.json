@@ -2,43 +2,79 @@
   {
     "artifact_id": "intent.aggregate.value_by_family",
     "kind": "intent",
-    "tags": ["aggregate", "value", "family"],
+    "tags": [
+      "aggregate",
+      "value",
+      "family"
+    ],
     "content": "When users ask for total collection value by family, use aggregate intent, group_by family_name, metric total_estimated_value, scope inventory unless catalog is explicit."
   },
   {
     "artifact_id": "intent.aggregate.spend",
     "kind": "intent",
-    "tags": ["aggregate", "spend", "purchase_price"],
+    "tags": [
+      "aggregate",
+      "spend",
+      "purchase_price"
+    ],
     "content": "Spend questions map to aggregate intent with metric total_spend computed from purchase_price * quantity."
   },
   {
     "artifact_id": "mapping.series_aliases",
     "kind": "mapping",
-    "tags": ["series", "traditions", "vip", "ultra", "blood brothers"],
+    "tags": [
+      "series",
+      "traditions",
+      "vip",
+      "ultra",
+      "blood brothers"
+    ],
     "content": "Traditions, VIP, Ultra, and Blood Brothers are series_name values unless the user explicitly asks for family/type."
   },
   {
     "artifact_id": "mapping.family_vs_series",
     "kind": "mapping",
-    "tags": ["family", "series", "disambiguation"],
+    "tags": [
+      "family",
+      "series",
+      "disambiguation"
+    ],
     "content": "Phrase 'in the <X> family' maps to family_name filters. Phrase 'in the <X> series/line' maps to series_name filters."
   },
   {
     "artifact_id": "constraint.exclusions",
     "kind": "rule",
-    "tags": ["exclude", "excluding", "without", "not"],
+    "tags": [
+      "exclude",
+      "excluding",
+      "without",
+      "not"
+    ],
     "content": "User exclusions (exclude/without/not including) must preserve negation in canonical plan using exclusions list. Never invert exclusions into positive filters."
   },
   {
     "artifact_id": "scope.default_inventory",
     "kind": "rule",
-    "tags": ["scope", "inventory", "catalog"],
-    "content": "Default scope is inventory unless user explicitly asks for full catalog."
+    "tags": [
+      "scope",
+      "inventory",
+      "catalog",
+      "mkc has",
+      "mkc makes",
+      "mkc offers",
+      "available"
+    ],
+    "content": "scope=inventory when the user refers to their own knives (I have, my collection, I bought, I own). scope=catalog when the user refers to MKC's product line (MKC has, MKC makes, MKC offers, MKC produces, MKC carries, does MKC make, all models, available from MKC). The subject of the sentence decides scope \u2014 not just the presence of a brand name."
   },
   {
     "artifact_id": "followup.list_underlying_items",
     "kind": "rule",
-    "tags": ["followup", "list", "those", "that number"],
+    "tags": [
+      "followup",
+      "list",
+      "those",
+      "that number"
+    ],
     "content": "Follow-ups asking to list items that made up an aggregate should use list intent with the same explicit filters/exclusions, not another scalar aggregate."
   }
 ]

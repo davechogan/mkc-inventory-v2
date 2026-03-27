@@ -71,6 +71,25 @@
   },
   {
     "kind": "example",
+    "artifact_id": "example.blood_brothers_catalog",
+    "tags": [
+      "blood brothers",
+      "mkc has",
+      "mkc offers",
+      "mkc makes",
+      "catalog",
+      "series"
+    ],
+    "content": "When the user asks what Blood Brothers knives MKC has, offers, or makes, the subject is MKC's catalog — not the user's inventory. Use scope=catalog, filter series_name=Blood Brothers.",
+    "natural_query": "show me all of the blood brothers knives MKC has",
+    "hint_intent": "list",
+    "hint_metric": "count",
+    "hint_scope": "catalog",
+    "hint_year_compare": null,
+    "hint_group_by": null
+  },
+  {
+    "kind": "example",
     "artifact_id": "example.speedgoat_family",
     "tags": [
       "speedgoat",
@@ -169,10 +188,16 @@
     "artifact_id": "example.mkc_made_catalog",
     "tags": [
       "mkc made",
+      "mkc has",
+      "mkc offers",
+      "mkc makes",
+      "mkc produces",
+      "mkc carries",
       "catalog",
-      "all models"
+      "all models",
+      "available"
     ],
-    "content": "Questions about what MKC has made target the full catalog.",
+    "content": "When MKC (not the user) is the subject — 'MKC has', 'MKC offers', 'MKC makes', 'MKC carries', 'does MKC make', 'are available' — use scope=catalog. The catalog covers all MKC models ever made, not just what the user owns.",
     "natural_query": "how many speedgoats has MKC made",
     "hint_intent": "aggregate",
     "hint_metric": "count",
