@@ -19,19 +19,21 @@ def test_reporting_retrieval_meta_is_persisted_in_assistant_message(invapp, monk
         images_b64: Optional[list[str]] = None,
         timeout: float = 180.0,
     ) -> str:
-        if "convert collection questions into semantic JSON plans" in system:
-            return json.dumps(
-                {
-                    "intent": "list_inventory",
-                    "filters": {},
-                    "group_by": None,
-                    "metric": "count",
-                    "limit": 10,
-                    "date_start": None,
-                    "date_end": None,
-                    "year_compare": None,
-                }
-            )
+        if "canonical JSON plan" in system:
+            return json.dumps({
+                "intent": "list",
+                "scope": "inventory",
+                "metric": "count",
+                "group_by": [],
+                "filters": [],
+                "exclusions": [],
+                "time_range": None,
+                "year_compare": [],
+                "sort": None,
+                "limit": 10,
+                "needs_clarification": False,
+                "clarification_reason": None,
+            })
         if "concise collection reporting assistant" in system:
             raise RuntimeError("force deterministic fallback")
         return "{}"

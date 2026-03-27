@@ -1,12 +1,14 @@
 """Natural-language reporting orchestrator: session management, hint tracking, and query execution.
 
+Pipeline (per query):
+  Retrieval → LLM planner → Structural validation → Semantic validation
+  → Deterministic SQL compilation → SQL validation → Execution → LLM responder → Response
+
 Constants live in ``reporting.constants``.
 SQL compilation lives in ``reporting.compiler``.
 Semantic planning lives in ``reporting.planner``.
 
 Env:
-  ``REPORTING_SCOPE_PREPROCESSING`` — when ``1``/``true``/``yes``/``on``, enable scope-status
-  short-circuit and inventory-vs-catalog clarification prompts. Default **unset** = off (legacy behavior).
   ``REPORTING_DEBUG_PIPELINE`` — when ``1``/``true``/``yes``/``on``, responses include ``pipeline_debug``
   (retrieval query text, planner/responder prompts and raw model output). Do not enable in untrusted environments.
   Other reporting model env vars: ``REPORTING_PLANNER_MODEL``, ``REPORTING_RESPONDER_MODEL``, …
@@ -33,7 +35,6 @@ from sqlite_schema import column_exists
 from reporting.regex_contract import (
     RE_HINT_ENTITY_STOP_PREFIX,
     RE_HINT_ENTITY_STOP_SUFFIX,
-    extract_first_json_object,
 )
 from reporting.compiler import (
     compile_plan as _reporting_plan_to_sql,
@@ -54,32 +55,25 @@ from reporting.constants import (
     REPORTING_RESPONDER_MODEL,
     GetConn,
 )
-from reporting.plan_models import CanonicalReportingPlan
-from reporting.plan_validator import validate_canonical_structure, validate_canonical_semantics
+from reporting.plan_models import (
+    CanonicalReportingPlan,
+    FilterClause,
+    FilterOp,
+    PlanDimension,
+    PlanField,
+    PlanIntent,
+    PlanMetric,
+    PlanScope,
+    SortSpec,
+    SortDirection,
+    TimeRange,
+)
+from reporting.plan_validator import validate_canonical_semantics
 from reporting.planner import (
-    REPORTING_SCOPE_PREPROCESSING,
-    _reporting_apply_followup_carryover,
     _reporting_build_prompt_schema,
-    _reporting_clarification_plan_planner_failed,
-    _reporting_detect_date_bounds,
-    _reporting_detect_year_comparison,
-    _reporting_detect_unsafe_request,
-    _reporting_direct_llm_sql_enabled,
-    _reporting_explicit_constraints,
     _reporting_has_substantive_rows,
-    _reporting_heuristic_plan,
-    _reporting_is_completion_cost_question,
-    _reporting_is_meta_question,
-    _reporting_is_scope_status_question,
-    _reporting_legacy_plan_from_llm_dict,
     _reporting_llm_plan,
-    _reporting_merge_explicit_constraints_into_plan,
-    _reporting_needs_scope_clarification,
-    _reporting_normalize_filter_value,
-    _reporting_planner_hints_payload,
-    _reporting_prune_conflicting_filters,
-    _reporting_template_sql,
-    reporting_scope_preprocessing_enabled,
+    _reporting_summarize_state_for_hints,
 )
 from reporting.retrieval import format_retrieval_context, retrieve_artifacts_with_meta
 
@@ -734,82 +728,70 @@ def _reporting_semantic_plan(
     question: str,
     session_id: str,
     context_block: str,
+    retrieval_context: str,
+    schema_context: str,
     retry_model: Optional[str] = None,
     *,
     debug: bool = False,
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    last_state = _reporting_get_last_query_state(conn, session_id)
-    explicit = _reporting_explicit_constraints(question)
-    heuristic = _reporting_heuristic_plan(question, last_state=last_state)
+) -> tuple[CanonicalReportingPlan, dict[str, Any]]:
+    """Call LLM planner and return a CanonicalReportingPlan.
+
+    Retrieval and schema context are prepared by the caller (run_reporting_query)
+    so they appear as first-class visible steps in the pipeline.
+    Returns (canonical_plan, meta). plan may have needs_clarification=True if
+    the LLM could not produce a valid plan.
+    """
     learned_hints = _reporting_get_semantic_hints(conn, session_id, question)
-    planner_hints = _reporting_planner_hints_payload(
-        question, explicit, heuristic, learned_hints, last_state
-    )
-    schema_context = _reporting_build_prompt_schema(conn)
-    llm_plan, retrieval_meta, planner_dbg_primary = _reporting_llm_plan(
-        conn,
+
+    canonical_plan, planner_dbg = _reporting_llm_plan(
         planner_model,
         question,
         context_block,
         schema_context,
-        planner_hints=planner_hints,
+        retrieval_context,
+        learned_hints=learned_hints,
         debug=debug,
     )
+    planner_attempts = 1
     planner_llm: dict[str, Any] = {}
     if debug:
-        planner_llm["primary"] = planner_dbg_primary
-    planner_attempts = 1
-    if not isinstance(llm_plan, dict) and retry_model and retry_model != planner_model:
-        retry, retry_retrieval_meta, planner_dbg_retry = _reporting_llm_plan(
-            conn,
+        planner_llm["primary"] = planner_dbg
+
+    if canonical_plan is None and retry_model and retry_model != planner_model:
+        canonical_plan, planner_dbg_retry = _reporting_llm_plan(
             retry_model,
             question,
             context_block,
             schema_context,
-            planner_hints=planner_hints,
+            retrieval_context,
+            learned_hints=learned_hints,
             debug=debug,
         )
         planner_attempts = 2
         if debug:
             planner_llm["retry"] = planner_dbg_retry
-        if isinstance(retry, dict):
-            llm_plan = retry
-            retrieval_meta = retry_retrieval_meta
-    mode = "semantic_llm_plan"
-    if not isinstance(llm_plan, dict):
-        plan = _reporting_clarification_plan_planner_failed()
-        mode = "semantic_llm_unparsed"
-    else:
-        plan = _reporting_legacy_plan_from_llm_dict(llm_plan, question)
-        plan = _reporting_merge_explicit_constraints_into_plan(plan, explicit)
-        _reporting_apply_followup_carryover(plan, last_state, question)
-        plan["filters"] = _reporting_prune_conflicting_filters(question, plan.get("filters") or {})
 
-    canonical_candidate = CanonicalReportingPlan.from_legacy_semantic_plan(plan)
-    structural = validate_canonical_structure(canonical_candidate.model_dump())
-    if not structural.valid:
-        err = "; ".join(structural.errors[:3]) or "Invalid canonical plan."
-        raise HTTPException(status_code=400, detail=f"Planner produced invalid plan structure: {err}")
-    canonical_valid = structural.canonical_plan
-    if canonical_valid is None:
-        raise HTTPException(status_code=400, detail="Planner produced invalid canonical plan structure.")
-    # Semantic validation is performed in run_reporting_query before compilation.
-    normalized_plan = canonical_valid.to_legacy_semantic_plan()
+    if canonical_plan is None:
+        canonical_plan = CanonicalReportingPlan(
+            intent=PlanIntent.LIST,
+            scope=PlanScope.INVENTORY,
+            metric=PlanMetric.COUNT,
+            needs_clarification=True,
+            clarification_reason=(
+                "The planner could not produce a valid structured plan for this question. "
+                "Please rephrase with a concrete scope, time window, or sort intent."
+            ),
+        )
 
     meta_out: dict[str, Any] = {
-        "mode": mode,
+        "mode": "semantic_llm_plan" if not canonical_plan.needs_clarification else "semantic_llm_unparsed",
         "planner_attempts": planner_attempts,
         "hint_ids": learned_hints.get("hint_ids") or [],
         "hints": learned_hints.get("hints") or [],
-        "retrieval": retrieval_meta or {},
-        "plan_validation": {
-            "structural": structural.classification,
-            "semantic": "pending",
-        },
     }
     if debug and planner_llm:
         meta_out["planner_llm"] = planner_llm
-    return normalized_plan, meta_out
+    return canonical_plan, meta_out
 
 class ReportingQueryIn(BaseModel):
     question: str = Field(min_length=2, max_length=2000)
@@ -1141,7 +1123,6 @@ def run_reporting_query(
     if not question:
         raise HTTPException(status_code=400, detail="Question is required.")
     debug_pipeline = _reporting_pipeline_debug_enabled(payload)
-    date_start, date_end, date_label = _reporting_detect_date_bounds(question)
 
     route_models = _reporting_model_route(payload.model, ollama_check_payload)
     planner_model = route_models["planner_model"] or REPORTING_DEFAULT_MODEL
@@ -1161,6 +1142,7 @@ def run_reporting_query(
 
         _reporting_store_message(conn, session_id, "user", question)
         context_block = _reporting_context_block(conn, session_id)
+
         def _log_error(
             status: str,
             detail: str,
@@ -1186,298 +1168,136 @@ def run_reporting_query(
                 meta={"classification": classification} if classification else {},
             )
 
-        # Optional scope preprocessing: short-circuit on scope_status or clarification_scope.
-        # Controlled by REPORTING_SCOPE_PREPROCESSING (default off = legacy production).
-        if REPORTING_SCOPE_PREPROCESSING and _reporting_is_scope_status_question(question):
-            state = _reporting_get_last_query_state(conn, session_id) or {}
-            scope = str(state.get("scope") or "inventory").strip().lower()
-            if scope == "catalog":
-                msg = (
-                    "I am currently scoped to the full MKC catalog "
-                    "(all models made), not just your inventory."
-                )
-            else:
-                msg = (
-                    "I am currently scoped to your inventory "
-                    "(knives you own), not the full MKC catalog."
-                )
-            assistant_message_id = _reporting_store_message(
-                conn,
-                session_id,
-                "assistant",
-                msg,
-                meta={"scope_status": scope},
-            )
-            total_ms = round((time.perf_counter() - started) * 1000.0, 2)
-            _reporting_log_query_event(
-                conn,
-                session_id=session_id,
-                question=question,
-                planner_model=planner_model,
-                responder_model=responder_model,
-                generation_mode="scope_status",
-                semantic_intent=None,
-                sql_excerpt=None,
-                row_count=0,
-                execution_ms=None,
-                total_ms=total_ms,
-                status="ok",
-                error_detail=None,
-                meta={"scope": scope},
-            )
-            return {
-                "session_id": session_id,
-                "model": responder_model,
-                "planner_model": planner_model,
-                "answer_text": msg,
-                "columns": [],
-                "rows": [],
-                "chart_spec": None,
-                "sql_executed": None,
-                "follow_ups": [],
-                "confidence": 0.9,
-                "limitations": None,
-                "generation_mode": "scope_status",
-                "execution_ms": None,
-                "date_window": {"start": date_start, "end": date_end, "label": date_label},
-                "assistant_message_id": assistant_message_id,
-            }
+        # ── Step 1: Retrieval ──────────────────────────────────────────────
+        retrieval_artifacts, retrieval_meta = retrieve_artifacts_with_meta(
+            question, top_k=6, conn=conn, debug=debug_pipeline
+        )
+        retrieval_context = format_retrieval_context(retrieval_artifacts)
 
-        if REPORTING_SCOPE_PREPROCESSING and _reporting_needs_scope_clarification(question):
-            clarify = (
-                "Quick clarification: do you want this based on knives you currently own "
-                "(your inventory), or based on all models MKC has made (full catalog)?"
-            )
-            follow_ups = [
-                f"{question.rstrip('?')} in my inventory (knives I own)?",
-                f"{question.rstrip('?')} in the full MKC catalog (all models made)?",
-            ]
-            assistant_message_id = _reporting_store_message(
-                conn,
-                session_id,
-                "assistant",
-                clarify,
-                meta={"clarification_needed": "scope", "follow_ups": follow_ups},
-            )
-            total_ms = round((time.perf_counter() - started) * 1000.0, 2)
-            _reporting_log_query_event(
-                conn,
-                session_id=session_id,
-                question=question,
-                planner_model=planner_model,
-                responder_model=responder_model,
-                generation_mode="clarification_scope",
-                semantic_intent=None,
-                sql_excerpt=None,
-                row_count=0,
-                execution_ms=None,
-                total_ms=total_ms,
-                status="clarification_needed",
-                error_detail="scope_ambiguous",
-                meta={"follow_ups": follow_ups},
-            )
-            return {
-                "session_id": session_id,
-                "model": responder_model,
-                "planner_model": planner_model,
-                "answer_text": clarify,
-                "columns": [],
-                "rows": [],
-                "chart_spec": None,
-                "sql_executed": None,
-                "follow_ups": follow_ups,
-                "confidence": None,
-                "limitations": "Scope was ambiguous (inventory vs full catalog).",
-                "generation_mode": "clarification_scope",
-                "execution_ms": None,
-                "date_window": {"start": date_start, "end": date_end, "label": date_label},
-                "assistant_message_id": assistant_message_id,
-            }
+        # ── Step 2: Schema context ─────────────────────────────────────────
+        schema_context = _reporting_build_prompt_schema(conn)
 
-        unsafe_reason = _reporting_detect_unsafe_request(question)
-        if unsafe_reason:
-            safe_msg = (
-                "I can only help with safe, read-only collection questions. "
-                "Please ask in plain language without SQL commands or schema instructions."
-            )
-            _reporting_store_message(
-                conn,
-                session_id,
-                "assistant",
-                safe_msg,
-                meta={"guardrail": "unsafe_request", "reason": unsafe_reason},
-            )
-            _log_error("guardrail_reject", unsafe_reason, mode="guardrail", semantic_intent=None, classification="invalid_request")
-            raise HTTPException(status_code=400, detail=safe_msg)
+        # ── Step 3: Plan generation ────────────────────────────────────────
+        # Explicit compare mode: build canonical plan directly from UI params.
+        # No LLM call needed; still goes through compilation and execution.
+        canonical_plan: Optional[CanonicalReportingPlan] = None
+        plan_meta: dict[str, Any] = {}
 
-        # Short-circuit for meta/schema questions (RPT-003).
-        # These ask about the system's data model or field definitions, not about
-        # collection data.  Routing them to the SQL planner produces a confusing
-        # inventory listing.  Return a canned explanation instead.
-        if _reporting_is_meta_question(question):
-            assistant_message_id = _reporting_store_message(
-                conn,
-                session_id,
-                "assistant",
-                _REPORTING_META_ANSWER,
-                meta={"generation_mode": "meta_explanation"},
-            )
-            total_ms = round((time.perf_counter() - started) * 1000.0, 2)
-            _reporting_log_query_event(
-                conn,
-                session_id=session_id,
-                question=question,
-                planner_model=planner_model,
-                responder_model=responder_model,
-                generation_mode="meta_explanation",
-                semantic_intent=None,
-                sql_excerpt=None,
-                row_count=0,
-                execution_ms=None,
-                total_ms=total_ms,
-                status="ok",
-                error_detail=None,
-                meta={},
-            )
-            return {
-                "session_id": session_id,
-                "model": responder_model,
-                "planner_model": planner_model,
-                "answer_text": _REPORTING_META_ANSWER,
-                "columns": [],
-                "rows": [],
-                "chart_spec": None,
-                "sql_executed": None,
-                "follow_ups": [
-                    "How much have I spent total?",
-                    "What is the estimated value of my collection?",
-                    "Show me knives with an msrp above $300.",
-                ],
-                "confidence": 1.0,
-                "limitations": None,
-                "generation_mode": "meta_explanation",
-                "execution_ms": None,
-                "date_window": {"start": date_start, "end": date_end, "label": date_label},
-                "assistant_message_id": assistant_message_id,
-            }
-
-        semantic_plan: Optional[dict[str, Any]] = None
-        semantic_plan_validated: Optional[CanonicalReportingPlan] = None
-        sql: Optional[str] = None
-        sql_meta: dict[str, Any] = {}
-        hint_ids_used: list[int] = []
-
-        # Explicit compare mode remains template-backed for predictable behavior.
         if payload.compare_dimension and payload.compare_value_a and payload.compare_value_b:
-            sql, sql_meta = _reporting_template_sql(
-                question,
-                date_start,
-                date_end,
-                compare_dimension=payload.compare_dimension,
-                compare_a=payload.compare_value_a,
-                compare_b=payload.compare_value_b,
-            )
-        else:
-            semantic_plan, semantic_meta = _reporting_semantic_plan(
+            dim_map = {
+                "family": "family_name",
+                "type": "knife_type",
+                "series": "series_name",
+                "steel": "steel",
+                "condition": "condition",
+                "location": "location",
+            }
+            dim_col = dim_map.get(str(payload.compare_dimension).lower())
+            if dim_col:
+                try:
+                    canonical_plan = CanonicalReportingPlan(
+                        intent=PlanIntent.AGGREGATE,
+                        scope=PlanScope.INVENTORY,
+                        metric=PlanMetric.TOTAL_SPEND,
+                        group_by=[PlanDimension(dim_col)],
+                        filters=[FilterClause(
+                            field=PlanField(dim_col),
+                            op=FilterOp.IN,
+                            value=[payload.compare_value_a, payload.compare_value_b],
+                        )],
+                    )
+                    plan_meta = {"mode": "compare_explicit"}
+                except Exception:
+                    canonical_plan = None
+
+        if canonical_plan is None:
+            canonical_plan, plan_meta = _reporting_semantic_plan(
                 conn,
                 planner_model,
                 question,
                 session_id,
                 context_block,
+                retrieval_context,
+                schema_context,
                 retry_model=retry_model,
                 debug=debug_pipeline,
             )
-            semantic_plan_validated = CanonicalReportingPlan.from_legacy_semantic_plan(semantic_plan)
-            semantic_check = validate_canonical_semantics(semantic_plan_validated)
-            if not semantic_check.valid:
-                reason = "; ".join(semantic_check.errors[:2]) or "Plan validation failed."
-                if semantic_check.classification == "clarification_needed":
-                    assistant_message_id = _reporting_store_message(
-                        conn,
-                        session_id,
-                        "assistant",
-                        reason,
-                        meta={"clarification_needed": True, "validation_stage": "semantic"},
-                    )
-                    total_ms = round((time.perf_counter() - started) * 1000.0, 2)
-                    _reporting_log_query_event(
-                        conn,
-                        session_id=session_id,
-                        question=question,
-                        planner_model=planner_model,
-                        responder_model=responder_model,
-                        generation_mode="clarification_semantic",
-                        semantic_intent=(semantic_plan or {}).get("intent"),
-                        sql_excerpt=None,
-                        row_count=0,
-                        execution_ms=None,
-                        total_ms=total_ms,
-                        status="clarification_needed",
-                        error_detail=reason,
-                        meta={"validation_stage": "semantic"},
-                    )
-                    return {
-                        "session_id": session_id,
-                        "model": responder_model,
-                        "planner_model": planner_model,
-                        "answer_text": reason,
-                        "columns": [],
-                        "rows": [],
-                        "chart_spec": None,
-                        "sql_executed": None,
-                        "follow_ups": [],
-                        "confidence": None,
-                        "limitations": "Semantic plan requested clarification.",
-                        "generation_mode": "clarification_semantic",
-                        "execution_ms": None,
-                        "date_window": {"start": date_start, "end": date_end, "label": date_label},
-                        "assistant_message_id": assistant_message_id,
-                    }
-                _log_error(
-                    "invalid_plan",
-                    reason,
-                    mode="semantic_invalid",
-                    semantic_intent=(semantic_plan or {}).get("intent"),
-                    classification="invalid_plan",
-                )
-                raise HTTPException(status_code=400, detail=f"Invalid semantic plan: {reason}")
-            sql, compile_meta = _reporting_plan_to_sql(
-                semantic_plan_validated,
-                date_start,
-                date_end,
-                payload.max_rows,
+
+        # ── Step 4: Clarification check ────────────────────────────────────
+        if canonical_plan.needs_clarification:
+            reason = canonical_plan.clarification_reason or "Please clarify your question."
+            assistant_message_id = _reporting_store_message(
+                conn, session_id, "assistant", reason,
+                meta={"clarification_needed": True, "generation_mode": plan_meta.get("mode")},
             )
-            sql_meta = {**semantic_meta, **compile_meta}
-            sql_meta["plan_validation"] = {
-                "structural": (semantic_meta.get("plan_validation") or {}).get("structural", "ok"),
-                "semantic": semantic_check.classification,
+            total_ms = round((time.perf_counter() - started) * 1000.0, 2)
+            _reporting_log_query_event(
+                conn, session_id=session_id, question=question,
+                planner_model=planner_model, responder_model=responder_model,
+                generation_mode="clarification", semantic_intent=None,
+                sql_excerpt=None, row_count=0, execution_ms=None, total_ms=total_ms,
+                status="clarification_needed", error_detail=reason,
+                meta={"planner_attempts": plan_meta.get("planner_attempts")},
+            )
+            return {
+                "session_id": session_id,
+                "model": responder_model,
+                "planner_model": planner_model,
+                "answer_text": reason,
+                "columns": [], "rows": [], "chart_spec": None, "sql_executed": None,
+                "follow_ups": [], "confidence": None,
+                "limitations": "Clarification required before query can proceed.",
+                "generation_mode": "clarification",
+                "execution_ms": None,
+                "date_window": {"start": None, "end": None, "label": None},
+                "assistant_message_id": assistant_message_id,
+                "semantic_plan": None, "retrieval": retrieval_meta,
             }
-            hint_ids_used = [int(x) for x in (semantic_meta.get("hint_ids") or []) if isinstance(x, int) or str(x).isdigit()]
+
+        # ── Step 5: Semantic validation ────────────────────────────────────
+        semantic_check = validate_canonical_semantics(canonical_plan)
+        if not semantic_check.valid:
+            reason = "; ".join(semantic_check.errors[:2]) or "Plan validation failed."
+            _log_error(
+                "invalid_plan", reason,
+                mode="semantic_invalid",
+                semantic_intent=canonical_plan.intent.value,
+                classification="invalid_plan",
+            )
+            raise HTTPException(status_code=400, detail=f"Invalid semantic plan: {reason}")
+
+        # ── Step 6: SQL compilation ────────────────────────────────────────
+        date_start = canonical_plan.time_range.start if canonical_plan.time_range else None
+        date_end = canonical_plan.time_range.end if canonical_plan.time_range else None
+        sql, compile_meta = _reporting_plan_to_sql(canonical_plan, date_start, date_end, payload.max_rows)
+
         if not sql:
             _log_error(
                 "no_sql",
-                f"Could not derive SQL. {sql_meta.get('error') or ''}".strip(),
-                mode=sql_meta.get("mode"),
-                semantic_intent=(semantic_plan or {}).get("intent"),
+                f"Could not derive SQL. {compile_meta.get('error') or ''}".strip(),
+                mode=compile_meta.get("mode"),
+                semantic_intent=canonical_plan.intent.value,
                 classification="invalid_plan",
             )
             raise HTTPException(
                 status_code=400,
-                detail=f"Could not derive SQL from validated semantic plan. {sql_meta.get('error') or ''}".strip(),
+                detail=f"Could not derive SQL from validated plan. {compile_meta.get('error') or ''}".strip(),
             )
 
+        # ── Step 7: SQL execution ──────────────────────────────────────────
         try:
             columns, rows, execution_ms = _reporting_exec_sql(conn, sql, payload.max_rows)
         except HTTPException as exc:
             _log_error(
-                "sql_error",
-                str(exc.detail),
-                mode=sql_meta.get("mode"),
-                semantic_intent=(semantic_plan or {}).get("intent"),
+                "sql_error", str(exc.detail),
+                mode=compile_meta.get("mode"),
+                semantic_intent=canonical_plan.intent.value,
                 classification="internal_failure",
             )
             raise
-        primary_intent = (semantic_plan or {}).get("intent")
+
+        # ── Step 8: Post-execution processing ─────────────────────────────
+        primary_intent = canonical_plan.intent.value
         rows_out = []
         for r in rows:
             row = dict(r)
@@ -1487,123 +1307,84 @@ def run_reporting_query(
             rows_out.append(row)
         substantive = _reporting_has_substantive_rows(primary_intent, rows_out)
 
-        # Learn and feedback hint confidence from final outcome.
+        hint_ids_used = [int(x) for x in (plan_meta.get("hint_ids") or []) if isinstance(x, int) or str(x).isdigit()]
         if hint_ids_used:
             _reporting_feedback_semantic_hints(conn, hint_ids_used, success=substantive)
-        if semantic_plan:
-            _reporting_learn_semantic_hints(
-                conn,
-                session_id=session_id,
-                question=question,
-                plan=semantic_plan,
-                row_count=(1 if substantive else 0),
-            )
 
+        plan_legacy = canonical_plan.to_legacy_semantic_plan()
+        _reporting_learn_semantic_hints(
+            conn, session_id=session_id, question=question,
+            plan=plan_legacy, row_count=(1 if substantive else 0),
+        )
+
+        # ── Step 9: Response generation ────────────────────────────────────
         chart_spec = _reporting_infer_chart(
-            question,
-            columns,
-            rows_out,
+            question, columns, rows_out,
             preference=(payload.chart_preference or "").strip().lower() or None,
         )
         answer_text, follow_ups, limitations, confidence, responder_debug = _reporting_generate_answer(
-            responder_model,
-            question,
-            columns,
-            rows_out,
-            sql,
-            context_block,
-            semantic_intent=(semantic_plan or {}).get("intent"),
-            semantic_plan=semantic_plan,
+            responder_model, question, columns, rows_out, sql, context_block,
+            semantic_intent=primary_intent,
+            semantic_plan=plan_legacy,
             debug=debug_pipeline,
         )
-        if isinstance(sql_meta.get("follow_ups"), list) and sql_meta["follow_ups"]:
-            follow_ups = sql_meta["follow_ups"][:5]
-        if sql_meta.get("limitations") and not limitations:
-            limitations = str(sql_meta["limitations"])
-        yc_inv_note = sql_meta.get("year_compare_inventory_note")
-        if yc_inv_note:
-            extra = str(yc_inv_note).strip()
-            if extra:
-                if limitations:
-                    limitations = f"{str(limitations).strip()} {extra}".strip()
-                else:
-                    limitations = extra
-        if sql_meta.get("confidence") is not None and confidence is None:
-            try:
-                confidence = float(sql_meta["confidence"])
-            except (TypeError, ValueError):
-                confidence = confidence
-        effective_date_start = (semantic_plan or {}).get("date_start") or date_start
-        effective_date_end = (semantic_plan or {}).get("date_end") or date_end
-        effective_date_label = (semantic_plan or {}).get("date_label") or date_label
-        yc = (semantic_plan or {}).get("year_compare")
-        if not effective_date_label and isinstance(yc, (list, tuple)) and len(yc) == 2:
-            effective_date_label = f"{yc[0]} vs {yc[1]}"
+        if compile_meta.get("limitations") and not limitations:
+            limitations = str(compile_meta["limitations"])
+
+        date_label = canonical_plan.time_range.label if canonical_plan.time_range else None
+        if not date_label and canonical_plan.year_compare and len(canonical_plan.year_compare) == 2:
+            date_label = f"{canonical_plan.year_compare[0]} vs {canonical_plan.year_compare[1]}"
 
         result_payload = {
-            "columns": columns,
-            "rows": rows_out,
-            "row_count": len(rows_out),
-            "date_window": {"start": effective_date_start, "end": effective_date_end, "label": effective_date_label},
-            "retrieval": sql_meta.get("retrieval") or {},
+            "columns": columns, "rows": rows_out, "row_count": len(rows_out),
+            "date_window": {"start": date_start, "end": date_end, "label": date_label},
+            "retrieval": retrieval_meta,
         }
         meta = {
             "planner_model": planner_model,
             "responder_model": responder_model,
             "retry_model": retry_model,
-            "generation_mode": sql_meta.get("mode"),
+            "generation_mode": plan_meta.get("mode") or compile_meta.get("mode"),
             "confidence": confidence,
             "limitations": limitations,
             "follow_ups": follow_ups,
             "execution_ms": execution_ms,
-            "semantic_plan": semantic_plan,
+            "semantic_plan": plan_legacy,
             "timestamp": _reporting_iso_now(),
-            "semantic_hints": sql_meta.get("hints") or [],
-            "retrieval": sql_meta.get("retrieval") or {},
+            "semantic_hints": plan_meta.get("hints") or [],
+            "retrieval": retrieval_meta,
         }
         if debug_pipeline:
             meta["pipeline_debug"] = {
-                "retrieval": sql_meta.get("retrieval") or {},
-                "planner_llm": sql_meta.get("planner_llm") or {},
+                "retrieval": retrieval_meta,
+                "planner_llm": plan_meta.get("planner_llm") or {},
                 "responder_llm": responder_debug,
             }
+
+        # ── Step 10: Persist and log ───────────────────────────────────────
         assistant_message_id = _reporting_store_message(
-            conn,
-            session_id,
-            "assistant",
-            answer_text,
-            sql_executed=sql,
-            result=result_payload,
-            chart_spec=chart_spec,
-            meta=meta,
+            conn, session_id, "assistant", answer_text,
+            sql_executed=sql, result=result_payload, chart_spec=chart_spec, meta=meta,
         )
-        if semantic_plan:
-            _reporting_set_last_query_state(
-                conn, session_id, {**semantic_plan, "_result_row_count": len(rows_out)}
-            )
+        _reporting_set_last_query_state(
+            conn, session_id, {**plan_legacy, "_result_row_count": len(rows_out)}
+        )
         _reporting_update_summary(conn, session_id)
 
         total_ms = round((time.perf_counter() - started) * 1000.0, 2)
         _reporting_log_query_event(
-            conn,
-            session_id=session_id,
-            question=question,
-            planner_model=planner_model,
-            responder_model=responder_model,
-            generation_mode=sql_meta.get("mode"),
-            semantic_intent=(semantic_plan or {}).get("intent"),
-            sql_excerpt=sql,
-            row_count=len(rows_out),
-            execution_ms=execution_ms,
-            total_ms=total_ms,
-            status="ok",
+            conn, session_id=session_id, question=question,
+            planner_model=planner_model, responder_model=responder_model,
+            generation_mode=meta["generation_mode"],
+            semantic_intent=primary_intent,
+            sql_excerpt=sql, row_count=len(rows_out),
+            execution_ms=execution_ms, total_ms=total_ms, status="ok",
             meta={
-                "date_window": {"start": effective_date_start, "end": effective_date_end, "label": effective_date_label},
-                "planner_attempts": sql_meta.get("planner_attempts"),
-                "has_compare_mode": bool(payload.compare_dimension and payload.compare_value_a and payload.compare_value_b),
-                "semantic_plan": semantic_plan,
-                "semantic_hints": sql_meta.get("hints") or [],
-                "retrieval": sql_meta.get("retrieval") or {},
+                "date_window": {"start": date_start, "end": date_end, "label": date_label},
+                "planner_attempts": plan_meta.get("planner_attempts"),
+                "semantic_plan": plan_legacy,
+                "semantic_hints": plan_meta.get("hints") or [],
+                "retrieval": retrieval_meta,
             },
         )
 
@@ -1619,13 +1400,12 @@ def run_reporting_query(
             "follow_ups": follow_ups,
             "confidence": confidence,
             "limitations": limitations,
-            "generation_mode": sql_meta.get("mode"),
+            "generation_mode": meta["generation_mode"],
             "execution_ms": execution_ms,
-            "date_window": {"start": effective_date_start, "end": effective_date_end, "label": effective_date_label},
+            "date_window": {"start": date_start, "end": date_end, "label": date_label},
             "assistant_message_id": assistant_message_id,
-            # Top-level for clients and reporting_eval_harness brittle/plan-equiv checks (also in stored meta).
-            "semantic_plan": semantic_plan,
-            "retrieval": sql_meta.get("retrieval") or {},
+            "semantic_plan": plan_legacy,
+            "retrieval": retrieval_meta,
         }
         if debug_pipeline:
             out["pipeline_debug"] = meta.get("pipeline_debug") or {}

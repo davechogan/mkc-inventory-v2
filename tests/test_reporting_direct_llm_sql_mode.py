@@ -48,17 +48,21 @@ def test_reporting_direct_llm_sql_toggle_does_not_bypass_planner(invapp, monkeyp
         timeout: float = 180.0,
     ) -> str:
         systems_seen.append(system or "")
-        if "convert collection questions into semantic JSON plans" in system:
+        if "canonical JSON plan" in system:
             return json.dumps(
                 {
-                    "intent": "list_inventory",
-                    "filters": {},
-                    "group_by": None,
+                    "intent": "list",
+                    "scope": "inventory",
                     "metric": "count",
+                    "group_by": [],
+                    "filters": [],
+                    "exclusions": [],
+                    "time_range": None,
+                    "year_compare": [],
+                    "sort": None,
                     "limit": 10,
-                    "date_start": None,
-                    "date_end": None,
-                    "year_compare": None,
+                    "needs_clarification": False,
+                    "clarification_reason": None,
                 }
             )
         if "generate read-only SQLite SELECT queries for collection reporting" in system:
@@ -133,7 +137,7 @@ def test_reporting_direct_llm_sql_toggle_does_not_bypass_planner(invapp, monkeyp
         assert isinstance(result.get("retrieval"), dict)
 
         # Sanity: planner prompt called, direct SQL generation prompt was not.
-        assert any("convert collection questions into semantic JSON plans" in s for s in systems_seen)
+        assert any("canonical JSON plan" in s for s in systems_seen)
         assert not any("generate read-only SQLite SELECT queries for collection reporting" in s for s in systems_seen)
         assert any("concise collection reporting assistant" in s for s in systems_seen)
     finally:

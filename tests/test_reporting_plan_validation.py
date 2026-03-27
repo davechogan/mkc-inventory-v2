@@ -65,19 +65,16 @@ def test_semantic_validation_rejects_catalog_inventory_only_field() -> None:
 def test_run_reporting_query_blocks_semantically_invalid_plan(invapp, monkeypatch) -> None:
     import reporting.domain as reporting_domain
     from reporting.domain import ReportingQueryIn, run_reporting_query
+    from reporting.plan_models import FilterClause, FilterOp, PlanField
 
     def fake_semantic_plan(*args, **kwargs):
-        return (
-            {
-                "intent": "aggregate",
-                "scope": "catalog",
-                "metric": "count",
-                "group_by": None,
-                "filters": {"condition": "Like New"},
-                "limit": 50,
-            },
-            {"mode": "semantic_test"},
+        plan = CanonicalReportingPlan(
+            intent=PlanIntent.AGGREGATE,
+            scope=PlanScope.CATALOG,
+            metric=PlanMetric.COUNT,
+            filters=[FilterClause(field=PlanField.CONDITION, op=FilterOp.EQ, value="Like New")],
         )
+        return plan, {"mode": "semantic_test"}
 
     monkeypatch.setattr(reporting_domain, "_reporting_semantic_plan", fake_semantic_plan)
     monkeypatch.setattr(
@@ -101,11 +98,22 @@ def test_paraphrase_year_compare_normalizes_equivalently(invapp, monkeypatch) ->
 
     # Keep planner output deterministic so equivalence is tested at normalized plan boundary.
     def fake_ollama_chat(model, system, user_text, images_b64=None, timeout=180.0):
-        if "convert collection questions into semantic JSON plans" in system:
-            return (
-                '{"intent":"aggregate","filters":{},"group_by":"family_name",'
-                '"metric":"total_spend","limit":50,"year_compare":["2024","2025"]}'
-            )
+        if "canonical JSON plan" in system:
+            import json
+            return json.dumps({
+                "intent": "aggregate",
+                "scope": "inventory",
+                "metric": "total_spend",
+                "group_by": ["family_name"],
+                "filters": [],
+                "exclusions": [],
+                "time_range": None,
+                "year_compare": [2024, 2025],
+                "sort": None,
+                "limit": 50,
+                "needs_clarification": False,
+                "clarification_reason": None,
+            })
         if "concise collection reporting assistant" in system:
             raise RuntimeError("force deterministic fallback")
         return "{}"
@@ -123,22 +131,4 @@ def test_paraphrase_year_compare_normalizes_equivalently(invapp, monkeypatch) ->
     assert p1.get("intent") == p2.get("intent") == "aggregate"
     assert p1.get("metric") == p2.get("metric") == "total_spend"
     assert p1.get("year_compare") == p2.get("year_compare") == [2024, 2025]
-
-
-def test_explicit_constraints_followup_switches_to_list(invapp) -> None:
-    plan = reporting_domain._reporting_explicit_constraints("list the knives that made up that number")
-    assert plan.get("intent") == "list_inventory"
-
-
-def test_explicit_constraints_extracts_multi_exclusions(invapp) -> None:
-    plan = reporting_domain._reporting_explicit_constraints(
-        "how much have i spent on the blackfoot knives excluding the damascus and traditions versions?"
-    )
-    filters = plan.get("filters") or {}
-    assert filters.get("series_name__not") == "Traditions"
-    text_ex = filters.get("text_search__not")
-    if isinstance(text_ex, list):
-        assert "damascus" in text_ex
-    else:
-        assert text_ex == "damascus"
 
