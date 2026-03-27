@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from reporting.domain import _reporting_heuristic_plan, _reporting_plan_to_sql_legacy
+from reporting.compiler import _compile_legacy_dict as _reporting_plan_to_sql_legacy
+from reporting.domain import _reporting_heuristic_plan
 
 
 def test_heuristic_top_10_most_expensive_purchases() -> None:
