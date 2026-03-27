@@ -14,7 +14,7 @@ def test_reporting_retrieval_status_endpoint_returns_runtime_metadata(invapp) ->
     assert retrieval.get("artifact_count", 0) >= 1
     assert isinstance(retrieval.get("artifact_source"), str)
     assert "configured_backend" in retrieval
-    assert retrieval.get("default_backend") == "embedding"
+    assert retrieval.get("default_backend") == "chroma"
     assert "env_override_active" in retrieval
     assert "vector_index_path" in retrieval
     assert "vector_index_error" in retrieval
@@ -31,7 +31,7 @@ def test_reporting_retrieval_backend_get_and_post(invapp, monkeypatch) -> None:
     g = client.get("/api/reporting/retrieval/backend")
     assert g.status_code == 200, g.text
     data = g.json()
-    assert data.get("default_backend") == "embedding"
+    assert data.get("default_backend") == "chroma"
     assert isinstance(data.get("valid_backends"), list)
     assert "lexical" in data["valid_backends"]
     p = client.post("/api/reporting/retrieval/backend", json={"backend": "chroma"})

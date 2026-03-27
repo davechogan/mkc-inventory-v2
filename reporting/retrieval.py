@@ -30,7 +30,7 @@ RetrievalArtifact = RetrievalCandidate
 RETRIEVAL_BACKEND_META_KEY = "reporting_retrieval_backend"
 
 VALID_RETRIEVAL_BACKENDS: tuple[str, ...] = ("lexical", "embedding", "vector", "chroma")
-DEFAULT_RETRIEVAL_BACKEND = "embedding"
+DEFAULT_RETRIEVAL_BACKEND = "chroma"
 
 _CHROMA_MANIFEST_NAME = "retrieval_chroma_manifest.json"
 
