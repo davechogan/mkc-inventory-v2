@@ -23,18 +23,19 @@ def recompute_silhouettes_for_masters_without_hu(conn: sqlite3.Connection) -> in
     """
     rows = conn.execute(
         """
-        SELECT id, identifier_image_blob, identifier_silhouette_hu_json
-        FROM master_knives
-        WHERE identifier_image_blob IS NOT NULL
-          AND length(identifier_image_blob) > 0
+        SELECT km.id, kmi.image_blob, kmi.silhouette_hu_json
+        FROM knife_models_v2 km
+        JOIN knife_model_images kmi ON kmi.knife_model_id = km.id
+        WHERE kmi.image_blob IS NOT NULL
+          AND length(kmi.image_blob) > 0
         """
     ).fetchall()
     updated = 0
     for row in rows:
-        blob = row["identifier_image_blob"]
+        blob = row["image_blob"]
         if not blob:
             continue
-        hu_json = (row.get("identifier_silhouette_hu_json") or "").strip()
+        hu_json = (row.get("silhouette_hu_json") or "").strip()
         needs_recompute = not hu_json
         if hu_json:
             try:
@@ -48,9 +49,9 @@ def recompute_silhouettes_for_masters_without_hu(conn: sqlite3.Connection) -> in
         if hu_list:
             conn.execute(
                 """
-                UPDATE master_knives
-                SET identifier_silhouette_hu_json = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
+                UPDATE knife_model_images
+                SET silhouette_hu_json = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE knife_model_id = ?
                 """,
                 (json.dumps(hu_list), row["id"]),
             )
@@ -58,9 +59,9 @@ def recompute_silhouettes_for_masters_without_hu(conn: sqlite3.Connection) -> in
         else:
             conn.execute(
                 """
-                UPDATE master_knives
-                SET identifier_silhouette_hu_json = NULL, updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
+                UPDATE knife_model_images
+                SET silhouette_hu_json = NULL, updated_at = CURRENT_TIMESTAMP
+                WHERE knife_model_id = ?
                 """,
                 (row["id"],),
             )
@@ -177,17 +178,18 @@ def create_admin_router(
         with get_conn() as conn:
             rows = conn.execute(
                 """
-                SELECT id, name,
-                       (identifier_image_blob IS NOT NULL AND length(identifier_image_blob) > 0) AS has_image,
-                       identifier_silhouette_hu_json
-                FROM master_knives
-                ORDER BY name COLLATE NOCASE
+                SELECT km.id, km.official_name AS name,
+                       (kmi.image_blob IS NOT NULL AND length(kmi.image_blob) > 0) AS has_image,
+                       kmi.silhouette_hu_json
+                FROM knife_models_v2 km
+                LEFT JOIN knife_model_images kmi ON kmi.knife_model_id = km.id
+                ORDER BY km.official_name COLLATE NOCASE
                 """
             ).fetchall()
         result: list[dict[str, Any]] = []
         missing_hu: list[dict[str, Any]] = []
         for r in rows:
-            hu_json = (r.get("identifier_silhouette_hu_json") or "").strip()
+            hu_json = (r.get("silhouette_hu_json") or "").strip()
             has_hu = bool(hu_json)
             degenerate = False
             if has_hu:
