@@ -94,6 +94,14 @@ class FilterClause(BaseModel):
     op: FilterOp
     value: ClauseValue
 
+    @field_validator("op", mode="before")
+    @classmethod
+    def _normalize_op(cls, v: object) -> object:
+        # LLM occasionally outputs "==" instead of "="
+        if v == "==":
+            return "="
+        return v
+
     @field_validator("value")
     @classmethod
     def _non_empty_value(cls, value: ClauseValue) -> ClauseValue:

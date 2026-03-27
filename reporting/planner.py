@@ -96,6 +96,7 @@ _PLANNER_SYSTEM = (
     "    steel, condition, location, knife_name, official_name, record_status, acquired_date,\n"
     "    purchase_price, estimated_value, msrp, text_search\n"
     "  Allowed ops: =, !=, contains, not_contains, in, not_in, >, >=, <, <=, between\n"
+    "  Use a single = for equality — never ==.\n"
     "  For 'in' and 'not_in', value must be a JSON array. For all others, value is a scalar.\n\n"
     "time_range: null or {\"start\": \"YYYY-MM-DD\", \"end\": \"YYYY-MM-DD\", \"label\": \"...\"}\n"
     "  Extract from the question when a date, year, or time period is mentioned.\n"
