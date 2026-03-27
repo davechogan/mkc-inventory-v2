@@ -1,0 +1,28 @@
+[
+  {
+    "kind": "scope",
+    "artifact_id": "scope.inventory",
+    "tags": [
+      "inventory",
+      "my knives",
+      "my collection",
+      "what i own",
+      "owned"
+    ],
+    "content": "inventory scope means questions about knives the user owns. Phrases like 'my knives', 'my collection', 'do I own', 'what do I have', or bare ownership questions default to inventory.",
+    "canonical_scope": "inventory"
+  },
+  {
+    "kind": "scope",
+    "artifact_id": "scope.catalog",
+    "tags": [
+      "catalog",
+      "full catalog",
+      "mkc made",
+      "all models",
+      "every model"
+    ],
+    "content": "catalog scope means questions about the full MKC model universe, including models not owned. Phrases like 'full catalog', 'what has MKC made', 'all models', or missing-model questions imply catalog or a comparison against catalog.",
+    "canonical_scope": "catalog"
+  }
+]

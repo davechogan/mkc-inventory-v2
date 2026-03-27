@@ -21,6 +21,8 @@ def test_reporting_retrieval_status_endpoint_returns_runtime_metadata(invapp) ->
     assert "chroma_path" in retrieval
     assert "chroma_collection" in retrieval
     assert "chroma_error" in retrieval
+    assert isinstance(retrieval.get("corpus_fingerprint"), str)
+    assert "corpus_path" in retrieval
 
 
 def test_reporting_retrieval_backend_get_and_post(invapp, monkeypatch) -> None:

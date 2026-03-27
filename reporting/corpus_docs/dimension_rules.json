@@ -1,0 +1,67 @@
+[
+  {
+    "kind": "rule",
+    "artifact_id": "rule.series_vs_family_vs_type",
+    "tags": [
+      "dimension",
+      "series",
+      "family",
+      "type",
+      "disambiguation"
+    ],
+    "content": "Dimension choice is deterministic when phrasing is explicit: 'family knives' -> family_name, 'series knives' or named line like Blood Brothers/Traditions -> series_name, 'type' or broad classes like Hunting/Tactical -> knife_type. If still ambiguous, ask a clarification question instead of guessing."
+  },
+  {
+    "kind": "rule",
+    "artifact_id": "rule.no_hidden_filters",
+    "tags": [
+      "guardrail",
+      "no hidden filters",
+      "chat drift"
+    ],
+    "content": "Do not turn prior chat context into hidden WHERE clauses. Only explicit constraints in the current turn, or narrowly allowed follow-up carryover, may affect the canonical plan."
+  },
+  {
+    "kind": "rule",
+    "artifact_id": "rule.explicit_constraints_win",
+    "tags": [
+      "guardrail",
+      "explicit constraints",
+      "exclusions"
+    ],
+    "content": "If the current question includes explicit exclusions or constraints, they must override vague contextual hints. The current question wins."
+  },
+  {
+    "kind": "rule",
+    "artifact_id": "rule.exclusions_preserved",
+    "tags": [
+      "exclusion",
+      "negation",
+      "without",
+      "excluding",
+      "not including"
+    ],
+    "content": "Exclusions are first-class semantic objects. Phrases like excluding, except, without, or not including must stay in exclusions and must not be silently flipped into positive filters."
+  },
+  {
+    "kind": "rule",
+    "artifact_id": "rule.followup_list_underlying_items",
+    "tags": [
+      "followup",
+      "list them",
+      "show them",
+      "drill down"
+    ],
+    "content": "Follow-ups like 'list them', 'show them', or 'which ones' after an aggregate should switch output shape to list while preserving only the prior explicit filters/scope. They should not introduce new hidden filters."
+  },
+  {
+    "kind": "rule",
+    "artifact_id": "rule.canonicalization_before_sql",
+    "tags": [
+      "canonicalization",
+      "normalization",
+      "before sql"
+    ],
+    "content": "Normalize dimension names, aliases, and exclusion targets before SQL compilation. The compiler should receive canonical fields and values, not fuzzy user phrasing."
+  }
+]

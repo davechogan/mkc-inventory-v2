@@ -184,7 +184,7 @@ class CanonicalReportingPlan(BaseModel):
         metric = self.metric.value
         if metric == PlanMetric.ESTIMATED_VALUE.value:
             metric = "total_estimated_value"
-        return {
+        out: dict[str, Any] = {
             "intent": "list_inventory" if self.intent == PlanIntent.LIST else self.intent.value,
             "scope": self.scope.value,
             "metric": metric,
@@ -198,6 +198,9 @@ class CanonicalReportingPlan(BaseModel):
             "needs_clarification": self.needs_clarification,
             "clarification_reason": self.clarification_reason,
         }
+        if self.sort is not None:
+            out["sort"] = {"field": self.sort.field, "direction": self.sort.direction.value}
+        return out
 
     @classmethod
     def from_legacy_semantic_plan(cls, plan: dict[str, Any]) -> "CanonicalReportingPlan":
@@ -277,6 +280,24 @@ class CanonicalReportingPlan(BaseModel):
         scope_raw = str(plan.get("scope") or "inventory").strip().lower()
         scope = PlanScope.CATALOG if scope_raw == "catalog" else PlanScope.INVENTORY
 
+        sort_spec: Optional[SortSpec] = None
+        raw_sort = plan.get("sort")
+        if isinstance(raw_sort, dict):
+            sf = str(raw_sort.get("field") or "").strip()
+            sd = str(raw_sort.get("direction") or "asc").strip().lower()
+            if sf and sd in ("asc", "desc"):
+                try:
+                    PlanField(sf)  # validate allowed field name
+                    sort_spec = SortSpec(field=sf, direction=SortDirection(sd))
+                except ValueError:
+                    sort_spec = None
+
+        lim = plan.get("limit")
+        try:
+            lim_i = int(lim) if lim is not None else None
+        except (TypeError, ValueError):
+            lim_i = None
+
         return cls(
             intent=intent,
             scope=scope,
@@ -286,8 +307,8 @@ class CanonicalReportingPlan(BaseModel):
             exclusions=exclusions,
             time_range=time_range,
             year_compare=years,
-            sort=None,
-            limit=plan.get("limit"),
+            sort=sort_spec,
+            limit=lim_i,
             needs_clarification=bool(plan.get("needs_clarification")),
             clarification_reason=(
                 str(plan.get("clarification_reason")).strip() if plan.get("clarification_reason") else None

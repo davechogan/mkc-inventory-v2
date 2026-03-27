@@ -1,0 +1,881 @@
+{
+  "schema_version": 1,
+  "items": [
+    {
+      "kind": "intent",
+      "artifact_id": "intent.aggregate.count_by_dimension",
+      "tags": [
+        "aggregate",
+        "count",
+        "how many",
+        "breakdown",
+        "distribution",
+        "by",
+        "grouped by"
+      ],
+      "content": "Use aggregate intent when the user wants totals or counts grouped by a dimension such as family, series, steel, condition, collaborator, location, or knife type. Common phrasings: 'how many by family', 'show the breakdown by steel', 'distribution by condition'.",
+      "canonical_intent": "aggregate"
+    },
+    {
+      "kind": "intent",
+      "artifact_id": "intent.aggregate.total_spend",
+      "tags": [
+        "aggregate",
+        "spend",
+        "spent",
+        "paid",
+        "cost",
+        "purchase price",
+        "money spent"
+      ],
+      "content": "Use aggregate intent with metric total_spend when the user asks how much was spent, what was paid, or spend by period/dimension. total_spend means sum of purchase_price times quantity for inventory rows.",
+      "canonical_intent": "aggregate"
+    },
+    {
+      "kind": "intent",
+      "artifact_id": "intent.aggregate.estimated_value",
+      "tags": [
+        "aggregate",
+        "value",
+        "worth",
+        "estimated value",
+        "collection value"
+      ],
+      "content": "Use aggregate intent with metric estimated_value when the user asks what the collection is worth, total value, estimated value by family, or top value breakdowns. This is different from spend.",
+      "canonical_intent": "aggregate"
+    },
+    {
+      "kind": "intent",
+      "artifact_id": "intent.list.inventory_items",
+      "tags": [
+        "list",
+        "show",
+        "which",
+        "what do i own",
+        "what do i have",
+        "list my"
+      ],
+      "content": "Use list intent when the user wants rows or items rather than a grouped aggregate. Typical phrasings: 'show me my speedgoats', 'which blood brothers do I own', 'list my hunting knives'. Default scope is inventory unless the user explicitly asks for catalog.",
+      "canonical_intent": "list"
+    },
+    {
+      "kind": "intent",
+      "artifact_id": "intent.missing_models",
+      "tags": [
+        "missing",
+        "not in inventory",
+        "dont have",
+        "what am i missing",
+        "still need"
+      ],
+      "content": "Use missing_models when the user wants catalog items they do not own yet. Typical phrasings: 'what am I missing', 'which speedgoats do I still not have', 'models not in my inventory'.",
+      "canonical_intent": "missing_models"
+    },
+    {
+      "kind": "intent",
+      "artifact_id": "intent.compare.year_over_year",
+      "tags": [
+        "compare",
+        "vs",
+        "versus",
+        "compared to",
+        "year over year",
+        "yoy"
+      ],
+      "content": "Use compare intent for direct side-by-side comparison across two named periods or entities. If the user explicitly compares two years for spend or value, prefer compare intent or aggregate intent with year_compare depending on compiler design, but the canonical meaning is a two-period comparison.",
+      "canonical_intent": "compare"
+    },
+    {
+      "kind": "intent",
+      "artifact_id": "intent.completion_cost",
+      "tags": [
+        "complete collection",
+        "completion cost",
+        "finish collection",
+        "cost to complete",
+        "msrp to finish"
+      ],
+      "content": "Use completion_cost intent when the user asks how much it would cost to finish the collection or buy everything they do not own. This is distinct from current spend or current value.",
+      "canonical_intent": "completion_cost"
+    },
+    {
+      "kind": "field",
+      "artifact_id": "field.series_name",
+      "tags": [
+        "series",
+        "line",
+        "group",
+        "collection line",
+        "product line"
+      ],
+      "content": "series_name is the canonical dimension for named MKC lines such as Blood Brothers, Traditions, VIP, and Ultra. If the user says line, group, run, or series and names Blood Brothers or Traditions, prefer series_name unless they explicitly ask for family or type.",
+      "canonical_field": "series_name",
+      "aliases": [
+        "series",
+        "line",
+        "group",
+        "product line",
+        "knife line"
+      ]
+    },
+    {
+      "kind": "field",
+      "artifact_id": "field.family_name",
+      "tags": [
+        "family",
+        "model family",
+        "knife family"
+      ],
+      "content": "family_name is the canonical dimension for a knife family such as Speedgoat, Blackfoot, Mini Speedgoat, or Super Cub. If the user says family or phrases like 'in the X family', prefer family_name. Family is different from series and type.",
+      "canonical_field": "family_name",
+      "aliases": [
+        "family",
+        "knife family",
+        "model family"
+      ]
+    },
+    {
+      "kind": "field",
+      "artifact_id": "field.knife_type",
+      "tags": [
+        "type",
+        "class",
+        "category",
+        "hunting",
+        "tactical",
+        "edc"
+      ],
+      "content": "knife_type is the canonical dimension for broad classes like Hunting or Tactical. If the user says type, class, category, or asks for hunting knives versus tactical knives, prefer knife_type.",
+      "canonical_field": "knife_type",
+      "aliases": [
+        "type",
+        "class",
+        "category",
+        "style"
+      ]
+    },
+    {
+      "kind": "field",
+      "artifact_id": "field.form_name",
+      "tags": [
+        "form",
+        "shape",
+        "blade form"
+      ],
+      "content": "form_name is the canonical dimension for form-related grouping if the user explicitly asks by form. Use when the user says form, blade form, or shape in the reporting sense.",
+      "canonical_field": "form_name",
+      "aliases": [
+        "form",
+        "blade form",
+        "shape"
+      ]
+    },
+    {
+      "kind": "field",
+      "artifact_id": "field.collaborator_name",
+      "tags": [
+        "collaborator",
+        "collab",
+        "partnership",
+        "maker collab"
+      ],
+      "content": "collaborator_name is the canonical dimension for collaboration relationships. If the user says collab, collaborator, or asks about Blood Brothers as a collaborator context, use collaborator_name only when the business meaning is collaboration rather than a series line.",
+      "canonical_field": "collaborator_name",
+      "aliases": [
+        "collaborator",
+        "collab",
+        "collaboration",
+        "partner"
+      ]
+    },
+    {
+      "kind": "field",
+      "artifact_id": "field.steel",
+      "tags": [
+        "steel",
+        "blade steel",
+        "magnacut",
+        "s45vn",
+        "3v"
+      ],
+      "content": "steel is the canonical dimension for blade steel. Use when the user asks by steel, about Magnacut, or wants steel breakdowns.",
+      "canonical_field": "steel",
+      "aliases": [
+        "steel",
+        "blade steel"
+      ]
+    },
+    {
+      "kind": "field",
+      "artifact_id": "field.condition",
+      "tags": [
+        "condition",
+        "like new",
+        "used",
+        "new in box",
+        "mint"
+      ],
+      "content": "condition is the canonical dimension for ownership condition. Use when the user asks about like new, used, mint, or condition distribution.",
+      "canonical_field": "condition",
+      "aliases": [
+        "condition",
+        "state",
+        "quality"
+      ]
+    },
+    {
+      "kind": "field",
+      "artifact_id": "field.location",
+      "tags": [
+        "location",
+        "safe",
+        "drawer",
+        "storage",
+        "where kept"
+      ],
+      "content": "location is the canonical dimension for storage or physical location. If the user says safe 1, drawer, case, or where the knives are stored, use location.",
+      "canonical_field": "location",
+      "aliases": [
+        "location",
+        "storage",
+        "safe",
+        "stored in"
+      ]
+    },
+    {
+      "kind": "field",
+      "artifact_id": "field.knife_name",
+      "tags": [
+        "knife name",
+        "owned item name",
+        "inventory row name"
+      ],
+      "content": "knife_name is the inventory-side item name. Use for listing owned items or exclusions against owned inventory rows. Prefer this over official_name when the question is explicitly about what the user owns.",
+      "canonical_field": "knife_name",
+      "aliases": [
+        "knife",
+        "item name",
+        "owned knife"
+      ]
+    },
+    {
+      "kind": "field",
+      "artifact_id": "field.official_name",
+      "tags": [
+        "official name",
+        "catalog model name",
+        "mkc model"
+      ],
+      "content": "official_name is the catalog-side model name. Use when the question is about the full catalog, missing models, or official product naming rather than owned inventory rows.",
+      "canonical_field": "official_name",
+      "aliases": [
+        "official name",
+        "model name",
+        "catalog model"
+      ]
+    },
+    {
+      "kind": "field",
+      "artifact_id": "field.purchase_price",
+      "tags": [
+        "purchase price",
+        "paid",
+        "cost",
+        "price",
+        "spend"
+      ],
+      "content": "purchase_price is the per-row amount paid for an owned knife. total_spend is derived from purchase_price times quantity. If the user asks 'what did I spend' or 'what did I pay', purchase_price feeds the spend metric.",
+      "canonical_field": "purchase_price",
+      "aliases": [
+        "purchase price",
+        "paid",
+        "cost",
+        "price",
+        "what I paid"
+      ]
+    },
+    {
+      "kind": "field",
+      "artifact_id": "field.estimated_value",
+      "tags": [
+        "estimated value",
+        "worth",
+        "current value",
+        "value"
+      ],
+      "content": "estimated_value is the per-row estimated current value of an owned knife. Collection value aggregates use estimated_value times quantity, not purchase_price.",
+      "canonical_field": "estimated_value",
+      "aliases": [
+        "estimated value",
+        "worth",
+        "value",
+        "current value"
+      ]
+    },
+    {
+      "kind": "field",
+      "artifact_id": "field.msrp",
+      "tags": [
+        "msrp",
+        "retail",
+        "list price",
+        "retail price"
+      ],
+      "content": "msrp is the manufacturer's suggested retail price. Use for completion-cost style questions or when the user explicitly asks about MSRP rather than purchase price or current value.",
+      "canonical_field": "msrp",
+      "aliases": [
+        "msrp",
+        "retail",
+        "list price",
+        "retail price"
+      ]
+    },
+    {
+      "kind": "field",
+      "artifact_id": "field.acquired_date",
+      "tags": [
+        "acquired date",
+        "purchase date",
+        "bought on",
+        "year"
+      ],
+      "content": "acquired_date is the canonical inventory date field used for date filters, year buckets, month buckets, and year-over-year comparisons based on ownership acquisition.",
+      "canonical_field": "acquired_date",
+      "aliases": [
+        "purchase date",
+        "acquired date",
+        "bought on",
+        "year bought"
+      ]
+    },
+    {
+      "kind": "field",
+      "artifact_id": "field.record_status",
+      "tags": [
+        "status",
+        "record status",
+        "active",
+        "archived"
+      ],
+      "content": "record_status is a control/status field. Use only if the user explicitly asks about active, deleted, archived, or status-related filtering. Do not inject status filtering by default.",
+      "canonical_field": "record_status",
+      "aliases": [
+        "status",
+        "record status"
+      ]
+    },
+    {
+      "kind": "field",
+      "artifact_id": "field.text_search",
+      "tags": [
+        "search",
+        "contains",
+        "match text",
+        "name search"
+      ],
+      "content": "text_search is a fallback search field used only when the user is clearly searching text and no specific semantic dimension can be safely selected. Prefer a real dimension when possible.",
+      "canonical_field": "text_search",
+      "aliases": [
+        "search",
+        "contains",
+        "matching text"
+      ]
+    },
+    {
+      "kind": "metric",
+      "artifact_id": "metric.count",
+      "tags": [
+        "count",
+        "how many",
+        "number of",
+        "total count"
+      ],
+      "content": "count is the canonical metric for quantities or counts of rows/models depending on scope and intent. Use for 'how many' and count breakdowns.",
+      "canonical_metric": "count"
+    },
+    {
+      "kind": "metric",
+      "artifact_id": "metric.total_spend",
+      "tags": [
+        "spend",
+        "spent",
+        "paid",
+        "cost me",
+        "money spent"
+      ],
+      "content": "total_spend is the aggregate metric for money spent on owned knives. It is computed from purchase_price multiplied by quantity. Use for 'how much did I spend', 'money spent', or 'spend by year/family/series'.",
+      "canonical_metric": "total_spend"
+    },
+    {
+      "kind": "metric",
+      "artifact_id": "metric.estimated_value",
+      "tags": [
+        "value",
+        "worth",
+        "estimated value",
+        "collection value"
+      ],
+      "content": "estimated_value is the aggregate metric for current estimated worth. Use for 'what is my collection worth', 'value by family', or 'top value knives'. Do not confuse with spend.",
+      "canonical_metric": "estimated_value"
+    },
+    {
+      "kind": "metric",
+      "artifact_id": "metric.msrp",
+      "tags": [
+        "msrp",
+        "retail",
+        "list price",
+        "cost to complete"
+      ],
+      "content": "msrp is used for completion-cost or retail-based calculations. Use when the user asks what it would cost to complete the collection or explicitly asks about MSRP.",
+      "canonical_metric": "msrp"
+    },
+    {
+      "kind": "scope",
+      "artifact_id": "scope.inventory",
+      "tags": [
+        "inventory",
+        "my knives",
+        "my collection",
+        "what i own",
+        "owned"
+      ],
+      "content": "inventory scope means questions about knives the user owns. Phrases like 'my knives', 'my collection', 'do I own', 'what do I have', or bare ownership questions default to inventory.",
+      "canonical_scope": "inventory"
+    },
+    {
+      "kind": "scope",
+      "artifact_id": "scope.catalog",
+      "tags": [
+        "catalog",
+        "full catalog",
+        "mkc made",
+        "all models",
+        "every model"
+      ],
+      "content": "catalog scope means questions about the full MKC model universe, including models not owned. Phrases like 'full catalog', 'what has MKC made', 'all models', or missing-model questions imply catalog or a comparison against catalog.",
+      "canonical_scope": "catalog"
+    },
+    {
+      "kind": "mapping",
+      "artifact_id": "mapping.series_aliases.core",
+      "tags": [
+        "series",
+        "traditions",
+        "vip",
+        "ultra",
+        "blood brothers"
+      ],
+      "content": "Certain named lines are usually series_name values. Blood Brothers, Traditions, VIP, and Ultra are canonical examples of series_name unless the user explicitly asks for family or collaborator.",
+      "target_dimension": "series_name",
+      "entity_phrases": [
+        "blood brothers",
+        "traditions",
+        "vip",
+        "ultra"
+      ],
+      "canonical_value": null
+    },
+    {
+      "kind": "mapping",
+      "artifact_id": "mapping.family_examples.core",
+      "tags": [
+        "family",
+        "speedgoat",
+        "blackfoot",
+        "super cub",
+        "mini speedgoat"
+      ],
+      "content": "Certain names are usually family_name values. Speedgoat, Blackfoot, Mini Speedgoat, and Super Cub are canonical examples of family_name unless the user explicitly asks for series or type.",
+      "target_dimension": "family_name",
+      "entity_phrases": [
+        "speedgoat",
+        "blackfoot",
+        "mini speedgoat",
+        "super cub"
+      ],
+      "canonical_value": null
+    },
+    {
+      "kind": "mapping",
+      "artifact_id": "mapping.type_examples.core",
+      "tags": [
+        "type",
+        "hunting",
+        "tactical"
+      ],
+      "content": "Broad usage classes map to knife_type. Hunting and Tactical are type values. If the user says hunting knives or tactical knives, prefer knife_type.",
+      "target_dimension": "knife_type",
+      "entity_phrases": [
+        "hunting",
+        "tactical"
+      ],
+      "canonical_value": null
+    },
+    {
+      "kind": "mapping",
+      "artifact_id": "mapping.collab_examples.core",
+      "tags": [
+        "collab",
+        "collaborator",
+        "collaboration"
+      ],
+      "content": "If the user explicitly asks for collaborators or collabs, use collaborator_name. Do not map words like Blood Brothers to collaborator_name unless the request meaning is clearly collaboration-related.",
+      "target_dimension": "collaborator_name",
+      "entity_phrases": [
+        "collab",
+        "collaborator",
+        "collaboration"
+      ],
+      "canonical_value": null
+    },
+    {
+      "kind": "mapping",
+      "artifact_id": "mapping.metric_spend_words",
+      "tags": [
+        "spent",
+        "spend",
+        "paid",
+        "cost"
+      ],
+      "content": "Words like spent, spend, paid, and cost usually map to the aggregate metric total_spend, not estimated_value.",
+      "target_dimension": "metric",
+      "entity_phrases": [
+        "spent",
+        "spend",
+        "paid",
+        "cost"
+      ],
+      "canonical_value": "total_spend"
+    },
+    {
+      "kind": "mapping",
+      "artifact_id": "mapping.metric_value_words",
+      "tags": [
+        "value",
+        "worth",
+        "collection worth"
+      ],
+      "content": "Words like value and worth usually map to the aggregate metric estimated_value, not total_spend.",
+      "target_dimension": "metric",
+      "entity_phrases": [
+        "value",
+        "worth",
+        "what is it worth"
+      ],
+      "canonical_value": "estimated_value"
+    },
+    {
+      "kind": "mapping",
+      "artifact_id": "mapping.metric_count_words",
+      "tags": [
+        "how many",
+        "count",
+        "number of"
+      ],
+      "content": "Count wording like how many, count, or number of maps to the count metric.",
+      "target_dimension": "metric",
+      "entity_phrases": [
+        "how many",
+        "count",
+        "number of"
+      ],
+      "canonical_value": "count"
+    },
+    {
+      "kind": "rule",
+      "artifact_id": "schema.reporting_inventory",
+      "tags": [
+        "schema",
+        "inventory",
+        "view",
+        "owned items"
+      ],
+      "content": "Use reporting_inventory for owned-knife questions. Important fields include knife_name, series_name, family_name, knife_type, form_name, collaborator_name, steel, condition, location, acquired_date, purchase_price, estimated_value, msrp, record_status."
+    },
+    {
+      "kind": "rule",
+      "artifact_id": "schema.reporting_models",
+      "tags": [
+        "schema",
+        "catalog",
+        "view",
+        "models"
+      ],
+      "content": "Use reporting_models for catalog/model questions. Important fields include official_name, series_name, family_name, knife_type, form_name, collaborator_name, steel, msrp, and model/status fields relevant to the full catalog."
+    },
+    {
+      "kind": "rule",
+      "artifact_id": "schema.inventory_vs_catalog_usage",
+      "tags": [
+        "schema",
+        "scope",
+        "inventory",
+        "catalog"
+      ],
+      "content": "Questions about what the user owns use reporting_inventory. Questions about the full MKC catalog use reporting_models. Missing-model and completion-cost questions usually compare inventory against catalog, but the canonical plan should still make scope explicit."
+    },
+    {
+      "kind": "rule",
+      "artifact_id": "rule.series_vs_family_vs_type",
+      "tags": [
+        "dimension",
+        "series",
+        "family",
+        "type",
+        "disambiguation"
+      ],
+      "content": "Dimension choice is deterministic when phrasing is explicit: 'family knives' -> family_name, 'series knives' or named line like Blood Brothers/Traditions -> series_name, 'type' or broad classes like Hunting/Tactical -> knife_type. If still ambiguous, ask a clarification question instead of guessing."
+    },
+    {
+      "kind": "rule",
+      "artifact_id": "rule.no_hidden_filters",
+      "tags": [
+        "guardrail",
+        "no hidden filters",
+        "chat drift"
+      ],
+      "content": "Do not turn prior chat context into hidden WHERE clauses. Only explicit constraints in the current turn, or narrowly allowed follow-up carryover, may affect the canonical plan."
+    },
+    {
+      "kind": "rule",
+      "artifact_id": "rule.explicit_constraints_win",
+      "tags": [
+        "guardrail",
+        "explicit constraints",
+        "exclusions"
+      ],
+      "content": "If the current question includes explicit exclusions or constraints, they must override vague contextual hints. The current question wins."
+    },
+    {
+      "kind": "rule",
+      "artifact_id": "rule.exclusions_preserved",
+      "tags": [
+        "exclusion",
+        "negation",
+        "without",
+        "excluding",
+        "not including"
+      ],
+      "content": "Exclusions are first-class semantic objects. Phrases like excluding, except, without, or not including must stay in exclusions and must not be silently flipped into positive filters."
+    },
+    {
+      "kind": "rule",
+      "artifact_id": "rule.followup_list_underlying_items",
+      "tags": [
+        "followup",
+        "list them",
+        "show them",
+        "drill down"
+      ],
+      "content": "Follow-ups like 'list them', 'show them', or 'which ones' after an aggregate should switch output shape to list while preserving only the prior explicit filters/scope. They should not introduce new hidden filters."
+    },
+    {
+      "kind": "rule",
+      "artifact_id": "rule.canonicalization_before_sql",
+      "tags": [
+        "canonicalization",
+        "normalization",
+        "before sql"
+      ],
+      "content": "Normalize dimension names, aliases, and exclusion targets before SQL compilation. The compiler should receive canonical fields and values, not fuzzy user phrasing."
+    },
+    {
+      "kind": "example",
+      "artifact_id": "example.count_by_family",
+      "tags": [
+        "how many",
+        "by family",
+        "count"
+      ],
+      "content": "Count breakdown by family in inventory.",
+      "natural_query": "how many knives do I have by family",
+      "hint_intent": "aggregate",
+      "hint_metric": "count",
+      "hint_scope": "inventory",
+      "hint_year_compare": null,
+      "hint_group_by": "family_name"
+    },
+    {
+      "kind": "example",
+      "artifact_id": "example.value_by_family",
+      "tags": [
+        "value",
+        "worth",
+        "by family"
+      ],
+      "content": "Estimated value grouped by family in inventory.",
+      "natural_query": "what is my collection value by family",
+      "hint_intent": "aggregate",
+      "hint_metric": "estimated_value",
+      "hint_scope": "inventory",
+      "hint_year_compare": null,
+      "hint_group_by": "family_name"
+    },
+    {
+      "kind": "example",
+      "artifact_id": "example.spend_year_compare",
+      "tags": [
+        "2024",
+        "2025",
+        "spent",
+        "vs",
+        "versus"
+      ],
+      "content": "Year-over-year spend comparison across two explicit years.",
+      "natural_query": "show me how much i spent in 2024 vs 2025",
+      "hint_intent": "compare",
+      "hint_metric": "total_spend",
+      "hint_scope": "inventory",
+      "hint_year_compare": [
+        "2024",
+        "2025"
+      ],
+      "hint_group_by": null
+    },
+    {
+      "kind": "example",
+      "artifact_id": "example.blood_brothers_series",
+      "tags": [
+        "blood brothers",
+        "series",
+        "group",
+        "line"
+      ],
+      "content": "Blood Brothers usually maps to series_name in reporting language.",
+      "natural_query": "show me knives in the Blood Brothers group",
+      "hint_intent": "list",
+      "hint_metric": "count",
+      "hint_scope": "inventory",
+      "hint_year_compare": null,
+      "hint_group_by": null
+    },
+    {
+      "kind": "example",
+      "artifact_id": "example.speedgoat_family",
+      "tags": [
+        "speedgoat",
+        "family",
+        "family knives"
+      ],
+      "content": "Speedgoat usually maps to family_name in family phrasing.",
+      "natural_query": "show me speedgoat family knives",
+      "hint_intent": "list",
+      "hint_metric": "count",
+      "hint_scope": "inventory",
+      "hint_year_compare": null,
+      "hint_group_by": null
+    },
+    {
+      "kind": "example",
+      "artifact_id": "example.hunting_type",
+      "tags": [
+        "hunting",
+        "type",
+        "category"
+      ],
+      "content": "Hunting knives map to knife_type.",
+      "natural_query": "list my hunting knives",
+      "hint_intent": "list",
+      "hint_metric": "count",
+      "hint_scope": "inventory",
+      "hint_year_compare": null,
+      "hint_group_by": null
+    },
+    {
+      "kind": "example",
+      "artifact_id": "example.missing_speedgoats",
+      "tags": [
+        "missing",
+        "speedgoat",
+        "catalog"
+      ],
+      "content": "Missing models compares inventory against catalog for a named family or series.",
+      "natural_query": "which speedgoat models do i still not have",
+      "hint_intent": "missing_models",
+      "hint_metric": "count",
+      "hint_scope": "catalog",
+      "hint_year_compare": null,
+      "hint_group_by": null
+    },
+    {
+      "kind": "example",
+      "artifact_id": "example.completion_cost",
+      "tags": [
+        "complete collection",
+        "finish collection",
+        "msrp"
+      ],
+      "content": "Completion cost uses completion_cost intent and retail/MSRP style pricing.",
+      "natural_query": "how much would it cost to complete my collection",
+      "hint_intent": "completion_cost",
+      "hint_metric": "msrp",
+      "hint_scope": "catalog",
+      "hint_year_compare": null,
+      "hint_group_by": null
+    },
+    {
+      "kind": "example",
+      "artifact_id": "example.exclude_mini_speedgoat",
+      "tags": [
+        "exclude",
+        "except",
+        "mini speedgoat"
+      ],
+      "content": "Explicit exclusion must remain exclusion.",
+      "natural_query": "show me all speedgoats except mini speedgoat",
+      "hint_intent": "list",
+      "hint_metric": "count",
+      "hint_scope": "inventory",
+      "hint_year_compare": null,
+      "hint_group_by": null
+    },
+    {
+      "kind": "example",
+      "artifact_id": "example.what_do_i_own",
+      "tags": [
+        "what do i own",
+        "inventory"
+      ],
+      "content": "Ownership phrasing defaults to inventory list intent.",
+      "natural_query": "what do i own",
+      "hint_intent": "list",
+      "hint_metric": "count",
+      "hint_scope": "inventory",
+      "hint_year_compare": null,
+      "hint_group_by": null
+    },
+    {
+      "kind": "example",
+      "artifact_id": "example.mkc_made_catalog",
+      "tags": [
+        "mkc made",
+        "catalog",
+        "all models"
+      ],
+      "content": "Questions about what MKC has made target the full catalog.",
+      "natural_query": "how many speedgoats has MKC made",
+      "hint_intent": "aggregate",
+      "hint_metric": "count",
+      "hint_scope": "catalog",
+      "hint_year_compare": null,
+      "hint_group_by": null
+    },
+    {
+      "kind": "example",
+      "artifact_id": "example.by_steel",
+      "tags": [
+        "by steel",
+        "steel breakdown",
+        "magnacut"
+      ],
+      "content": "Steel breakdown uses aggregate count grouped by steel unless the user asked for value/spend by steel.",
+      "natural_query": "show me my knives by steel",
+      "hint_intent": "aggregate",
+      "hint_metric": "count",
+      "hint_scope": "inventory",
+      "hint_year_compare": null,
+      "hint_group_by": "steel"
+    }
+  ]
+}

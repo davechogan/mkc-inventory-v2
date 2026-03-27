@@ -18,6 +18,30 @@ from pydantic import BaseModel, Field, field_validator
 from reporting.domain import GetConn
 
 
+class InventoryItemV2In(BaseModel):
+    """Request body for POST/PUT /api/v2/inventory (module-level so FastAPI/Pydantic resolve the model reliably)."""
+
+    knife_model_id: int
+    nickname: Optional[str] = None
+    quantity: int = 1
+    acquired_date: Optional[str] = None
+    mkc_order_number: Optional[str] = None
+    purchase_price: Optional[float] = None
+    estimated_value: Optional[float] = None
+    condition: str = "Like New"
+    handle_color: Optional[str] = None
+    steel: Optional[str] = None
+    blade_finish: Optional[str] = None
+    blade_color: Optional[str] = None
+    blade_length: Optional[float] = None
+    collaboration_name: Optional[str] = None
+    serial_number: Optional[str] = None
+    location: Optional[str] = None
+    purchase_source: Optional[str] = None
+    last_sharpened: Optional[str] = None
+    notes: Optional[str] = None
+
+
 def create_v2_router(
     *,
     get_conn: GetConn,
@@ -1145,28 +1169,6 @@ def create_v2_router(
                 (option_id, option_type),
             )
             return {"message": "Deleted"}
-
-
-    class InventoryItemV2In(BaseModel):
-        knife_model_id: int
-        nickname: Optional[str] = None
-        quantity: int = 1
-        acquired_date: Optional[str] = None
-        mkc_order_number: Optional[str] = None
-        purchase_price: Optional[float] = None
-        estimated_value: Optional[float] = None
-        condition: str = "Like New"
-        handle_color: Optional[str] = None
-        steel: Optional[str] = None
-        blade_finish: Optional[str] = None
-        blade_color: Optional[str] = None
-        blade_length: Optional[float] = None
-        collaboration_name: Optional[str] = None
-        serial_number: Optional[str] = None
-        location: Optional[str] = None
-        purchase_source: Optional[str] = None
-        last_sharpened: Optional[str] = None
-        notes: Optional[str] = None
 
 
     @router.post("/api/v2/inventory")

@@ -1,0 +1,16 @@
+{
+  "intent": "aggregate",
+  "scope": "inventory",
+  "metric": "total_spend",
+  "group_by": ["series_name"],
+  "filters": [
+    {"field": "purchase_price", "op": ">", "value": 100}
+  ],
+  "exclusions": [],
+  "time_range": null,
+  "year_compare": [],
+  "sort": null,
+  "limit": 100,
+  "needs_clarification": false,
+  "clarification_reason": null
+}

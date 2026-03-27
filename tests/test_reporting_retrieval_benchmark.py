@@ -10,7 +10,7 @@ def test_retrieve_artifacts_with_meta_backend_override(monkeypatch) -> None:
     monkeypatch.setattr(retrieval, "resolve_retrieval_backend", lambda c: "chroma")
     arts, meta = retrieve_artifacts_with_meta(
         "list the knives in the blackfoot family",
-        top_k=4,
+        top_k=8,
         backend="lexical",
     )
     assert meta.get("configured_backend") == "lexical"

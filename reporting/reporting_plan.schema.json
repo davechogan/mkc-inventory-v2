@@ -188,9 +188,6 @@
               "type": "number"
             },
             {
-              "type": "integer"
-            },
-            {
               "type": "array",
               "items": {
                 "oneOf": [
@@ -199,9 +196,6 @@
                   },
                   {
                     "type": "number"
-                  },
-                  {
-                    "type": "integer"
                   }
                 ]
               },

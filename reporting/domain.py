@@ -3,6 +3,8 @@
 Env:
   ``REPORTING_SCOPE_PREPROCESSING`` — when ``1``/``true``/``yes``/``on``, enable scope-status
   short-circuit and inventory-vs-catalog clarification prompts. Default **unset** = off (legacy behavior).
+  ``REPORTING_DEBUG_PIPELINE`` — when ``1``/``true``/``yes``/``on``, responses include ``pipeline_debug``
+  (retrieval query text, planner/responder prompts and raw model output). Do not enable in untrusted environments.
   Other reporting model env vars: ``REPORTING_PLANNER_MODEL``, ``REPORTING_RESPONDER_MODEL``, …
 """
 
@@ -481,6 +483,62 @@ def _reporting_is_scope_status_question(question: str) -> bool:
     return asks_scope
 
 
+def _reporting_is_meta_question(question: str) -> bool:
+    """Return True for questions about the system's data model or capabilities.
+
+    These questions ask *about* the data fields or how the system works, not
+    *about* the knife collection data itself.  Routing them to the SQL planner
+    produces a confusing inventory listing (RPT-003).
+    """
+    q = " ".join((question or "").strip().lower().split())
+    if not q:
+        return False
+    patterns = (
+        "what field",
+        "which field",
+        "what fields",
+        "which fields",
+        "what column",
+        "which column",
+        "what data",
+        "what information do you",
+        "what are you using for",
+        "what do you use for",
+        "how do you calculate",
+        "how do you determine",
+        "how is cost",
+        "how is spend",
+        "how is value",
+        "what is your cost",
+        "what is the cost field",
+        "what does cost mean",
+        "what does spend mean",
+        "what does value mean",
+        "what metrics",
+        "what types of questions",
+        "what can you answer",
+        "what can you tell",
+        "what kinds of questions",
+    )
+    return any(p in q for p in patterns)
+
+
+_REPORTING_META_ANSWER = (
+    "Here is how I calculate cost and value fields:\n\n"
+    "• **purchase_price** — what you actually paid when you acquired the knife "
+    "(from your inventory record). This is used for 'total spend' or 'how much did I spend' questions.\n"
+    "• **estimated_value** — your current estimated resale or market value "
+    "(from your inventory record). This is used for 'estimated value' or 'what is my collection worth' questions.\n"
+    "• **msrp** — the manufacturer's suggested retail price from the catalog. "
+    "This is catalog data and is used for 'msrp' or 'retail price' questions.\n\n"
+    "For any spend question I use **purchase_price**. "
+    "For value questions I use **estimated_value**. "
+    "You can ask me things like: 'how much did I spend by series?', "
+    "'what is the estimated value of my Blackfoot knives?', or "
+    "'which knives have an msrp above $300?'."
+)
+
+
 def _reporting_validate_sql(sql: str) -> str:
     if not sql or not str(sql).strip():
         raise HTTPException(status_code=400, detail="No SQL generated for this question.")
@@ -538,7 +596,21 @@ def _reporting_exec_sql(
     return cols, rows, elapsed_ms
 
 
-def _reporting_build_drill_link(row: dict[str, Any]) -> Optional[str]:
+def _reporting_build_drill_link(row: dict[str, Any], intent: Optional[str] = None) -> Optional[str]:
+    """Build a drill-through URL for a result row.
+
+    For ``missing_models`` intent the row describes a model that is NOT in the
+    user's inventory.  Linking to the inventory view produces an empty list,
+    which is confusing (RPT-005).  Instead, link to the master catalog page with
+    the model name pre-filled in the search field so the user can inspect or add
+    it from there.
+    """
+    if intent == "missing_models":
+        name = str(row.get("official_name") or row.get("knife_name") or "").strip()
+        if name:
+            return f"/master.html?{urlencode({'search': name})}"
+        return None
+
     mapping = [
         ("knife_name", "search"),
         ("knife_type", "type"),
@@ -1283,16 +1355,39 @@ def _reporting_explicit_constraints(question: str) -> dict[str, Any]:
 
 def _reporting_prune_conflicting_filters(question: str, filters: dict[str, Any]) -> dict[str, Any]:
     """
-    Resolve ambiguous identity filters that can over-constrain results.
+    Resolve ambiguous or contradictory filters that would over-constrain results to zero rows.
 
-    Example: prompts with "Traditions knives" should not accidentally enforce both
-    series_name=Traditions and family_name=Traditions unless family is explicitly requested.
+    Two cases are handled:
+
+    1. Same-field contradiction (RPT-001): a positive filter and its negation for the same
+       field (e.g. series_name="Blood Brothers" and series_name__not="Blood Brothers") produce
+       a SQL WHERE clause that can never be satisfied.  Drop the exclusion when the positive
+       and negative values are equal under normalization.
+
+    2. Cross-dimension ambiguity: series_name, family_name, and knife_type carrying the same
+       normalized value simultaneously (e.g. from a heuristic that stamped the same entity
+       into multiple dimensions).  Drop the redundant dimensions unless the user explicitly
+       requested a breakdown by that dimension.
     """
     q = " ".join((question or "").strip().lower().split())
     out = dict(filters or {})
     if not out:
         return out
 
+    # --- Case 1: same-field positive+negative contradiction ---
+    for key in list(out.keys()):
+        if key.endswith("__not"):
+            base = key[:-5]
+            pos_val = out.get(base)
+            neg_val = out[key]
+            if pos_val is not None:
+                norm_pos = _reporting_normalize_filter_value(base, pos_val)
+                norm_neg = _reporting_normalize_filter_value(base, neg_val)
+                if norm_pos and norm_neg and norm_pos.lower() == norm_neg.lower():
+                    # Drop the exclusion; the positive filter is the user's intent.
+                    out.pop(key)
+
+    # --- Case 2: cross-dimension ambiguity ---
     series_val = out.get("series_name")
     if series_val:
         norm_series = _reporting_normalize_filter_value("series_name", series_val)
@@ -1344,35 +1439,6 @@ def _reporting_has_substantive_rows(intent: Optional[str], rows: list[dict[str, 
     return True
 
 
-def _reporting_relax_ambiguous_plan(plan: dict[str, Any], question: str) -> Optional[dict[str, Any]]:
-    """
-    If an initial plan yields non-substantive results, relax ambiguous filters by
-    dropping likely duplicate constraints across dimensions.
-    """
-    p = dict(plan or {})
-    f = dict(p.get("filters") or {})
-    if not f:
-        return None
-    changed = False
-    q = " ".join((question or "").strip().lower().split())
-    s = _reporting_normalize_filter_value("series_name", f.get("series_name") or "")
-    fam = _reporting_normalize_filter_value("family_name", f.get("family_name") or "")
-    typ = _reporting_normalize_filter_value("knife_type", f.get("knife_type") or "")
-    if s and fam and s == fam:
-        # If user did not explicitly demand family segmentation, prefer series scope.
-        if "by family" not in q and "family breakdown" not in q:
-            f.pop("family_name", None)
-            changed = True
-    if s and typ and s == typ:
-        if "by type" not in q and "knife type" not in q:
-            f.pop("knife_type", None)
-            changed = True
-    if changed:
-        p["filters"] = f
-        return p
-    return None
-
-
 def _reporting_heuristic_plan(question: str, last_state: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     q = " ".join((question or "").strip().lower().split())
     plan = dict(last_state or {})
@@ -1422,6 +1488,22 @@ def _reporting_heuristic_plan(question: str, last_state: Optional[dict[str, Any]
             plan["intent"] = "aggregate"
             plan["metric"] = "count"
 
+    top_m = re.search(r"\btop\s+(\d{1,4})\b", q)
+    if top_m:
+        plan["limit"] = min(REPORTING_MAX_ROWS_HARD, max(1, int(top_m.group(1))))
+
+    inv_scope = str(plan.get("scope") or "inventory").strip().lower() == "inventory"
+    if (
+        inv_scope
+        and plan.get("intent") == "list_inventory"
+        and not plan.get("group_by")
+        and any(w in q for w in ("expensive", "most expensive", "highest price", "priciest", "costliest"))
+        and any(w in q for w in ("purchase", "purchases", "paid", "buy", "bought"))
+    ):
+        plan["sort"] = {"field": "purchase_price", "direction": "desc"}
+        if not top_m:
+            plan["limit"] = min(10, REPORTING_MAX_ROWS_HARD, max(1, int(plan.get("limit") or 10)))
+
     # Preserve date intent across short/contextual follow-ups when user did not
     # restate a new date window explicitly.
     if _reporting_is_followup(q) and isinstance(last_state, dict):
@@ -1461,116 +1543,203 @@ def _reporting_heuristic_plan(question: str, last_state: Optional[dict[str, Any]
     return plan
 
 
-def _reporting_llm_plan(
-    conn: sqlite3.Connection,
-    model: str,
+_REPORTING_LLM_FILTER_KEYS = {
+    "series_name",
+    "family_name",
+    "knife_type",
+    "form_name",
+    "collaborator_name",
+    "steel",
+    "condition",
+    "location",
+    "series_name__not",
+    "family_name__not",
+    "knife_type__not",
+    "form_name__not",
+    "collaborator_name__not",
+    "steel__not",
+    "condition__not",
+    "location__not",
+    "text_search",
+    "text_search__not",
+}
+
+
+def _reporting_summarize_state_for_hints(last_state: Optional[dict[str, Any]]) -> dict[str, Any]:
+    if not isinstance(last_state, dict) or not last_state:
+        return {}
+    return {
+        "intent": last_state.get("intent"),
+        "scope": last_state.get("scope"),
+        "date_start": last_state.get("date_start"),
+        "date_end": last_state.get("date_end"),
+        "year_compare": last_state.get("year_compare"),
+        "filter_keys": list((last_state.get("filters") or {}).keys()),
+    }
+
+
+def _reporting_planner_hints_payload(
     question: str,
-    context_block: str,
-    schema_context: str,
-) -> tuple[Optional[dict[str, Any]], dict[str, Any]]:
-    retrieval_artifacts, retrieval_meta = retrieve_artifacts_with_meta(question, top_k=6, conn=conn)
-    retrieval_ctx = format_retrieval_context(retrieval_artifacts)
-    system = (
-        "You convert collection questions into semantic JSON plans. "
-        "Return JSON only with keys: intent, filters, group_by, metric, limit, date_start, date_end, year_compare. "
-        "intent must be one of: missing_models, list_inventory, aggregate, completion_cost. "
-        "filters is an object using only: series_name, family_name, knife_type, form_name, collaborator_name, steel, condition, location. "
-        "group_by must be null or one of: series_name, family_name, knife_type, form_name, collaborator_name, steel, condition, location. "
-        "metric must be one of: count, total_spend, total_estimated_value. "
-        "date_start/date_end must be YYYY-MM-DD or null. "
-        "year_compare must be null or [YYYY, YYYY] when user asks year-vs-year."
+    explicit: dict[str, Any],
+    heuristic: dict[str, Any],
+    learned_hints: dict[str, Any],
+    last_state: Optional[dict[str, Any]],
+) -> dict[str, Any]:
+    ds, de, dl = _reporting_detect_date_bounds(question)
+    yc = _reporting_detect_year_comparison(question)
+    q = " ".join((question or "").strip().lower().split())
+    compact_h: dict[str, Any] = {}
+    for k in ("intent", "metric", "group_by", "scope", "limit"):
+        if heuristic.get(k) is not None:
+            compact_h[k] = heuristic.get(k)
+    hf = heuristic.get("filters")
+    if isinstance(hf, dict) and hf:
+        compact_h["filters"] = dict(list(hf.items())[:16])
+    out: dict[str, Any] = {
+        "advisory_explicit_constraints": {k: v for k, v in explicit.items() if v not in (None, "", [], {})},
+        "advisory_heuristic_guess": compact_h,
+        "retrieval_learned_hints": learned_hints.get("hints") or [],
+        "detected_date_window": {"start": ds, "end": de, "label": dl},
+        "detected_year_compare": [yc[0], yc[1]] if yc else None,
+    }
+    if _reporting_is_followup(q):
+        out["prior_turn_plan_summary"] = _reporting_summarize_state_for_hints(last_state)
+    return out
+
+
+def _reporting_repair_completion_cost_vs_ranked_purchases(question: str, plan: dict[str, Any]) -> None:
+    """If the model chose completion_cost but the question is about ranked owned purchases, normalize intent."""
+    q = " ".join((question or "").strip().lower().split())
+    if plan.get("intent") != "completion_cost":
+        return
+    ranked_owned = ("purchase" in q or "purchases" in q or "bought" in q or "paid" in q) and (
+        "expensive" in q or "top" in q or "most" in q or "highest" in q or "price" in q
     )
-    user = (
-        f"Schema:\n{schema_context}\n\n"
-        f"Retrieved grounding:\n{retrieval_ctx or '(none)'}\n\n"
-        f"Context:\n{context_block or '(none)'}\n\n"
-        f"Question:\n{question}\n"
-    )
+    if not ranked_owned:
+        return
+    plan["intent"] = "list_inventory"
+    plan["metric"] = "count"
+    plan["sort"] = {"field": "purchase_price", "direction": "desc"}
+    m = re.search(r"\btop\s+(\d+)\b", q)
+    if m and m.group(1).isdigit():
+        plan["limit"] = min(REPORTING_MAX_ROWS_HARD, max(1, int(m.group(1))))
+    elif re.search(r"\b(\d+)\s+most\s+expensive\b", q):
+        m2 = re.search(r"\b(\d+)\s+most\s+expensive\b", q)
+        if m2 and m2.group(1).isdigit():
+            plan["limit"] = min(REPORTING_MAX_ROWS_HARD, max(1, int(m2.group(1))))
+
+
+def _reporting_legacy_plan_from_llm_dict(llm_plan: dict[str, Any], question: str) -> dict[str, Any]:
+    plan: dict[str, Any] = {
+        "intent": "list_inventory",
+        "scope": "inventory",
+        "metric": "count",
+        "filters": {},
+        "group_by": None,
+        "limit": REPORTING_MAX_ROWS_DEFAULT,
+    }
+    ri = str(llm_plan.get("intent") or "").strip()
+    if ri in REPORTING_INTENTS:
+        plan["intent"] = ri
+    rm = str(llm_plan.get("metric") or "").strip()
+    if rm in REPORTING_METRICS:
+        plan["metric"] = rm
+    sc = str(llm_plan.get("scope") or "").strip().lower()
+    if sc in {"inventory", "catalog"}:
+        plan["scope"] = sc
+    gb = llm_plan.get("group_by")
+    if isinstance(gb, str) and gb.strip() and gb.strip() in REPORTING_GROUPABLE_DIMENSIONS.values():
+        plan["group_by"] = gb.strip()
     try:
-        raw = blade_ai.ollama_chat(model, system, user, timeout=60.0)
-        parsed = None
-        if raw.strip().startswith("{"):
-            try:
-                parsed = json.loads(raw)
-            except Exception:
-                parsed = None
-        if parsed is None:
-            braced = extract_first_json_object(raw)
-            if braced:
-                try:
-                    parsed = json.loads(braced)
-                except Exception:
-                    parsed = None
-        return (parsed if isinstance(parsed, dict) else None), retrieval_meta
-    except Exception:
-        return None, retrieval_meta
+        lim_raw = llm_plan.get("limit")
+        if lim_raw is not None:
+            plan["limit"] = min(REPORTING_MAX_ROWS_HARD, max(1, int(lim_raw)))
+    except (TypeError, ValueError):
+        pass
+    if isinstance(llm_plan.get("filters"), dict):
+        merged_f: dict[str, Any] = {}
+        for k, v in llm_plan["filters"].items():
+            if k in _REPORTING_LLM_FILTER_KEYS:
+                sv = _reporting_normalize_filter_value(k, str(v or ""))
+                if sv:
+                    merged_f[k] = sv
+        plan["filters"] = merged_f
+    llm_ds = str(llm_plan.get("date_start") or "").strip()
+    llm_de = str(llm_plan.get("date_end") or "").strip()
+    if RE_DATE_ISO.fullmatch(llm_ds):
+        plan["date_start"] = llm_ds
+    if RE_DATE_ISO.fullmatch(llm_de):
+        plan["date_end"] = llm_de
+    yc = llm_plan.get("year_compare")
+    if isinstance(yc, (list, tuple)) and len(yc) == 2:
+        ya = str(yc[0]).strip()
+        yb = str(yc[1]).strip()
+        if RE_YEAR_4.fullmatch(ya) and RE_YEAR_4.fullmatch(yb):
+            plan["year_compare"] = [ya, yb]
+    raw_sort = llm_plan.get("sort")
+    if isinstance(raw_sort, dict):
+        sf = str(raw_sort.get("field") or "").strip()
+        sd = str(raw_sort.get("direction") or "desc").strip().lower()
+        if sf and sd in ("asc", "desc"):
+            plan["sort"] = {"field": sf, "direction": sd}
+    _reporting_repair_completion_cost_vs_ranked_purchases(question, plan)
+    if plan.get("intent") == "list_inventory" and plan.get("metric") not in {"count", "total_estimated_value"}:
+        plan["metric"] = "count"
+    plan["filters"] = _reporting_prune_conflicting_filters(question, plan.get("filters") or {})
+    plan["scope"] = str(plan.get("scope") or "inventory")
+    if plan["scope"] not in {"inventory", "catalog"}:
+        plan["scope"] = "inventory"
+    return plan
 
 
-def _reporting_semantic_plan(
-    conn: sqlite3.Connection,
-    planner_model: str,
+def _reporting_clarification_plan_planner_failed() -> dict[str, Any]:
+    return {
+        "intent": "list_inventory",
+        "scope": "inventory",
+        "metric": "count",
+        "filters": {},
+        "group_by": None,
+        "limit": REPORTING_MAX_ROWS_DEFAULT,
+        "needs_clarification": True,
+        "clarification_reason": (
+            "The planner could not produce structured JSON for this question. "
+            "Rephrase with a concrete scope (series, date window, inventory vs catalog, or sort intent)."
+        ),
+    }
+
+
+def _reporting_apply_followup_carryover(
+    plan: dict[str, Any],
+    last_state: Optional[dict[str, Any]],
     question: str,
-    session_id: str,
-    context_block: str,
-    retry_model: Optional[str] = None,
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    last_state = _reporting_get_last_query_state(conn, session_id)
-    is_followup = _reporting_is_followup(question)
-    explicit = _reporting_explicit_constraints(question)
-    heuristic = _reporting_heuristic_plan(question, last_state=last_state)
-    learned_hints = _reporting_get_semantic_hints(conn, session_id, question)
-    schema_context = _reporting_build_prompt_schema(conn)
-    llm_plan, retrieval_meta = _reporting_llm_plan(conn, planner_model, question, context_block, schema_context)
-    planner_attempts = 1
-    if not isinstance(llm_plan, dict) and retry_model and retry_model != planner_model:
-        retry, retry_retrieval_meta = _reporting_llm_plan(conn, retry_model, question, context_block, schema_context)
-        planner_attempts = 2
-        if isinstance(retry, dict):
-            llm_plan = retry
-            retrieval_meta = retry_retrieval_meta
-    plan = dict(heuristic)
-    mode = "semantic_heuristic"
-    if isinstance(llm_plan, dict):
-        # LLM can refine intent/grouping/metric while keeping validated filters.
-        if llm_plan.get("intent") in REPORTING_INTENTS:
-            plan["intent"] = llm_plan["intent"]
-        if llm_plan.get("metric") in REPORTING_METRICS:
-            plan["metric"] = llm_plan["metric"]
-        if llm_plan.get("group_by") in REPORTING_GROUPABLE_DIMENSIONS.values():
-            plan["group_by"] = llm_plan["group_by"]
-        if isinstance(llm_plan.get("filters"), dict):
-            f = {}
-            for k, v in llm_plan["filters"].items():
-                if k in {
-                    "series_name", "family_name", "knife_type", "form_name", "collaborator_name", "steel", "condition", "location",
-                    "series_name__not", "family_name__not", "knife_type__not", "form_name__not", "collaborator_name__not", "steel__not", "condition__not", "location__not",
-                    "text_search", "text_search__not",
-                }:
-                    sv = _reporting_normalize_filter_value(k, str(v or ""))
-                    if sv and (is_followup or _reporting_filter_explicit_in_question(question, k, sv)):
-                        f[k] = sv
-            if f:
-                plan["filters"] = {**(plan.get("filters") or {}), **f}
-        llm_ds = str(llm_plan.get("date_start") or "").strip()
-        llm_de = str(llm_plan.get("date_end") or "").strip()
-        if RE_DATE_ISO.fullmatch(llm_ds):
-            plan["date_start"] = llm_ds
-        if RE_DATE_ISO.fullmatch(llm_de):
-            plan["date_end"] = llm_de
-        yc = llm_plan.get("year_compare")
-        if isinstance(yc, (list, tuple)) and len(yc) == 2:
-            ya = str(yc[0]).strip()
-            yb = str(yc[1]).strip()
-            if RE_YEAR_4.fullmatch(ya) and RE_YEAR_4.fullmatch(yb):
-                plan["year_compare"] = [ya, yb]
-        mode = "semantic_llm_plus_heuristic"
+) -> None:
+    """For contextual follow-ups, carry forward prior filters and reshape list-after-aggregate prompts."""
+    if not last_state or not _reporting_is_followup(question):
+        return
+    # Do not carry forward filters from a prior turn that returned zero rows.
+    # Those filters are likely contradictory or over-constrained; inheriting them
+    # locks the conversation into an unrecoverable empty state (RPT-002).
+    prior_row_count = last_state.get("_result_row_count")
+    if prior_row_count is not None and prior_row_count == 0:
+        return
+    q = " ".join(question.strip().lower().split())
+    prev_f = dict(last_state.get("filters") or {})
+    if prev_f:
+        plan["filters"] = {**prev_f, **dict(plan.get("filters") or {})}
+    if last_state.get("intent") == "aggregate" and any(
+        phrase in q for phrase in ("list", "show", "which knives", "which ones", "break down", "made up")
+    ):
+        plan["intent"] = "list_inventory"
+        plan["metric"] = "count"
+        plan["group_by"] = None
 
-    # Explicit user constraints always win over LLM refinements.
+
+def _reporting_merge_explicit_constraints_into_plan(plan: dict[str, Any], explicit: dict[str, Any]) -> dict[str, Any]:
+    """Apply regex/phrase extractions from the raw question (explicit constraints) on top of the LLM plan."""
     if explicit.get("intent") in REPORTING_INTENTS:
         plan["intent"] = explicit["intent"]
     if explicit.get("metric") in REPORTING_METRICS:
         plan["metric"] = explicit["metric"]
-    # Follow-up list/detail prompts should not carry aggregate-only metrics forward.
     if plan.get("intent") == "list_inventory" and plan.get("metric") not in {"count", "total_estimated_value"}:
         plan["metric"] = "count"
     if explicit.get("scope") in {"inventory", "catalog"}:
@@ -1587,19 +1756,144 @@ def _reporting_semantic_plan(
         plan["date_label"] = explicit.get("date_label")
     if isinstance(explicit.get("year_compare"), list) and len(explicit["year_compare"]) == 2:
         plan["year_compare"] = [str(explicit["year_compare"][0]), str(explicit["year_compare"][1])]
+    return plan
 
-    # Final pass: remove ambiguous cross-dimension filters unless the dimension
-    # is explicitly requested in user language.
-    merged_filters = dict(plan.get("filters") or {})
-    # Learned hints are soft priors: only add if the dimension is currently unset.
-    for k, v in dict(learned_hints.get("filters") or {}).items():
-        if k not in merged_filters and v:
-            merged_filters[k] = v
-    plan["filters"] = _reporting_prune_conflicting_filters(question, merged_filters)
 
-    plan["scope"] = str(plan.get("scope") or "inventory")
-    if plan["scope"] not in {"inventory", "catalog"}:
-        plan["scope"] = "inventory"
+def _reporting_llm_plan(
+    conn: sqlite3.Connection,
+    model: str,
+    question: str,
+    context_block: str,
+    schema_context: str,
+    *,
+    planner_hints: Optional[dict[str, Any]] = None,
+    debug: bool = False,
+) -> tuple[Optional[dict[str, Any]], dict[str, Any], dict[str, Any]]:
+    retrieval_artifacts, retrieval_meta = retrieve_artifacts_with_meta(
+        question, top_k=6, conn=conn, debug=debug
+    )
+    retrieval_ctx = format_retrieval_context(retrieval_artifacts)
+    system = (
+        "You convert collection questions into semantic JSON plans. Do not generate SQL. "
+        "Return JSON only with keys: intent, scope, filters, group_by, metric, limit, sort, date_start, date_end, year_compare. "
+        "intent must be one of: missing_models, list_inventory, aggregate, completion_cost. "
+        "scope must be inventory or catalog. "
+        "filters is an object using only: series_name, family_name, knife_type, form_name, collaborator_name, steel, condition, location "
+        "(and parallel __not keys or text_search as in schema notes). "
+        "group_by must be null or one of: series_name, family_name, knife_type, form_name, collaborator_name, steel, condition, location. "
+        "metric must be one of: count, total_spend, total_estimated_value. "
+        "limit is a positive integer row cap when the user asks for top N or a short list. "
+        "sort is null or {\"field\": \"purchase_price\", \"direction\": \"asc\"|\"desc\"} for ranked inventory rows "
+        "(e.g. most expensive purchases). "
+        "Use completion_cost only for cost-to-complete-the-collection / missing-model MSRP style questions—not for ranking knives you already bought by purchase price. "
+        "date_start/date_end must be YYYY-MM-DD or null. "
+        "year_compare must be null or [YYYY, YYYY] when user asks year-vs-year. "
+        "Align the JSON with the user question; advisory hints (if present) are suggestions only."
+    )
+    hints_block = ""
+    if planner_hints:
+        try:
+            hints_block = "\n\nPlanner hints (advisory JSON, not orders):\n" + json.dumps(
+                planner_hints, ensure_ascii=False, default=str
+            )
+        except (TypeError, ValueError):
+            hints_block = ""
+    user = (
+        f"Schema:\n{schema_context}\n\n"
+        f"Retrieved grounding:\n{retrieval_ctx or '(none)'}\n\n"
+        f"Context:\n{context_block or '(none)'}\n\n"
+        f"Question:\n{question}\n"
+        f"{hints_block}"
+    )
+    planner_debug: dict[str, Any] = {}
+    if debug:
+        planner_debug = {
+            "model": model,
+            "system": system,
+            "user": user,
+            "retrieval_context_block": retrieval_ctx,
+        }
+    try:
+        raw = blade_ai.ollama_chat(model, system, user, timeout=60.0)
+        parsed = None
+        if raw.strip().startswith("{"):
+            try:
+                parsed = json.loads(raw)
+            except Exception:
+                parsed = None
+        if parsed is None:
+            braced = extract_first_json_object(raw)
+            if braced:
+                try:
+                    parsed = json.loads(braced)
+                except Exception:
+                    parsed = None
+        if debug:
+            planner_debug["raw_response"] = raw
+            planner_debug["parsed_plan"] = parsed if isinstance(parsed, dict) else None
+        return (parsed if isinstance(parsed, dict) else None), retrieval_meta, planner_debug
+    except Exception as exc:
+        if debug:
+            planner_debug["exception"] = repr(exc)
+        return None, retrieval_meta, planner_debug
+
+
+def _reporting_semantic_plan(
+    conn: sqlite3.Connection,
+    planner_model: str,
+    question: str,
+    session_id: str,
+    context_block: str,
+    retry_model: Optional[str] = None,
+    *,
+    debug: bool = False,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    last_state = _reporting_get_last_query_state(conn, session_id)
+    explicit = _reporting_explicit_constraints(question)
+    heuristic = _reporting_heuristic_plan(question, last_state=last_state)
+    learned_hints = _reporting_get_semantic_hints(conn, session_id, question)
+    planner_hints = _reporting_planner_hints_payload(
+        question, explicit, heuristic, learned_hints, last_state
+    )
+    schema_context = _reporting_build_prompt_schema(conn)
+    llm_plan, retrieval_meta, planner_dbg_primary = _reporting_llm_plan(
+        conn,
+        planner_model,
+        question,
+        context_block,
+        schema_context,
+        planner_hints=planner_hints,
+        debug=debug,
+    )
+    planner_llm: dict[str, Any] = {}
+    if debug:
+        planner_llm["primary"] = planner_dbg_primary
+    planner_attempts = 1
+    if not isinstance(llm_plan, dict) and retry_model and retry_model != planner_model:
+        retry, retry_retrieval_meta, planner_dbg_retry = _reporting_llm_plan(
+            conn,
+            retry_model,
+            question,
+            context_block,
+            schema_context,
+            planner_hints=planner_hints,
+            debug=debug,
+        )
+        planner_attempts = 2
+        if debug:
+            planner_llm["retry"] = planner_dbg_retry
+        if isinstance(retry, dict):
+            llm_plan = retry
+            retrieval_meta = retry_retrieval_meta
+    mode = "semantic_llm_plan"
+    if not isinstance(llm_plan, dict):
+        plan = _reporting_clarification_plan_planner_failed()
+        mode = "semantic_llm_unparsed"
+    else:
+        plan = _reporting_legacy_plan_from_llm_dict(llm_plan, question)
+        plan = _reporting_merge_explicit_constraints_into_plan(plan, explicit)
+        _reporting_apply_followup_carryover(plan, last_state, question)
+        plan["filters"] = _reporting_prune_conflicting_filters(question, plan.get("filters") or {})
 
     canonical_candidate = CanonicalReportingPlan.from_legacy_semantic_plan(plan)
     structural = validate_canonical_structure(canonical_candidate.model_dump())
@@ -1612,7 +1906,7 @@ def _reporting_semantic_plan(
     # Semantic validation is performed in run_reporting_query before compilation.
     normalized_plan = canonical_valid.to_legacy_semantic_plan()
 
-    return normalized_plan, {
+    meta_out: dict[str, Any] = {
         "mode": mode,
         "planner_attempts": planner_attempts,
         "hint_ids": learned_hints.get("hint_ids") or [],
@@ -1623,6 +1917,9 @@ def _reporting_semantic_plan(
             "semantic": "pending",
         },
     }
+    if debug and planner_llm:
+        meta_out["planner_llm"] = planner_llm
+    return normalized_plan, meta_out
 
 
 def _reporting_plan_to_sql_legacy(
@@ -1848,6 +2145,14 @@ def _reporting_plan_to_sql_legacy(
             sql = f"SELECT {expr} FROM {source_view} {where_sql}"
         return sql, {"mode": "semantic_compiled_aggregate"}
 
+    raw_sort = plan.get("sort")
+    sort_field = ""
+    sort_dir = "asc"
+    if isinstance(raw_sort, dict):
+        sort_field = str(raw_sort.get("field") or "").strip()
+        sort_dir = str(raw_sort.get("direction") or "asc").strip().lower()
+    line_total_sql = "(COALESCE(purchase_price, 0) * COALESCE(quantity, 1))"
+
     if use_catalog:
         sql = (
             "SELECT model_id, official_name AS knife_name, knife_type, family_name, form_name, series_name, collaborator_name, "
@@ -1858,12 +2163,22 @@ def _reporting_plan_to_sql_legacy(
             f"LIMIT {limit}"
         )
     else:
-        sql = (
+        base_select = (
             "SELECT inventory_id, knife_name, knife_type, family_name, form_name, series_name, collaborator_name, "
-            "steel, blade_finish, handle_color, condition, quantity, location "
+            "steel, blade_finish, handle_color, condition, quantity, location"
+        )
+        if sort_field == "purchase_price" and sort_dir in ("asc", "desc"):
+            ord_kw = "DESC" if sort_dir == "desc" else "ASC"
+            order_by = f"{line_total_sql} {ord_kw}, knife_name"
+            extra = f", purchase_price, {line_total_sql} AS line_purchase_total"
+        else:
+            order_by = "knife_name"
+            extra = ""
+        sql = (
+            f"{base_select}{extra} "
             "FROM reporting_inventory "
             f"{where_sql} "
-            "ORDER BY knife_name "
+            f"ORDER BY {order_by} "
             f"LIMIT {limit}"
         )
     return sql, {"mode": "semantic_compiled_list_inventory"}
@@ -2152,6 +2467,14 @@ class ReportingQueryIn(BaseModel):
     compare_dimension: Optional[str] = None
     compare_value_a: Optional[str] = None
     compare_value_b: Optional[str] = None
+    debug: bool = False
+
+
+def _reporting_pipeline_debug_enabled(payload: ReportingQueryIn) -> bool:
+    if payload.debug:
+        return True
+    v = (os.environ.get("REPORTING_DEBUG_PIPELINE") or "").strip().lower()
+    return v in ("1", "true", "yes", "on")
 
 
 class ReportingSaveQueryIn(BaseModel):
@@ -2303,27 +2626,75 @@ def _reporting_generate_answer(
     sql_executed: str,
     context_block: str,
     semantic_intent: Optional[str] = None,
-) -> tuple[str, list[str], Optional[str], Optional[float]]:
+    semantic_plan: Optional[dict[str, Any]] = None,
+    *,
+    debug: bool = False,
+) -> tuple[str, list[str], Optional[str], Optional[float], dict[str, Any]]:
     if not rows:
+        dbg: dict[str, Any] = {"path": "deterministic_no_rows"} if debug else {}
         return (
             "No matching rows found for that question. Try broadening filters or date range.",
             ["Remove a filter and rerun.", "Try 'Show all knives by family.'"],
             "No rows matched the generated query.",
             0.6,
+            dbg,
         )
+    if semantic_intent == "list_inventory" and isinstance(semantic_plan, dict):
+        s = semantic_plan.get("sort")
+        if isinstance(s, dict) and str(s.get("field") or "") == "purchase_price" and str(s.get("direction") or "").lower() == "desc":
+            lines: list[str] = []
+            for i, r in enumerate(rows[:40], start=1):
+                name = str(r.get("knife_name") or "").strip() or "(unnamed)"
+                lt_raw = r.get("line_purchase_total")
+                try:
+                    lt_f = float(lt_raw) if lt_raw is not None else None
+                except (TypeError, ValueError):
+                    lt_f = None
+                if lt_f is None:
+                    try:
+                        pp = r.get("purchase_price")
+                        qty = float(r.get("quantity") or 1) or 1.0
+                        lt_f = float(pp) * qty if pp is not None else None
+                    except (TypeError, ValueError):
+                        lt_f = None
+                if lt_f is not None:
+                    price_str = f"${lt_f:,.2f}"
+                else:
+                    price_str = "—"
+                qty_v = r.get("quantity")
+                try:
+                    qn = int(qty_v) if qty_v is not None else 1
+                except (TypeError, ValueError):
+                    qn = 1
+                qsuffix = f" (qty {qn})" if qn != 1 else ""
+                lines.append(f"{i}. {name}{qsuffix}: {price_str} line total")
+            body = "\n".join(lines)
+            dbg2: dict[str, Any] = (
+                {"path": "deterministic_ranked_purchase_lines", "model": model} if debug else {}
+            )
+            return (
+                f"Most expensive purchase lines (by line total: price × quantity), showing {len(lines)}:\n{body}",
+                _reporting_default_followups(question, columns, rows),
+                "Deterministic ranked purchase list.",
+                0.88,
+                dbg2,
+            )
     if semantic_intent == "missing_models":
         names = [str(r.get("official_name") or "").strip() for r in rows if str(r.get("official_name") or "").strip()]
         if names:
             max_list = 30
             listed = ", ".join(names[:max_list])
             extra = f" (+{len(names)-max_list} more)" if len(names) > max_list else ""
+            dbg3: dict[str, Any] = {"path": "deterministic_missing_models", "model": model} if debug else {}
             return (
                 f"You are missing {len(names)} models matching that scope: {listed}{extra}.",
                 ["Show this grouped by family.", "Show only missing Traditions models.", "Estimate completion cost for these."],
                 "Deterministic missing-model answer.",
                 0.9,
+                dbg3,
             )
     preview = rows[:40]
+    responder_exc: Optional[BaseException] = None
     try:
         system = (
             "You are a concise collection reporting assistant. "
@@ -2354,17 +2725,31 @@ def _reporting_generate_answer(
                 confidence = None
             if not followups:
                 followups = _reporting_default_followups(question, columns, rows)
-            return answer, followups[:5], limitations, confidence
-    except Exception:
-        pass
+            r_dbg: dict[str, Any] = {}
+            if debug:
+                r_dbg = {
+                    "path": "ollama_json_responder",
+                    "model": model,
+                    "system": system,
+                    "user": user,
+                    "raw_response": raw,
+                    "parsed_json": parsed,
+                }
+            return answer, followups[:5], limitations, confidence, r_dbg
+    except Exception as exc:
+        responder_exc = exc
 
     top = rows[0]
     top_bits = ", ".join(f"{k}={top.get(k)}" for k in columns[:4])
+    fb_dbg: dict[str, Any] = {"path": "deterministic_fallback_first_row"} if debug else {}
+    if debug and responder_exc is not None:
+        fb_dbg["responder_exception"] = repr(responder_exc)
     return (
         f"Found {len(rows)} rows. First row: {top_bits}.",
         _reporting_default_followups(question, columns, rows),
         "Summary generated with deterministic fallback.",
         0.55,
+        fb_dbg,
     )
 
 
@@ -2402,6 +2787,7 @@ def run_reporting_query(
     question = payload.question.strip()
     if not question:
         raise HTTPException(status_code=400, detail="Question is required.")
+    debug_pipeline = _reporting_pipeline_debug_enabled(payload)
     date_start, date_end, date_label = _reporting_detect_date_bounds(question)
 
     route_models = _reporting_model_route(payload.model, ollama_check_payload)
@@ -2571,6 +2957,57 @@ def run_reporting_query(
             _log_error("guardrail_reject", unsafe_reason, mode="guardrail", semantic_intent=None, classification="invalid_request")
             raise HTTPException(status_code=400, detail=safe_msg)
 
+        # Short-circuit for meta/schema questions (RPT-003).
+        # These ask about the system's data model or field definitions, not about
+        # collection data.  Routing them to the SQL planner produces a confusing
+        # inventory listing.  Return a canned explanation instead.
+        if _reporting_is_meta_question(question):
+            assistant_message_id = _reporting_store_message(
+                conn,
+                session_id,
+                "assistant",
+                _REPORTING_META_ANSWER,
+                meta={"generation_mode": "meta_explanation"},
+            )
+            total_ms = round((time.perf_counter() - started) * 1000.0, 2)
+            _reporting_log_query_event(
+                conn,
+                session_id=session_id,
+                question=question,
+                planner_model=planner_model,
+                responder_model=responder_model,
+                generation_mode="meta_explanation",
+                semantic_intent=None,
+                sql_excerpt=None,
+                row_count=0,
+                execution_ms=None,
+                total_ms=total_ms,
+                status="ok",
+                error_detail=None,
+                meta={},
+            )
+            return {
+                "session_id": session_id,
+                "model": responder_model,
+                "planner_model": planner_model,
+                "answer_text": _REPORTING_META_ANSWER,
+                "columns": [],
+                "rows": [],
+                "chart_spec": None,
+                "sql_executed": None,
+                "follow_ups": [
+                    "How much have I spent total?",
+                    "What is the estimated value of my collection?",
+                    "Show me knives with an msrp above $300.",
+                ],
+                "confidence": 1.0,
+                "limitations": None,
+                "generation_mode": "meta_explanation",
+                "execution_ms": None,
+                "date_window": {"start": date_start, "end": date_end, "label": date_label},
+                "assistant_message_id": assistant_message_id,
+            }
+
         semantic_plan: Optional[dict[str, Any]] = None
         semantic_plan_validated: Optional[CanonicalReportingPlan] = None
         sql: Optional[str] = None
@@ -2595,6 +3032,7 @@ def run_reporting_query(
                 session_id,
                 context_block,
                 retry_model=retry_model,
+                debug=debug_pipeline,
             )
             semantic_plan_validated = CanonicalReportingPlan.from_legacy_semantic_plan(semantic_plan)
             semantic_check = validate_canonical_semantics(semantic_plan_validated)
@@ -2686,52 +3124,15 @@ def run_reporting_query(
                 classification="internal_failure",
             )
             raise
+        primary_intent = (semantic_plan or {}).get("intent")
         rows_out = []
         for r in rows:
             row = dict(r)
-            drill = _reporting_build_drill_link(row)
+            drill = _reporting_build_drill_link(row, intent=primary_intent)
             if drill:
                 row["_drill_link"] = drill
             rows_out.append(row)
-
-        primary_intent = (semantic_plan or {}).get("intent")
         substantive = _reporting_has_substantive_rows(primary_intent, rows_out)
-        # If semantic plan looks over-constrained, attempt one generic ambiguity relaxation pass.
-        if not substantive and semantic_plan:
-            relaxed = _reporting_relax_ambiguous_plan(semantic_plan, question)
-            if relaxed:
-                relaxed_validated = CanonicalReportingPlan.from_legacy_semantic_plan(relaxed)
-                relaxed_check = validate_canonical_semantics(relaxed_validated)
-                if not relaxed_check.valid:
-                    relaxed_sql = None
-                    relaxed_meta = {}
-                else:
-                    relaxed_sql, relaxed_meta = _reporting_plan_to_sql(
-                        relaxed_validated,
-                        date_start,
-                        date_end,
-                        payload.max_rows,
-                    )
-                if relaxed_sql:
-                    try:
-                        cols2, rows2, exec2 = _reporting_exec_sql(conn, relaxed_sql, payload.max_rows)
-                        rows_out2 = []
-                        for r2 in rows2:
-                            row2 = dict(r2)
-                            drill2 = _reporting_build_drill_link(row2)
-                            if drill2:
-                                row2["_drill_link"] = drill2
-                            rows_out2.append(row2)
-                        if _reporting_has_substantive_rows((relaxed or {}).get("intent"), rows_out2):
-                            columns = cols2
-                            rows_out = rows_out2
-                            execution_ms = exec2
-                            semantic_plan = relaxed
-                            sql = relaxed_sql
-                            sql_meta = {**sql_meta, **relaxed_meta, "mode": f"{sql_meta.get('mode')}_relaxed"}
-                            substantive = True
-                    except HTTPException:
-                        pass
 
         # Learn and feedback hint confidence from final outcome.
         if hint_ids_used:
@@ -2751,7 +3152,7 @@ def run_reporting_query(
             rows_out,
             preference=(payload.chart_preference or "").strip().lower() or None,
         )
-        answer_text, follow_ups, limitations, confidence = _reporting_generate_answer(
+        answer_text, follow_ups, limitations, confidence, responder_debug = _reporting_generate_answer(
             responder_model,
             question,
             columns,
@@ -2759,6 +3160,8 @@ def run_reporting_query(
             sql,
             context_block,
             semantic_intent=(semantic_plan or {}).get("intent"),
+            semantic_plan=semantic_plan,
+            debug=debug_pipeline,
         )
         if isinstance(sql_meta.get("follow_ups"), list) and sql_meta["follow_ups"]:
             follow_ups = sql_meta["follow_ups"][:5]
@@ -2789,6 +3192,7 @@ def run_reporting_query(
             "rows": rows_out,
             "row_count": len(rows_out),
             "date_window": {"start": effective_date_start, "end": effective_date_end, "label": effective_date_label},
+            "retrieval": sql_meta.get("retrieval") or {},
         }
         meta = {
             "planner_model": planner_model,
@@ -2804,6 +3208,12 @@ def run_reporting_query(
             "semantic_hints": sql_meta.get("hints") or [],
             "retrieval": sql_meta.get("retrieval") or {},
         }
+        if debug_pipeline:
+            meta["pipeline_debug"] = {
+                "retrieval": sql_meta.get("retrieval") or {},
+                "planner_llm": sql_meta.get("planner_llm") or {},
+                "responder_llm": responder_debug,
+            }
         assistant_message_id = _reporting_store_message(
             conn,
             session_id,
@@ -2815,7 +3225,9 @@ def run_reporting_query(
             meta=meta,
         )
         if semantic_plan:
-            _reporting_set_last_query_state(conn, session_id, semantic_plan)
+            _reporting_set_last_query_state(
+                conn, session_id, {**semantic_plan, "_result_row_count": len(rows_out)}
+            )
         _reporting_update_summary(conn, session_id)
 
         total_ms = round((time.perf_counter() - started) * 1000.0, 2)
@@ -2842,7 +3254,7 @@ def run_reporting_query(
             },
         )
 
-        return {
+        out: dict[str, Any] = {
             "session_id": session_id,
             "model": responder_model,
             "planner_model": planner_model,
@@ -2862,3 +3274,6 @@ def run_reporting_query(
             "semantic_plan": semantic_plan,
             "retrieval": sql_meta.get("retrieval") or {},
         }
+        if debug_pipeline:
+            out["pipeline_debug"] = meta.get("pipeline_debug") or {}
+        return out
