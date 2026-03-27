@@ -1,0 +1,285 @@
+[
+  {
+    "kind": "field",
+    "artifact_id": "field.series_name",
+    "tags": [
+      "series",
+      "line",
+      "group",
+      "collection line",
+      "product line"
+    ],
+    "content": "series_name is the canonical dimension for named MKC lines such as Blood Brothers, Traditions, VIP, and Ultra. If the user says line, group, run, or series and names Blood Brothers or Traditions, prefer series_name unless they explicitly ask for family or type.",
+    "canonical_field": "series_name",
+    "aliases": [
+      "series",
+      "line",
+      "group",
+      "product line",
+      "knife line"
+    ]
+  },
+  {
+    "kind": "field",
+    "artifact_id": "field.family_name",
+    "tags": [
+      "family",
+      "model family",
+      "knife family"
+    ],
+    "content": "family_name is the canonical dimension for a knife family such as Speedgoat, Blackfoot, Mini Speedgoat, or Super Cub. If the user says family or phrases like 'in the X family', prefer family_name. Family is different from series and type.",
+    "canonical_field": "family_name",
+    "aliases": [
+      "family",
+      "knife family",
+      "model family"
+    ]
+  },
+  {
+    "kind": "field",
+    "artifact_id": "field.knife_type",
+    "tags": [
+      "type",
+      "class",
+      "category",
+      "hunting",
+      "tactical",
+      "edc"
+    ],
+    "content": "knife_type is the canonical dimension for broad classes like Hunting or Tactical. If the user says type, class, category, or asks for hunting knives versus tactical knives, prefer knife_type.",
+    "canonical_field": "knife_type",
+    "aliases": [
+      "type",
+      "class",
+      "category",
+      "style"
+    ]
+  },
+  {
+    "kind": "field",
+    "artifact_id": "field.form_name",
+    "tags": [
+      "form",
+      "shape",
+      "blade form"
+    ],
+    "content": "form_name is the canonical dimension for form-related grouping if the user explicitly asks by form. Use when the user says form, blade form, or shape in the reporting sense.",
+    "canonical_field": "form_name",
+    "aliases": [
+      "form",
+      "blade form",
+      "shape"
+    ]
+  },
+  {
+    "kind": "field",
+    "artifact_id": "field.collaborator_name",
+    "tags": [
+      "collaborator",
+      "collab",
+      "partnership",
+      "maker collab"
+    ],
+    "content": "collaborator_name is the canonical dimension for collaboration relationships. If the user says collab, collaborator, or asks about Blood Brothers as a collaborator context, use collaborator_name only when the business meaning is collaboration rather than a series line.",
+    "canonical_field": "collaborator_name",
+    "aliases": [
+      "collaborator",
+      "collab",
+      "collaboration",
+      "partner"
+    ]
+  },
+  {
+    "kind": "field",
+    "artifact_id": "field.steel",
+    "tags": [
+      "steel",
+      "blade steel",
+      "magnacut",
+      "s45vn",
+      "3v"
+    ],
+    "content": "steel is the canonical dimension for blade steel. Use when the user asks by steel, about Magnacut, or wants steel breakdowns.",
+    "canonical_field": "steel",
+    "aliases": [
+      "steel",
+      "blade steel"
+    ]
+  },
+  {
+    "kind": "field",
+    "artifact_id": "field.condition",
+    "tags": [
+      "condition",
+      "like new",
+      "used",
+      "new in box",
+      "mint"
+    ],
+    "content": "condition is the canonical dimension for ownership condition. Use when the user asks about like new, used, mint, or condition distribution.",
+    "canonical_field": "condition",
+    "aliases": [
+      "condition",
+      "state",
+      "quality"
+    ]
+  },
+  {
+    "kind": "field",
+    "artifact_id": "field.location",
+    "tags": [
+      "location",
+      "safe",
+      "drawer",
+      "storage",
+      "where kept"
+    ],
+    "content": "location is the canonical dimension for storage or physical location. If the user says safe 1, drawer, case, or where the knives are stored, use location.",
+    "canonical_field": "location",
+    "aliases": [
+      "location",
+      "storage",
+      "safe",
+      "stored in"
+    ]
+  },
+  {
+    "kind": "field",
+    "artifact_id": "field.knife_name",
+    "tags": [
+      "knife name",
+      "owned item name",
+      "inventory row name"
+    ],
+    "content": "knife_name is the inventory-side item name. Use for listing owned items or exclusions against owned inventory rows. Prefer this over official_name when the question is explicitly about what the user owns.",
+    "canonical_field": "knife_name",
+    "aliases": [
+      "knife",
+      "item name",
+      "owned knife"
+    ]
+  },
+  {
+    "kind": "field",
+    "artifact_id": "field.official_name",
+    "tags": [
+      "official name",
+      "catalog model name",
+      "mkc model"
+    ],
+    "content": "official_name is the catalog-side model name. Use when the question is about the full catalog, missing models, or official product naming rather than owned inventory rows.",
+    "canonical_field": "official_name",
+    "aliases": [
+      "official name",
+      "model name",
+      "catalog model"
+    ]
+  },
+  {
+    "kind": "field",
+    "artifact_id": "field.purchase_price",
+    "tags": [
+      "purchase price",
+      "paid",
+      "cost",
+      "price",
+      "spend"
+    ],
+    "content": "purchase_price is the per-row amount paid for an owned knife. total_spend is derived from purchase_price times quantity. If the user asks 'what did I spend' or 'what did I pay', purchase_price feeds the spend metric.",
+    "canonical_field": "purchase_price",
+    "aliases": [
+      "purchase price",
+      "paid",
+      "cost",
+      "price",
+      "what I paid"
+    ]
+  },
+  {
+    "kind": "field",
+    "artifact_id": "field.estimated_value",
+    "tags": [
+      "estimated value",
+      "worth",
+      "current value",
+      "value"
+    ],
+    "content": "estimated_value is the per-row estimated current value of an owned knife. Collection value aggregates use estimated_value times quantity, not purchase_price.",
+    "canonical_field": "estimated_value",
+    "aliases": [
+      "estimated value",
+      "worth",
+      "value",
+      "current value"
+    ]
+  },
+  {
+    "kind": "field",
+    "artifact_id": "field.msrp",
+    "tags": [
+      "msrp",
+      "retail",
+      "list price",
+      "retail price"
+    ],
+    "content": "msrp is the manufacturer's suggested retail price. Use for completion-cost style questions or when the user explicitly asks about MSRP rather than purchase price or current value.",
+    "canonical_field": "msrp",
+    "aliases": [
+      "msrp",
+      "retail",
+      "list price",
+      "retail price"
+    ]
+  },
+  {
+    "kind": "field",
+    "artifact_id": "field.acquired_date",
+    "tags": [
+      "acquired date",
+      "purchase date",
+      "bought on",
+      "year"
+    ],
+    "content": "acquired_date is the canonical inventory date field used for date filters, year buckets, month buckets, and year-over-year comparisons based on ownership acquisition.",
+    "canonical_field": "acquired_date",
+    "aliases": [
+      "purchase date",
+      "acquired date",
+      "bought on",
+      "year bought"
+    ]
+  },
+  {
+    "kind": "field",
+    "artifact_id": "field.record_status",
+    "tags": [
+      "status",
+      "record status",
+      "active",
+      "archived"
+    ],
+    "content": "record_status is a control/status field. Use only if the user explicitly asks about active, deleted, archived, or status-related filtering. Do not inject status filtering by default.",
+    "canonical_field": "record_status",
+    "aliases": [
+      "status",
+      "record status"
+    ]
+  },
+  {
+    "kind": "field",
+    "artifact_id": "field.text_search",
+    "tags": [
+      "search",
+      "contains",
+      "match text",
+      "name search"
+    ],
+    "content": "text_search is a fallback search field used only when the user is clearly searching text and no specific semantic dimension can be safely selected. Prefer a real dimension when possible.",
+    "canonical_field": "text_search",
+    "aliases": [
+      "search",
+      "contains",
+      "matching text"
+    ]
+  }
+]

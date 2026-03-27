@@ -128,6 +128,10 @@
           <button type="button" id="reportingClearBtn" class="secondary">Clear input</button>
           <button type="button" id="reportingExportCsvBtn" class="secondary">Export grid CSV</button>
         </div>
+        <label class="full muted small">
+          <input type="checkbox" id="reportingPipelineDebug" />
+          Pipeline debug: include retrieval query text, planner/responder LLM prompts and raw responses (verbose; dev only)
+        </label>
       </form>
 
       <div class="reporting-followups">
@@ -143,6 +147,16 @@
 
       <section id="reportTextPanel" class="report-panel">
         <div id="reportingTextResult" class="ai-output">Ask a question to start.</div>
+        <details id="reportingSemanticRetrievalPanel" class="reporting-semantic-retrieval hidden">
+          <summary>Semantic retrieval (planner grounding)</summary>
+          <p id="reportingSemanticRetrievalSummary" class="muted small"></p>
+          <pre id="reportingSemanticRetrievalJson" class="reporting-sql reporting-json-scroll"></pre>
+        </details>
+        <details id="reportingPipelineDebugPanel" class="reporting-semantic-retrieval hidden">
+          <summary>Pipeline debug (planner + responder LLM)</summary>
+          <p class="muted small">Enable the checkbox above or set server env <code>REPORTING_DEBUG_PIPELINE=1</code>.</p>
+          <pre id="reportingPipelineDebugJson" class="reporting-sql reporting-json-scroll"></pre>
+        </details>
       </section>
       <section id="reportGridPanel" class="report-panel hidden">
         <div class="reporting-grid-toolbar">
@@ -164,6 +178,6 @@
     </section>
   </main>
 
-  <script src="/static/reporting.js?v=11"></script>
+  <script src="/static/reporting.js?v=12"></script>
 </body>
 </html>

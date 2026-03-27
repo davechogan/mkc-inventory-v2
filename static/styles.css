@@ -1059,6 +1059,24 @@ th.sortable.sort-desc::after {
   border-radius: 10px;
   padding: 0.8rem;
 }
+.reporting-semantic-retrieval {
+  margin-top: 1rem;
+}
+.reporting-semantic-retrieval summary {
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: var(--muted);
+  user-select: none;
+}
+.reporting-semantic-retrieval summary:hover {
+  color: var(--text);
+}
+.reporting-json-scroll {
+  max-height: 360px;
+  overflow: auto;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
 .reporting-chart-svg {
   width: 100%;
   height: auto;

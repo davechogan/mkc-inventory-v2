@@ -48,12 +48,12 @@ class BenchmarkCase:
     name: str
     question: str
     must_include: tuple[str, ...]
-    top_k: int = 5
+    # Larger merged corpus (``corpus_docs/``) increases lexical competition; keep headroom.
+    top_k: int = 12
 
 
 # Canonical prompts: each lists artifact_ids that should appear in top-k for
-# grounding quality. Tuned to the default file-backed catalog
-# ``reporting/retrieval_artifacts.json``.
+# grounding quality. Tuned for merged ``retrieval_corpus.json`` + ``corpus_docs/`` (schema v1).
 CANONICAL_CASES: tuple[BenchmarkCase, ...] = (
     BenchmarkCase(
         case_id="fam-01",

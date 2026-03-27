@@ -1,0 +1,161 @@
+{
+  "schema_version": 1,
+  "items": [
+    {
+      "kind": "field",
+      "artifact_id": "field.series_name",
+      "tags": ["series", "line", "collection line"],
+      "content": "Series groups models under a marketing line (e.g. Traditions, VIP). Filter and group using series_name.",
+      "canonical_field": "series_name",
+      "aliases": ["series", "line", "product line", "knife line"]
+    },
+    {
+      "kind": "field",
+      "artifact_id": "field.family_name",
+      "tags": ["family", "model family"],
+      "content": "Family is the knife family name. Phrases like 'in the X family' map to family_name.",
+      "canonical_field": "family_name",
+      "aliases": ["family", "knife family"]
+    },
+    {
+      "kind": "field",
+      "artifact_id": "field.purchase_price",
+      "tags": ["purchase", "price", "paid", "cost", "spend"],
+      "content": "Per-line purchase amount in inventory. Line total for spend is purchase_price times quantity.",
+      "canonical_field": "purchase_price",
+      "aliases": ["purchase price", "what I paid", "acquisition cost"]
+    },
+    {
+      "kind": "field",
+      "artifact_id": "field.acquired_date",
+      "tags": ["date", "acquired", "when bought", "year"],
+      "content": "Acquisition date for inventory rows; used for date filters and year buckets.",
+      "canonical_field": "acquired_date",
+      "aliases": ["purchase date", "acquisition date", "bought on"]
+    },
+    {
+      "kind": "metric",
+      "artifact_id": "metric.total_spend",
+      "tags": ["spend", "spent", "paid", "money", "dollars"],
+      "content": "Aggregate money outlay from inventory: sum of purchase_price times quantity.",
+      "canonical_metric": "total_spend"
+    },
+    {
+      "kind": "metric",
+      "artifact_id": "metric.total_estimated_value",
+      "tags": ["value", "worth", "estimated"],
+      "content": "Total collection value uses estimated_value times quantity unless user asks for purchase cost.",
+      "canonical_metric": "total_estimated_value"
+    },
+    {
+      "kind": "metric",
+      "artifact_id": "metric.count",
+      "tags": ["how many", "count", "number of"],
+      "content": "Row or model counts use metric count with appropriate intent aggregate or list.",
+      "canonical_metric": "count"
+    },
+    {
+      "kind": "intent",
+      "artifact_id": "intent.aggregate.value_by_family",
+      "tags": ["aggregate", "value", "family", "by family", "collection", "total", "what is my"],
+      "content": "Total collection value by family: aggregate intent, group_by family_name, metric total_estimated_value, inventory scope unless catalog explicit.",
+      "canonical_intent": "aggregate"
+    },
+    {
+      "kind": "intent",
+      "artifact_id": "intent.aggregate.spend",
+      "tags": ["aggregate", "spend", "spent", "total", "blackfoot", "money"],
+      "content": "Spend questions: aggregate intent, metric total_spend from purchase_price times quantity.",
+      "canonical_intent": "aggregate"
+    },
+    {
+      "kind": "scope",
+      "artifact_id": "scope.default_inventory",
+      "tags": ["inventory", "my collection", "own", "owned", "what i have", "what do i own", "how many", "knives", "have", "my"],
+      "content": "Default scope is inventory: items you possess. Phrases like what I own, my knives, in my collection, how many knives do I have imply inventory scope.",
+      "canonical_scope": "inventory"
+    },
+    {
+      "kind": "scope",
+      "artifact_id": "scope.catalog",
+      "tags": ["catalog", "full catalog", "all models", "every model mkc makes"],
+      "content": "Catalog scope is the full model catalog without requiring ownership. User must ask explicitly for catalog or all models.",
+      "canonical_scope": "catalog"
+    },
+    {
+      "kind": "mapping",
+      "artifact_id": "mapping.series_traditions_vip_ultra",
+      "tags": ["traditions", "vip", "ultra", "series names"],
+      "content": "Traditions, VIP, Ultra are series_name values when user refers to those lines.",
+      "target_dimension": "series_name",
+      "entity_phrases": ["traditions", "vip", "ultra"],
+      "canonical_value": null
+    },
+    {
+      "kind": "mapping",
+      "artifact_id": "mapping.series_blood_brothers",
+      "tags": ["blood brothers", "bloodbrothers", "bb", "group"],
+      "content": "Blood Brothers refers to the Blood Brothers series line. Use filter series_name equals Blood Brothers, not family_name, when user names that series or group.",
+      "target_dimension": "series_name",
+      "entity_phrases": ["blood brothers", "blood brothers group", "bb series"],
+      "canonical_value": "Blood Brothers"
+    },
+    {
+      "kind": "mapping",
+      "artifact_id": "mapping.family_vs_series",
+      "tags": ["family", "series", "disambiguation"],
+      "content": "Phrase 'in the X family' maps to family_name. Phrase 'in the X series or line' maps to series_name.",
+      "target_dimension": "disambiguation",
+      "entity_phrases": ["in the family", "series", "line"],
+      "canonical_value": null
+    },
+    {
+      "kind": "rule",
+      "artifact_id": "constraint.exclusions",
+      "tags": ["exclude", "excluding", "without", "not", "traditions", "damascus", "blackfoot", "vip", "models", "total", "knives"],
+      "content": "User exclusions (exclude, without, not including) must stay in the canonical exclusions list; never flip negated filters into positive filters."
+    },
+    {
+      "kind": "rule",
+      "artifact_id": "followup.list_underlying_items",
+      "tags": ["followup", "list", "those", "drill down", "knives", "total", "excluding", "vip", "models", "made up"],
+      "content": "Follow-ups that list items that made up an aggregate should use list_inventory with the same explicit filters and exclusions, not another scalar aggregate."
+    },
+    {
+      "kind": "example",
+      "artifact_id": "example.year_compare_spend",
+      "tags": ["2024", "2025", "versus", "vs", "compare", "spend", "year"],
+      "content": "Year-over-year spend: aggregate intent, metric total_spend, year_compare two years, inventory scope.",
+      "natural_query": "how much did I spend in 2024 vs 2025",
+      "hint_intent": "aggregate",
+      "hint_metric": "total_spend",
+      "hint_scope": "inventory",
+      "hint_year_compare": ["2024", "2025"],
+      "hint_group_by": null
+    },
+    {
+      "kind": "example",
+      "artifact_id": "example.what_i_own",
+      "tags": ["own", "collection", "have"],
+      "content": "What do I own lists inventory rows unless user asked for catalog explicitly.",
+      "natural_query": "what do I own",
+      "hint_intent": "list_inventory",
+      "hint_metric": "count",
+      "hint_scope": "inventory",
+      "hint_year_compare": null,
+      "hint_group_by": null
+    },
+    {
+      "kind": "example",
+      "artifact_id": "example.blood_brothers_group",
+      "tags": ["blood brothers", "group", "series"],
+      "content": "User says Blood Brothers group: filter or group by series_name Blood Brothers.",
+      "natural_query": "knives in the Blood Brothers group",
+      "hint_intent": "aggregate",
+      "hint_metric": "count",
+      "hint_scope": "inventory",
+      "hint_year_compare": null,
+      "hint_group_by": "series_name"
+    }
+  ]
+}

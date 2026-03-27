@@ -64,8 +64,12 @@ def main() -> int:
     arts, meta = r.retrieve_artifacts_with_meta(sample_q, top_k=6, conn=conn)
     print(f"  question: {sample_q[:80]}...")
     print(f"  artifact_ids: {[a.artifact_id for a in arts]}")
-    print("  meta:")
-    print(json.dumps(dict(meta), indent=2, default=str))
+    print(f"  corpus_fingerprint: {meta.get('corpus_fingerprint')}")
+    if meta.get("chroma_upsert_skipped") is not None:
+        print(f"  chroma_upsert_skipped: {meta.get('chroma_upsert_skipped')}")
+    meta_compact = {k: v for k, v in dict(meta).items() if k != "semantic_candidates"}
+    print("  meta (excluding semantic_candidates):")
+    print(json.dumps(meta_compact, indent=2, default=str))
     print()
 
     chroma_path = Path(r.RETRIEVAL_CHROMA_PATH)

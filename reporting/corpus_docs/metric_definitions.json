@@ -1,0 +1,51 @@
+[
+  {
+    "kind": "metric",
+    "artifact_id": "metric.count",
+    "tags": [
+      "count",
+      "how many",
+      "number of",
+      "total count"
+    ],
+    "content": "count is the canonical metric for quantities or counts of rows/models depending on scope and intent. Use for 'how many' and count breakdowns.",
+    "canonical_metric": "count"
+  },
+  {
+    "kind": "metric",
+    "artifact_id": "metric.total_spend",
+    "tags": [
+      "spend",
+      "spent",
+      "paid",
+      "cost me",
+      "money spent"
+    ],
+    "content": "total_spend is the aggregate metric for money spent on owned knives. It is computed from purchase_price multiplied by quantity. Use for 'how much did I spend', 'money spent', or 'spend by year/family/series'.",
+    "canonical_metric": "total_spend"
+  },
+  {
+    "kind": "metric",
+    "artifact_id": "metric.estimated_value",
+    "tags": [
+      "value",
+      "worth",
+      "estimated value",
+      "collection value"
+    ],
+    "content": "estimated_value is the aggregate metric for current estimated worth. Use for 'what is my collection worth', 'value by family', or 'top value knives'. Do not confuse with spend.",
+    "canonical_metric": "estimated_value"
+  },
+  {
+    "kind": "metric",
+    "artifact_id": "metric.msrp",
+    "tags": [
+      "msrp",
+      "retail",
+      "list price",
+      "cost to complete"
+    ],
+    "content": "msrp is used for completion-cost or retail-based calculations. Use when the user asks what it would cost to complete the collection or explicitly asks about MSRP.",
+    "canonical_metric": "msrp"
+  }
+]

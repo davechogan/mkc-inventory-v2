@@ -1,0 +1,128 @@
+[
+  {
+    "kind": "mapping",
+    "artifact_id": "mapping.series_aliases.core",
+    "tags": [
+      "series",
+      "traditions",
+      "vip",
+      "ultra",
+      "blood brothers"
+    ],
+    "content": "Certain named lines are usually series_name values. Blood Brothers, Traditions, VIP, and Ultra are canonical examples of series_name unless the user explicitly asks for family or collaborator.",
+    "target_dimension": "series_name",
+    "entity_phrases": [
+      "blood brothers",
+      "traditions",
+      "vip",
+      "ultra"
+    ],
+    "canonical_value": null
+  },
+  {
+    "kind": "mapping",
+    "artifact_id": "mapping.family_examples.core",
+    "tags": [
+      "family",
+      "speedgoat",
+      "blackfoot",
+      "super cub",
+      "mini speedgoat"
+    ],
+    "content": "Certain names are usually family_name values. Speedgoat, Blackfoot, Mini Speedgoat, and Super Cub are canonical examples of family_name unless the user explicitly asks for series or type.",
+    "target_dimension": "family_name",
+    "entity_phrases": [
+      "speedgoat",
+      "blackfoot",
+      "mini speedgoat",
+      "super cub"
+    ],
+    "canonical_value": null
+  },
+  {
+    "kind": "mapping",
+    "artifact_id": "mapping.type_examples.core",
+    "tags": [
+      "type",
+      "hunting",
+      "tactical"
+    ],
+    "content": "Broad usage classes map to knife_type. Hunting and Tactical are type values. If the user says hunting knives or tactical knives, prefer knife_type.",
+    "target_dimension": "knife_type",
+    "entity_phrases": [
+      "hunting",
+      "tactical"
+    ],
+    "canonical_value": null
+  },
+  {
+    "kind": "mapping",
+    "artifact_id": "mapping.collab_examples.core",
+    "tags": [
+      "collab",
+      "collaborator",
+      "collaboration"
+    ],
+    "content": "If the user explicitly asks for collaborators or collabs, use collaborator_name. Do not map words like Blood Brothers to collaborator_name unless the request meaning is clearly collaboration-related.",
+    "target_dimension": "collaborator_name",
+    "entity_phrases": [
+      "collab",
+      "collaborator",
+      "collaboration"
+    ],
+    "canonical_value": null
+  },
+  {
+    "kind": "mapping",
+    "artifact_id": "mapping.metric_spend_words",
+    "tags": [
+      "spent",
+      "spend",
+      "paid",
+      "cost"
+    ],
+    "content": "Words like spent, spend, paid, and cost usually map to the aggregate metric total_spend, not estimated_value.",
+    "target_dimension": "metric",
+    "entity_phrases": [
+      "spent",
+      "spend",
+      "paid",
+      "cost"
+    ],
+    "canonical_value": "total_spend"
+  },
+  {
+    "kind": "mapping",
+    "artifact_id": "mapping.metric_value_words",
+    "tags": [
+      "value",
+      "worth",
+      "collection worth"
+    ],
+    "content": "Words like value and worth usually map to the aggregate metric estimated_value, not total_spend.",
+    "target_dimension": "metric",
+    "entity_phrases": [
+      "value",
+      "worth",
+      "what is it worth"
+    ],
+    "canonical_value": "estimated_value"
+  },
+  {
+    "kind": "mapping",
+    "artifact_id": "mapping.metric_count_words",
+    "tags": [
+      "how many",
+      "count",
+      "number of"
+    ],
+    "content": "Count wording like how many, count, or number of maps to the count metric.",
+    "target_dimension": "metric",
+    "entity_phrases": [
+      "how many",
+      "count",
+      "number of"
+    ],
+    "canonical_value": "count"
+  }
+]

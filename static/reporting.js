@@ -208,11 +208,81 @@ function renderMessages() {
   wrap.scrollTop = wrap.scrollHeight;
 }
 
+/**
+ * @param {Record<string, unknown> | null | undefined} retrieval
+ */
+function renderSemanticRetrievalPanel(retrieval) {
+  const panel = document.getElementById('reportingSemanticRetrievalPanel');
+  const summaryEl = document.getElementById('reportingSemanticRetrievalSummary');
+  const pre = document.getElementById('reportingSemanticRetrievalJson');
+  if (!panel || !summaryEl || !pre) return;
+  if (!retrieval || typeof retrieval !== 'object') {
+    panel.classList.add('hidden');
+    pre.textContent = '';
+    summaryEl.textContent = '';
+    return;
+  }
+  const ids = Array.isArray(retrieval.artifact_ids) ? retrieval.artifact_ids : [];
+  const sc = Array.isArray(retrieval.semantic_candidates) ? retrieval.semantic_candidates : [];
+  const fp = retrieval.corpus_fingerprint != null ? String(retrieval.corpus_fingerprint) : '';
+  const sqt = retrieval.semantic_query_text != null ? String(retrieval.semantic_query_text) : '';
+  if (!ids.length && !sc.length && !fp && !sqt) {
+    panel.classList.add('hidden');
+    pre.textContent = '';
+    summaryEl.textContent = '';
+    return;
+  }
+  panel.classList.remove('hidden');
+  const bits = [];
+  if (fp) bits.push(`corpus ${fp.length > 14 ? `${fp.slice(0, 12)}…` : fp}`);
+  const rb = String(retrieval.effective_backend || retrieval.configured_backend || '').trim();
+  if (rb) bits.push(`backend ${rb}${retrieval.fallback_used ? ' (fallback)' : ''}`);
+  if (retrieval.chroma_upsert_skipped === true) bits.push('Chroma index unchanged (manifest match)');
+  if (retrieval.chroma_upsert_skipped === false) bits.push('Chroma index (re)built');
+  if (ids.length) bits.push(`${ids.length} artifact id(s) in top-k`);
+  if (sc.length) bits.push(`${sc.length} structured candidate(s)`);
+  summaryEl.textContent = bits.join(' · ');
+  const dump = {
+    corpus_fingerprint: fp || undefined,
+    semantic_query_text: retrieval.semantic_query_text || undefined,
+    retrieval_note: retrieval.retrieval_note || undefined,
+    artifact_ids: ids,
+    semantic_candidates: sc,
+  };
+  try {
+    pre.textContent = JSON.stringify(dump, null, 2);
+  } catch {
+    pre.textContent = '(could not serialize retrieval debug payload)';
+  }
+}
+
+/**
+ * @param {Record<string, unknown> | null | undefined} pipelineDebug
+ */
+function renderPipelineDebugPanel(pipelineDebug) {
+  const panel = document.getElementById('reportingPipelineDebugPanel');
+  const pre = document.getElementById('reportingPipelineDebugJson');
+  if (!panel || !pre) return;
+  if (!pipelineDebug || typeof pipelineDebug !== 'object') {
+    panel.classList.add('hidden');
+    pre.textContent = '';
+    return;
+  }
+  panel.classList.remove('hidden');
+  try {
+    pre.textContent = JSON.stringify(pipelineDebug, null, 2);
+  } catch {
+    pre.textContent = '(could not serialize pipeline_debug)';
+  }
+}
+
 function renderText(result) {
   const out = document.getElementById('reportingTextResult');
   if (!out) return;
   if (!result) {
     out.innerHTML = 'Ask a question to start.';
+    renderSemanticRetrievalPanel(null);
+    renderPipelineDebugPanel(null);
     return;
   }
   const extra = [];
@@ -240,6 +310,8 @@ function renderText(result) {
     ${extra.length ? `<p class="muted small">${escapeHtml(extra.join(' | '))}</p>` : ''}
     ${result.date_window?.label ? `<p class="muted small">Date window: ${escapeHtml(result.date_window.label)}</p>` : ''}
   `;
+  renderSemanticRetrievalPanel(result.retrieval);
+  renderPipelineDebugPanel(result.pipeline_debug);
 }
 
 /**
@@ -549,6 +621,14 @@ function renderRetrievalRuntimeStatus(payload, prefix = '') {
   if (retrieval.artifact_load_error) parts.push(`catalog_error=${String(retrieval.artifact_load_error)}`);
   if (retrieval.chroma_embed_mode) parts.push(`chroma_embed=${String(retrieval.chroma_embed_mode)}`);
   if (retrieval.chroma_collection_count != null) parts.push(`chroma_count=${String(retrieval.chroma_collection_count)}`);
+  if (retrieval.corpus_fingerprint) {
+    const fp = String(retrieval.corpus_fingerprint);
+    parts.push(`corpus_fp=${fp.length > 12 ? `${fp.slice(0, 10)}…` : fp}`);
+  }
+  if (retrieval.corpus_path) {
+    const tail = String(retrieval.corpus_path).split('/').pop() || retrieval.corpus_path;
+    parts.push(`corpus=${tail}`);
+  }
   statusEl.textContent = parts.join(' | ');
 }
 
@@ -660,7 +740,11 @@ async function loadSessionDetail(sessionId) {
         limitations: assistant.meta?.limitations,
         execution_ms: assistant.meta?.execution_ms,
         generation_mode: assistant.meta?.generation_mode,
-        retrieval: assistant.meta?.retrieval || null,
+        pipeline_debug: assistant.meta?.pipeline_debug || null,
+        retrieval:
+          assistant.meta?.retrieval ||
+          (assistant.result && typeof assistant.result === 'object' ? assistant.result.retrieval : null) ||
+          null,
       }
     : null;
   renderMessages();
@@ -749,6 +833,7 @@ async function runQuery() {
     compare_dimension: compareEnabled ? (document.getElementById('reportingCompareDimension')?.value || null) : null,
     compare_value_a: compareEnabled ? (document.getElementById('reportingCompareA')?.value || null) : null,
     compare_value_b: compareEnabled ? (document.getElementById('reportingCompareB')?.value || null) : null,
+    debug: !!document.getElementById('reportingPipelineDebug')?.checked,
   };
 
   const messagesEl = document.getElementById('reportingMessages');

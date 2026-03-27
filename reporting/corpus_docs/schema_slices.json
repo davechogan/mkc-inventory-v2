@@ -1,0 +1,35 @@
+[
+  {
+    "kind": "rule",
+    "artifact_id": "schema.reporting_inventory",
+    "tags": [
+      "schema",
+      "inventory",
+      "view",
+      "owned items"
+    ],
+    "content": "Use reporting_inventory for owned-knife questions. Important fields include knife_name, series_name, family_name, knife_type, form_name, collaborator_name, steel, condition, location, acquired_date, purchase_price, estimated_value, msrp, record_status."
+  },
+  {
+    "kind": "rule",
+    "artifact_id": "schema.reporting_models",
+    "tags": [
+      "schema",
+      "catalog",
+      "view",
+      "models"
+    ],
+    "content": "Use reporting_models for catalog/model questions. Important fields include official_name, series_name, family_name, knife_type, form_name, collaborator_name, steel, msrp, and model/status fields relevant to the full catalog."
+  },
+  {
+    "kind": "rule",
+    "artifact_id": "schema.inventory_vs_catalog_usage",
+    "tags": [
+      "schema",
+      "scope",
+      "inventory",
+      "catalog"
+    ],
+    "content": "Questions about what the user owns use reporting_inventory. Questions about the full MKC catalog use reporting_models. Missing-model and completion-cost questions usually compare inventory against catalog, but the canonical plan should still make scope explicit."
+  }
+]

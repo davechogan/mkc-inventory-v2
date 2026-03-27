@@ -1,4 +1,25 @@
 {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Canonical Reporting Plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["intent", "scope"],
+  "properties": {
+    "intent": {"type": "string", "enum": ["aggregate", "list", "missing_models", "compare"]},
+    "scope": {"type": "string", "enum": ["inventory", "catalog"]},
+    "metric": {"type": ["string", "null"]},
+    "group_by": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "filters": {"type": "array", "items": {"type": "object", "required": ["field", "op", "value"], "additionalProperties": false, "properties": {"field": {"type": "string"}, "op": {"type": "string"}, "value": {"type": ["string", "number", "array", "null"]}}}},
+    "exclusions": {"type": "array", "items": {"type": "object"}},
+    "time_range": {"type": ["object", "null"]},
+    "year_compare": {"type": "array", "items": {"type": "integer"}, "minItems": 0, "maxItems": 2},
+    "sort": {"type": ["object", "null"]},
+    "limit": {"type": ["integer", "null"]},
+    "needs_clarification": {"type": "boolean", "default": false},
+    "clarification_reason": {"type": ["string", "null"]}
+  }
+}
+{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://invapp.local/reporting/reporting_plan.schema.json",
   "title": "ReportingCanonicalPlan",

@@ -368,7 +368,9 @@ async function api(path, options = {}) {
     }
     const rawDetail = parsed.detail !== undefined ? parsed.detail : parsed.message;
     const msg = formatApiErrorDetail(rawDetail, statusFallback);
-    throw new Error(msg || statusFallback);
+    const method = (options.method || 'GET').toUpperCase();
+    const detailStr = msg || statusFallback;
+    throw new Error(`${method} ${path}: ${detailStr}`);
   }
   if (response.status === 204) return null;
   return response.json();
@@ -950,6 +952,10 @@ async function showInventoryForm(item = null, preSelectedMasterId = null, preSel
   if (showAllWrap) showAllWrap.classList.add('hidden');
 
   const setModel = (model) => {
+    if (searchDropdown) {
+      searchDropdown.remove();
+      searchDropdown = null;
+    }
     selectedModel = model;
     form.elements.knife_model_id.value = model ? model.id : '';
     if (modelSearchEl) modelSearchEl.value = model ? model.official_name : '';
@@ -992,8 +998,14 @@ async function showInventoryForm(item = null, preSelectedMasterId = null, preSel
     if (!q) { setModel(null); return; }
     if (searchAbort) searchAbort.abort();
     searchAbort = new AbortController();
+    const qWhenRequested = q;
     try {
-      const models = await api(`/api/v2/models/search?q=${encodeURIComponent(q)}&limit=20`);
+      const models = await api(`/api/v2/models/search?q=${encodeURIComponent(q)}&limit=20`, {
+        signal: searchAbort.signal,
+      });
+      if (!modelSearchEl || modelSearchEl.value.trim() !== qWhenRequested) {
+        return;
+      }
       if (models.length === 1 && models[0].official_name?.toLowerCase() === q.toLowerCase()) {
         setModel(await resolveModelDetail(models[0]));
         return;
@@ -1007,16 +1019,19 @@ async function showInventoryForm(item = null, preSelectedMasterId = null, preSel
         div.textContent = m.official_name + (m.family_name ? ` (${m.family_name})` : '');
         div.style.cursor = 'pointer';
         div.style.padding = '6px 10px';
+        div.addEventListener('pointerdown', (ev) => {
+          ev.preventDefault();
+        });
         div.addEventListener('click', async () => {
           setModel(await resolveModelDetail(m));
-          searchDropdown?.remove();
-          searchDropdown = null;
         });
         searchDropdown.appendChild(div);
       });
       modelSearchEl.parentElement.style.position = 'relative';
       modelSearchEl.parentElement.appendChild(searchDropdown);
-    } catch (_) {}
+    } catch (e) {
+      if (e?.name === 'AbortError') return;
+    }
   });
   modelSearchEl?.addEventListener('focus', () => {
     const q = modelSearchEl.value.trim();

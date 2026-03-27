@@ -1,0 +1,199 @@
+[
+  {
+    "kind": "example",
+    "artifact_id": "example.count_by_family",
+    "tags": [
+      "how many",
+      "by family",
+      "count"
+    ],
+    "content": "Count breakdown by family in inventory.",
+    "natural_query": "how many knives do I have by family",
+    "hint_intent": "aggregate",
+    "hint_metric": "count",
+    "hint_scope": "inventory",
+    "hint_year_compare": null,
+    "hint_group_by": "family_name"
+  },
+  {
+    "kind": "example",
+    "artifact_id": "example.value_by_family",
+    "tags": [
+      "value",
+      "worth",
+      "by family"
+    ],
+    "content": "Estimated value grouped by family in inventory.",
+    "natural_query": "what is my collection value by family",
+    "hint_intent": "aggregate",
+    "hint_metric": "estimated_value",
+    "hint_scope": "inventory",
+    "hint_year_compare": null,
+    "hint_group_by": "family_name"
+  },
+  {
+    "kind": "example",
+    "artifact_id": "example.spend_year_compare",
+    "tags": [
+      "2024",
+      "2025",
+      "spent",
+      "vs",
+      "versus"
+    ],
+    "content": "Year-over-year spend comparison across two explicit years.",
+    "natural_query": "show me how much i spent in 2024 vs 2025",
+    "hint_intent": "compare",
+    "hint_metric": "total_spend",
+    "hint_scope": "inventory",
+    "hint_year_compare": [
+      "2024",
+      "2025"
+    ],
+    "hint_group_by": null
+  },
+  {
+    "kind": "example",
+    "artifact_id": "example.blood_brothers_series",
+    "tags": [
+      "blood brothers",
+      "series",
+      "group",
+      "line"
+    ],
+    "content": "Blood Brothers usually maps to series_name in reporting language.",
+    "natural_query": "show me knives in the Blood Brothers group",
+    "hint_intent": "list",
+    "hint_metric": "count",
+    "hint_scope": "inventory",
+    "hint_year_compare": null,
+    "hint_group_by": null
+  },
+  {
+    "kind": "example",
+    "artifact_id": "example.speedgoat_family",
+    "tags": [
+      "speedgoat",
+      "family",
+      "family knives"
+    ],
+    "content": "Speedgoat usually maps to family_name in family phrasing.",
+    "natural_query": "show me speedgoat family knives",
+    "hint_intent": "list",
+    "hint_metric": "count",
+    "hint_scope": "inventory",
+    "hint_year_compare": null,
+    "hint_group_by": null
+  },
+  {
+    "kind": "example",
+    "artifact_id": "example.hunting_type",
+    "tags": [
+      "hunting",
+      "type",
+      "category"
+    ],
+    "content": "Hunting knives map to knife_type.",
+    "natural_query": "list my hunting knives",
+    "hint_intent": "list",
+    "hint_metric": "count",
+    "hint_scope": "inventory",
+    "hint_year_compare": null,
+    "hint_group_by": null
+  },
+  {
+    "kind": "example",
+    "artifact_id": "example.missing_speedgoats",
+    "tags": [
+      "missing",
+      "speedgoat",
+      "catalog"
+    ],
+    "content": "Missing models compares inventory against catalog for a named family or series.",
+    "natural_query": "which speedgoat models do i still not have",
+    "hint_intent": "missing_models",
+    "hint_metric": "count",
+    "hint_scope": "catalog",
+    "hint_year_compare": null,
+    "hint_group_by": null
+  },
+  {
+    "kind": "example",
+    "artifact_id": "example.completion_cost",
+    "tags": [
+      "complete collection",
+      "finish collection",
+      "msrp"
+    ],
+    "content": "Completion cost uses completion_cost intent and retail/MSRP style pricing.",
+    "natural_query": "how much would it cost to complete my collection",
+    "hint_intent": "completion_cost",
+    "hint_metric": "msrp",
+    "hint_scope": "catalog",
+    "hint_year_compare": null,
+    "hint_group_by": null
+  },
+  {
+    "kind": "example",
+    "artifact_id": "example.exclude_mini_speedgoat",
+    "tags": [
+      "exclude",
+      "except",
+      "mini speedgoat"
+    ],
+    "content": "Explicit exclusion must remain exclusion.",
+    "natural_query": "show me all speedgoats except mini speedgoat",
+    "hint_intent": "list",
+    "hint_metric": "count",
+    "hint_scope": "inventory",
+    "hint_year_compare": null,
+    "hint_group_by": null
+  },
+  {
+    "kind": "example",
+    "artifact_id": "example.what_do_i_own",
+    "tags": [
+      "what do i own",
+      "inventory"
+    ],
+    "content": "Ownership phrasing defaults to inventory list intent.",
+    "natural_query": "what do i own",
+    "hint_intent": "list",
+    "hint_metric": "count",
+    "hint_scope": "inventory",
+    "hint_year_compare": null,
+    "hint_group_by": null
+  },
+  {
+    "kind": "example",
+    "artifact_id": "example.mkc_made_catalog",
+    "tags": [
+      "mkc made",
+      "catalog",
+      "all models"
+    ],
+    "content": "Questions about what MKC has made target the full catalog.",
+    "natural_query": "how many speedgoats has MKC made",
+    "hint_intent": "aggregate",
+    "hint_metric": "count",
+    "hint_scope": "catalog",
+    "hint_year_compare": null,
+    "hint_group_by": null
+  },
+  {
+    "kind": "example",
+    "artifact_id": "example.by_steel",
+    "tags": [
+      "by steel",
+      "steel breakdown",
+      "magnacut"
+    ],
+    "content": "Steel breakdown uses aggregate count grouped by steel unless the user asked for value/spend by steel.",
+    "natural_query": "show me my knives by steel",
+    "hint_intent": "aggregate",
+    "hint_metric": "count",
+    "hint_scope": "inventory",
+    "hint_year_compare": null,
+    "hint_group_by": "steel"
+  }
+]

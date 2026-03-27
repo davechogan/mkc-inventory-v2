@@ -1,0 +1,10 @@
+{
+  "intent": "aggregate",
+  "scope": "inventory",
+  "metric": "total_value",
+  "group_by": ["model", "family"],
+  "filters": [
+    {"field": "price", "op": ">", "value": 100}
+  ],
+  "limit": 100
+}

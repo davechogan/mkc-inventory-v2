@@ -40,3 +40,12 @@ Track defects discovered during implementation/testing that are intentionally de
 - **Planned fix phase:** post-implementation stabilization (projection selection and follow-up intent reclassification)
 - **Notes:** indicates missing transition from "list items" to "list with spend fields" in follow-up planner behavior.
 
+### RPT-005: Missing-model drill-through link targets inventory instead of catalog
+
+- **Found during:** UI runtime test for missing-model query (`am i missing any blackfoot knives?`)
+- **Symptom:** response row correctly shows a missing model, but drill-through link opens a pre-filtered inventory view. Because the model is missing, this produces an empty inventory list.
+- **Impact:** medium (misleading navigation path for missing-model workflow)
+- **Status:** open / deferred
+- **Planned fix phase:** post-implementation stabilization (drill-through route contract)
+- **Expected behavior:** for `missing_models` results, drill-through should target filtered catalog view, not inventory view.
+
