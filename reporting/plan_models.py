@@ -153,6 +153,15 @@ class CanonicalReportingPlan(BaseModel):
                 raise ValueError("year_compare years must be in [1900, 2200].")
         return years
 
+    @field_validator("metric", mode="before")
+    @classmethod
+    def _coerce_metric(cls, v: object) -> object:
+        # LLM sometimes returns null for metric on list intents where metric is irrelevant.
+        # Default to count rather than failing validation.
+        if v is None:
+            return PlanMetric.COUNT
+        return v
+
     @field_validator("limit")
     @classmethod
     def _validate_limit(cls, limit: Optional[int]) -> Optional[int]:
