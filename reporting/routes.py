@@ -11,8 +11,8 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from reporting.constants import REPORTING_ALLOWED_SOURCES
 from reporting.domain import (
-    REPORTING_ALLOWED_SOURCES,
     REPORTING_PLANNER_MODEL,
     REPORTING_RESPONDER_MODEL,
     GetConn,
