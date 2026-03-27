@@ -11,6 +11,41 @@ TYPE_NAMES = [
     'Hunting', 'Culinary', 'Tactical', 'Everyday Carry', 'Bushcraft & Camp'
 ]
 
+# Alias used by migration and route code
+CANONICAL_CATEGORY_NAMES = tuple(TYPE_NAMES)
+
+
+def normalize_category_value(value: Optional[str]) -> Optional[str]:
+    """Normalize free-form category text to a canonical TYPE_NAMES entry."""
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return None
+    lower = raw.lower()
+    exact = {"hunting": "Hunting", "culinary": "Culinary", "tactical": "Tactical",
+             "everyday carry": "Everyday Carry", "bushcraft & camp": "Bushcraft & Camp"}
+    if lower in exact:
+        return exact[lower]
+    culinary_tokens = ("culinary", "kitchen", "chef", "butcher", "steak", "paring", "santoku", "cleaver", "fillet")
+    tactical_tokens = ("tactical",)
+    camp_tokens = ("bushcraft", "camp", "hatchet", "axe", "chopper")
+    edc_tokens = ("edc", "everyday carry", "utility", "work", "ranch")
+    hunting_tokens = ("hunting", "archery", "waterfowl", "small-game", "processing", "skinner",
+                      "belt knife", "all-purpose", "traditions", "heritage")
+    if any(tok in lower for tok in culinary_tokens):
+        return "Culinary"
+    if any(tok in lower for tok in tactical_tokens):
+        return "Tactical"
+    if any(tok in lower for tok in camp_tokens):
+        return "Bushcraft & Camp"
+    if any(tok in lower for tok in edc_tokens):
+        return "Everyday Carry"
+    if any(tok in lower for tok in hunting_tokens):
+        return "Hunting"
+    return "Hunting"
+
+
 SERIES_PATTERNS = [
     ('Blood Brothers', re.compile(r'\bBlood Brothers\b', re.I)),
     ('VIP', re.compile(r'\bVIP\b', re.I)),

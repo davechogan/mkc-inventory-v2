@@ -326,12 +326,428 @@ def ensure_master_catalog_columns(conn: sqlite3.Connection) -> None:
 
 
 def backfill_v2_model_identity(conn: sqlite3.Connection) -> dict[str, int]:
-    # reuse normalized_model.normalize/backfill helpers where practical
-    return normalized_model.backfill_v2_model_identity(conn) if hasattr(normalized_model, 'backfill_v2_model_identity') else {"rows_updated":0, "values_inferred":0}
+    """
+    Normalize and backfill v2 identity dimensions using normalized-model heuristics.
+
+    Idempotent. Fills missing values and fixes malformed legacy-like values.
+    """
+    rows = conn.execute(
+        """
+        SELECT km.id, km.official_name, km.normalized_name, km.generation_label, km.size_modifier, km.platform_variant,
+               km.type_id, km.form_id, km.family_id, km.series_id, km.collaborator_id,
+               kt.name AS type_name, frm.name AS form_name, fam.name AS family_name,
+               ks.name AS series_name, c.name AS collaborator_name
+        FROM knife_models_v2 km
+        LEFT JOIN knife_types kt ON kt.id = km.type_id
+        LEFT JOIN knife_forms frm ON frm.id = km.form_id
+        LEFT JOIN knife_families fam ON fam.id = km.family_id
+        LEFT JOIN knife_series ks ON ks.id = km.series_id
+        LEFT JOIN collaborators c ON c.id = km.collaborator_id
+        ORDER BY km.id
+        """
+    ).fetchall()
+    updated = 0
+    inferred = 0
+
+    canonical_series_names = {
+        "traditions": "Traditions",
+        "vip": "VIP",
+        "ultra": "Ultra",
+        "blood brothers": "Blood Brothers",
+    }
+    collab_like_series = {
+        "archery country": "Archery Country",
+        "archery": "Archery Country",
+        "bearded butchers": "Bearded Butchers",
+        "meat church": "Meat Church",
+        "nock on": "Nock On",
+    }
+    generic_family_labels = {
+        "hunting", "culinary", "tactical", "everyday carry", "edc", "bushcraft",
+        "bushcraft & camp", "camp", "utility", "work", "kitchen", "fillet", "skinner",
+    }
+
+    def _dim_id(table: str, name: Optional[str]) -> Optional[int]:
+        if not name or not str(name).strip():
+            return None
+        n = str(name).strip()
+        row = conn.execute(f"SELECT id FROM {table} WHERE name = ?", (n,)).fetchone()
+        if row:
+            return row["id"]
+        if table == "knife_types":
+            cur = conn.execute(
+                "INSERT INTO knife_types (name, slug, sort_order) VALUES (?, ?, ?)",
+                (n, normalized_model.slugify(n), 999),
+            )
+            return cur.lastrowid
+        if table == "knife_forms":
+            cur = conn.execute("INSERT INTO knife_forms (name, slug) VALUES (?, ?)",
+                               (n, normalized_model.slugify(n)))
+            return cur.lastrowid
+        if table == "knife_families":
+            cur = conn.execute(
+                "INSERT INTO knife_families (name, normalized_name, slug) VALUES (?, ?, ?)",
+                (n, n, normalized_model.slugify(n)),
+            )
+            return cur.lastrowid
+        if table == "knife_series":
+            cur = conn.execute("INSERT INTO knife_series (name, slug) VALUES (?, ?)",
+                               (n, normalized_model.slugify(n)))
+            return cur.lastrowid
+        if table == "collaborators":
+            cur = conn.execute("INSERT INTO collaborators (name, slug) VALUES (?, ?)",
+                               (n, normalized_model.slugify(n)))
+            return cur.lastrowid
+        return None
+
+    def _is_generic_or_legacy(v: Optional[str]) -> bool:
+        if not v or not str(v).strip():
+            return True
+        s = str(v).strip()
+        return "/" in s or s.lower() in generic_family_labels
+
+    def _is_lowercase_word(v: Optional[str]) -> bool:
+        if not v or not str(v).strip():
+            return False
+        s = str(v).strip()
+        return any(ch.isalpha() for ch in s) and s == s.lower()
+
+    for row in rows:
+        official = (row.get("official_name") or "").strip()
+        normalized = (row.get("normalized_name") or official).strip()
+        if not official:
+            continue
+
+        current_type = (row.get("type_name") or "").strip()
+        current_form = (row.get("form_name") or "").strip()
+        current_family = (row.get("family_name") or "").strip()
+        current_series = (row.get("series_name") or "").strip()
+        current_collaborator = (row.get("collaborator_name") or "").strip()
+
+        normalized_type = normalized_model.normalize_category_value(current_type) if current_type else None
+        if not normalized_type:
+            normalized_type = normalized_model.detect_type(None, current_family, 0, 0, 0, normalized)
+
+        series_guess = (normalized_model.detect_series(official, current_series or None) or current_series or "").strip() or None
+        family_guess = normalized_model.detect_family(normalized)
+        form_guess = normalized_model.detect_form(
+            normalized, current_form or None, None, None, normalized_type or "Hunting"
+        )
+        collab_guess = normalized_model.detect_collaborator(
+            1 if (series_guess and series_guess.lower() in collab_like_series) else 0,
+            current_collaborator or None,
+            series_guess,
+        )
+        if collab_guess and collab_guess.strip().lower() in {"nock on", "nock on archery", "knock on archery"}:
+            collab_guess = "Cam Hanes"
+        if series_guess:
+            sk = series_guess.lower()
+            if sk in canonical_series_names:
+                series_guess = canonical_series_names[sk]
+            elif sk in collab_like_series:
+                if not collab_guess:
+                    collab_guess = collab_like_series[sk]
+                series_guess = None
+
+        needs_type = row.get("type_id") is None or (normalized_type and normalized_type != current_type)
+        needs_form = row.get("form_id") is None or _is_generic_or_legacy(current_form)
+        needs_family = (
+            row.get("family_id") is None
+            or _is_generic_or_legacy(current_family)
+            or _is_lowercase_word(current_family)
+        )
+        needs_series = row.get("series_id") is None or bool(current_series and current_series.lower() in collab_like_series)
+        needs_collab = row.get("collaborator_id") is None and bool(collab_guess)
+        needs_gen = not (row.get("generation_label") or "").strip()
+        needs_size = not (row.get("size_modifier") or "").strip()
+        needs_platform = not (row.get("platform_variant") or "").strip()
+
+        if not any((needs_type, needs_form, needs_family, needs_series, needs_collab, needs_gen, needs_size, needs_platform)):
+            continue
+
+        _, _, _, size_or_generation, platform_guess = normalized_model.normalize_model_name(official, series_guess)
+        if platform_guess and str(platform_guess).strip().lower() == "ultra":
+            series_guess = "Ultra"
+            needs_series = True
+            platform_guess = None
+
+        type_id = row.get("type_id")
+        form_id = row.get("form_id")
+        family_id = row.get("family_id")
+        series_id = row.get("series_id")
+        collaborator_id = row.get("collaborator_id")
+        generation_label = row.get("generation_label")
+        size_modifier = row.get("size_modifier")
+        platform_variant = row.get("platform_variant")
+
+        if needs_type and normalized_type:
+            type_id = _dim_id("knife_types", normalized_type)
+            inferred += 1
+        if needs_form and form_guess:
+            form_id = _dim_id("knife_forms", form_guess)
+            inferred += 1
+        if needs_family and family_guess:
+            family_id = _dim_id("knife_families", family_guess)
+            inferred += 1
+        if needs_series and series_guess:
+            series_id = _dim_id("knife_series", series_guess)
+            inferred += 1
+        if needs_collab and collab_guess:
+            collaborator_id = _dim_id("collaborators", collab_guess)
+            inferred += 1
+        if needs_gen and size_or_generation and str(size_or_generation).replace(".", "", 1).isdigit():
+            generation_label = str(size_or_generation)
+            inferred += 1
+        if needs_size and size_or_generation and not str(size_or_generation).replace(".", "", 1).isdigit():
+            size_modifier = str(size_or_generation)
+            inferred += 1
+        if needs_platform and platform_guess:
+            platform_variant = platform_guess
+            inferred += 1
+
+        conn.execute(
+            """
+            UPDATE knife_models_v2
+            SET type_id = COALESCE(?, type_id),
+                form_id = COALESCE(?, form_id),
+                family_id = COALESCE(?, family_id),
+                series_id = COALESCE(?, series_id),
+                collaborator_id = COALESCE(?, collaborator_id),
+                generation_label = COALESCE(?, generation_label),
+                size_modifier = COALESCE(?, size_modifier),
+                platform_variant = COALESCE(?, platform_variant),
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (type_id, form_id, family_id, series_id, collaborator_id,
+             generation_label, size_modifier, platform_variant, row["id"]),
+        )
+        updated += 1
+    return {"rows_updated": updated, "values_inferred": inferred}
 
 
 def normalize_v2_additional_fields(conn: sqlite3.Connection) -> dict[str, int]:
-    # For now reuse normalized_model functionality if available, else provide a no-op.
-    if hasattr(normalized_model, 'normalize_v2_additional_fields'):
-        return normalized_model.normalize_v2_additional_fields(conn)
-    return {"model_attr_rows_updated":0, "inventory_attr_rows_updated":0}
+    """
+    Normalize additional non-category fields: collaborator/series alias cleanup,
+    model + inventory attribute text normalization (steel, finish, colors, condition).
+    Idempotent.
+    """
+    changes = {
+        "series_alias_merged": 0,
+        "collaborator_alias_merged": 0,
+        "series_collab_reclassified": 0,
+        "ultra_platform_to_series": 0,
+        "ultra_platform_cleared": 0,
+        "model_attr_rows_updated": 0,
+        "inventory_attr_rows_updated": 0,
+    }
+
+    def _collapse(v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        s = " ".join(str(v).strip().split())
+        return s or None
+
+    def _norm_map(v: Optional[str], mapping: dict[str, str]) -> Optional[str]:
+        s = _collapse(v)
+        if s is None:
+            return None
+        return mapping.get(s.lower(), s)
+
+    def _ensure_dim(table: str, name: Optional[str]) -> Optional[int]:
+        if not name or not str(name).strip():
+            return None
+        n = str(name).strip()
+        row = conn.execute(f"SELECT id FROM {table} WHERE lower(name) = lower(?) LIMIT 1", (n,)).fetchone()
+        if row:
+            return row["id"]
+        if table == "knife_series":
+            cur = conn.execute("INSERT INTO knife_series (name, slug) VALUES (?, ?)",
+                               (n, normalized_model.slugify(n)))
+            return cur.lastrowid
+        if table == "collaborators":
+            cur = conn.execute("INSERT INTO collaborators (name, slug) VALUES (?, ?)",
+                               (n, normalized_model.slugify(n)))
+            return cur.lastrowid
+        return None
+
+    def _merge_dim_aliases(table: str, fk_col: str, aliases: dict[str, str]) -> int:
+        merged = 0
+        for alias, canonical in aliases.items():
+            a = conn.execute(
+                f"SELECT id, name, slug FROM {table} WHERE lower(name) = lower(?) LIMIT 1", (alias,)
+            ).fetchone()
+            if not a:
+                continue
+            c = conn.execute(
+                f"SELECT id, name, slug FROM {table} WHERE lower(name) = lower(?) LIMIT 1", (canonical,)
+            ).fetchone()
+            canonical_slug = normalized_model.slugify(canonical)
+            if not c:
+                c = conn.execute(
+                    f"SELECT id, name, slug FROM {table} WHERE slug = ? LIMIT 1", (canonical_slug,)
+                ).fetchone()
+            if c and c["id"] != a["id"]:
+                conn.execute(f"UPDATE knife_models_v2 SET {fk_col} = ? WHERE {fk_col} = ?", (c["id"], a["id"]))
+                conn.execute(f"DELETE FROM {table} WHERE id = ?", (a["id"],))
+                merged += 1
+            elif not c:
+                try:
+                    conn.execute(f"UPDATE {table} SET name = ?, slug = ? WHERE id = ?",
+                                 (canonical, canonical_slug, a["id"]))
+                    merged += 1
+                except sqlite3.IntegrityError:
+                    conflict = conn.execute(
+                        f"SELECT id FROM {table} WHERE (lower(name) = lower(?) OR slug = ?) AND id != ? LIMIT 1",
+                        (canonical, canonical_slug, a["id"]),
+                    ).fetchone()
+                    if conflict:
+                        conn.execute(f"UPDATE knife_models_v2 SET {fk_col} = ? WHERE {fk_col} = ?",
+                                     (conflict["id"], a["id"]))
+                        conn.execute(f"DELETE FROM {table} WHERE id = ?", (a["id"],))
+                        merged += 1
+                    else:
+                        i = 2
+                        slug = canonical_slug
+                        while conn.execute(f"SELECT 1 FROM {table} WHERE slug = ? AND id != ?",
+                                           (slug, a["id"])).fetchone():
+                            slug = f"{canonical_slug}-{i}"
+                            i += 1
+                        conn.execute(f"UPDATE {table} SET name = ?, slug = ? WHERE id = ?",
+                                     (canonical, slug, a["id"]))
+                        merged += 1
+        return merged
+
+    series_aliases = {"nock on archery": "Nock On", "knock on archery": "Nock On"}
+    collaborator_aliases = {
+        "bearded butcher": "Bearded Butchers",
+        "nock on archery": "Cam Hanes",
+        "knock on archery": "Cam Hanes",
+        "nock on": "Cam Hanes",
+    }
+    changes["series_alias_merged"] = _merge_dim_aliases("knife_series", "series_id", series_aliases)
+    changes["collaborator_alias_merged"] = _merge_dim_aliases("collaborators", "collaborator_id", collaborator_aliases)
+
+    ultra_series_id = _ensure_dim("knife_series", "Ultra")
+    if ultra_series_id is not None:
+        cur = conn.execute(
+            """
+            UPDATE knife_models_v2
+            SET series_id = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE lower(trim(COALESCE(platform_variant, ''))) = 'ultra'
+              AND (series_id IS NULL OR series_id != ?)
+            """,
+            (ultra_series_id, ultra_series_id),
+        )
+        changes["ultra_platform_to_series"] = cur.rowcount or 0
+        cur = conn.execute(
+            "UPDATE knife_models_v2 SET platform_variant = NULL, updated_at = CURRENT_TIMESTAMP "
+            "WHERE lower(trim(COALESCE(platform_variant, ''))) = 'ultra'"
+        )
+        changes["ultra_platform_cleared"] = cur.rowcount or 0
+
+    for bad_series, collab_name in (
+        ("Meat Church", "Meat Church"), ("Archery Country", "Archery Country"), ("Archery", "Archery Country")
+    ):
+        bad = conn.execute(
+            "SELECT id FROM knife_series WHERE lower(name) = lower(?) LIMIT 1", (bad_series,)
+        ).fetchone()
+        if not bad:
+            continue
+        collab_id = _ensure_dim("collaborators", collab_name)
+        cur = conn.execute(
+            "UPDATE knife_models_v2 SET collaborator_id = COALESCE(collaborator_id, ?), "
+            "series_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE series_id = ?",
+            (collab_id, bad["id"]),
+        )
+        changes["series_collab_reclassified"] += cur.rowcount or 0
+
+    steel_map = {"magnacut": "MagnaCut", "magna cut": "MagnaCut", "aebl": "AEB-L", "aeb-l": "AEB-L", "440c": "440C"}
+    finish_map = {
+        "stonewashed": "Stonewashed", "pvd": "PVD", "cerakote": "Cerakote", "polished": "Polished",
+        "satin": "Satin", "black parkerized": "Black Parkerized", "working grind": "Working Grind", "etched": "Etched",
+    }
+    blade_color_map = {
+        "black": "Black", "steel": "Steel", "distressed gray": "Distressed Gray",
+        "red": "Red", "damascus wood grain": "Damascus Wood Grain",
+    }
+    handle_color_map = {"black": "Black", "red": "Red", "carbon fiber": "Carbon Fiber", "desert ironwood": "Desert Ironwood"}
+    condition_map = {"new": "New", "like new": "Like New", "very good": "Very Good", "good": "Good", "user": "User"}
+
+    for row in conn.execute("SELECT id, steel, blade_finish, blade_color, handle_color FROM knife_models_v2").fetchall():
+        steel = _norm_map(row.get("steel"), steel_map)
+        finish = _norm_map(row.get("blade_finish"), finish_map)
+        blade_color = _norm_map(row.get("blade_color"), blade_color_map)
+        handle_color = _norm_map(row.get("handle_color"), handle_color_map)
+        if (steel, finish, blade_color, handle_color) != (
+            _collapse(row.get("steel")), _collapse(row.get("blade_finish")),
+            _collapse(row.get("blade_color")), _collapse(row.get("handle_color")),
+        ):
+            conn.execute(
+                "UPDATE knife_models_v2 SET steel=?, blade_finish=?, blade_color=?, handle_color=?, "
+                "updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (steel, finish, blade_color, handle_color, row["id"]),
+            )
+            changes["model_attr_rows_updated"] += 1
+
+    for row in conn.execute(
+        "SELECT id, steel, blade_finish, blade_color, handle_color, condition FROM inventory_items_v2"
+    ).fetchall():
+        steel = _norm_map(row.get("steel"), steel_map)
+        finish = _norm_map(row.get("blade_finish"), finish_map)
+        blade_color = _norm_map(row.get("blade_color"), blade_color_map)
+        handle_color = _norm_map(row.get("handle_color"), handle_color_map)
+        condition = _norm_map(row.get("condition"), condition_map)
+        if (steel, finish, blade_color, handle_color, condition) != (
+            _collapse(row.get("steel")), _collapse(row.get("blade_finish")),
+            _collapse(row.get("blade_color")), _collapse(row.get("handle_color")),
+            _collapse(row.get("condition")),
+        ):
+            conn.execute(
+                "UPDATE inventory_items_v2 SET steel=?, blade_finish=?, blade_color=?, handle_color=?, "
+                "condition=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (steel, finish, blade_color, handle_color, condition, row["id"]),
+            )
+            changes["inventory_attr_rows_updated"] += 1
+
+    return changes
+
+
+if __name__ == "__main__":
+    import argparse
+    import sys
+    from pathlib import Path
+
+    _REPO_ROOT = Path(__file__).parent.parent
+    _DB_PATH = _REPO_ROOT / "data" / "mkc_inventory.db"
+
+    parser = argparse.ArgumentParser(description="Run all v2 migration steps.")
+    parser.add_argument("--db", default=str(_DB_PATH), help="Path to SQLite DB")
+    args = parser.parse_args()
+
+    import sqlite3 as _sqlite3
+
+    def _row_factory(cursor, row):
+        return {col[0]: row[i] for i, col in enumerate(cursor.description)}
+
+    conn = _sqlite3.connect(args.db)
+    conn.row_factory = _row_factory
+    conn.execute("PRAGMA foreign_keys = ON")
+
+    print(f"DB: {args.db}\n")
+    print("ensure_phase1_schema ...")
+    ensure_phase1_schema(conn)
+    print("ensure_v2_exclusive_schema ...")
+    ensure_v2_exclusive_schema(conn)
+    print("migrate_legacy_media_to_v2 ...")
+    r = migrate_legacy_media_to_v2(conn)
+    print(f"  images_copied={r['images_copied']}  descriptors_copied={r['descriptors_copied']}")
+    print("backfill_v2_model_identity ...")
+    r = backfill_v2_model_identity(conn)
+    print(f"  rows_updated={r['rows_updated']}  values_inferred={r['values_inferred']}")
+    print("normalize_v2_additional_fields ...")
+    r = normalize_v2_additional_fields(conn)
+    print(f"  {r}")
+    conn.commit()
+    print("\nDONE")
+    sys.exit(0)

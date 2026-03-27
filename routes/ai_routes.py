@@ -155,12 +155,13 @@ def create_ai_router(
         with get_conn() as conn:
             master_hu_rows = conn.execute(
                 """
-                SELECT id, name, identifier_silhouette_hu_json
-                FROM master_knives
-                WHERE status != 'archived'
-                  AND identifier_silhouette_hu_json IS NOT NULL
-                  AND trim(identifier_silhouette_hu_json) != ''
-                ORDER BY name COLLATE NOCASE
+                SELECT km.id, km.official_name AS name, kmi.silhouette_hu_json
+                FROM knife_models_v2 km
+                JOIN knife_model_images kmi ON kmi.knife_model_id = km.id
+                WHERE km.record_status != 'archived'
+                  AND kmi.silhouette_hu_json IS NOT NULL
+                  AND trim(kmi.silhouette_hu_json) != ''
+                ORDER BY km.official_name COLLATE NOCASE
                 """
             ).fetchall()
             tpl_rows = conn.execute(
@@ -170,7 +171,7 @@ def create_ai_router(
         catalog_templates = []
         for r in master_hu_rows:
             try:
-                hu_list = json.loads(r["identifier_silhouette_hu_json"])
+                hu_list = json.loads(r["silhouette_hu_json"])
                 if blade_ai.is_hu_vector_degenerate(hu_list):
                     continue
             except (json.JSONDecodeError, TypeError):
@@ -178,7 +179,7 @@ def create_ai_router(
             catalog_templates.append({
                 "slug": f"catalog-{r['id']}",
                 "name": r["name"],
-                "hu_json": r["identifier_silhouette_hu_json"],
+                "hu_json": r["silhouette_hu_json"],
             })
         generic_templates = [dict(r) for r in tpl_rows]
         combined_templates = catalog_templates + generic_templates

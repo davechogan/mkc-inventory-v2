@@ -1171,6 +1171,24 @@ def create_v2_router(
             return {"message": "Deleted"}
 
 
+    @router.get("/api/inventory/options")
+    def inventory_options(master_knife_id: Optional[int] = None):  # noqa: ARG001
+        """Return option lists for the inventory form. master_knife_id accepted but unused (all options returned)."""
+        option_types = (
+            "blade-steels", "blade-finishes", "blade-colors",
+            "handle-colors", "blade-types", "categories", "primary-use-cases",
+        )
+        with get_conn() as conn:
+            result: dict[str, list[dict[str, Any]]] = {}
+            for key in option_types:
+                result[key] = conn.execute(
+                    "SELECT id, name FROM v2_option_values WHERE option_type = ? ORDER BY name COLLATE NOCASE",
+                    (key,),
+                ).fetchall()
+            result["_filtered"] = False
+            return result
+
+
     @router.post("/api/v2/inventory")
     def v2_create_inventory_item(payload: InventoryItemV2In):
         """Create inventory item in v2 only (canonical write path)."""
