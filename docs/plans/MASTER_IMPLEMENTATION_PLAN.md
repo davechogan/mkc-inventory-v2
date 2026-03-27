@@ -284,6 +284,36 @@ reporting/
 
 ---
 
+### Phase Pipeline-Clean — Canonical LLM pipeline refactor ✅ COMPLETE (tag: phase-pipeline-clean)
+
+**Goal:** Replace all regex-based pre-processing, heuristic plans, and explicit constraint extraction with the spec-aligned pipeline defined in `Reporting_AI_Phase_Next_Plan_Schema_Validation_Spec.md`.
+
+**Pipeline (before → after):**
+```
+Before:
+  Question → Regex gates (scope, date, safety, intent) → Heuristic plan → LLM fallback → SQL
+
+After:
+  Question → Retrieval (Chroma/sentence-transformers) → LLM (canonical JSON)
+           → Structural Validation → Semantic Validation → Deterministic SQL → Execution → Response
+```
+
+**Completed changes:**
+- `planner.py`: rewritten from ~1200 lines to ~200; removed 20+ regex functions; new `_PLANNER_SYSTEM` prompt with strict canonical JSON schema; `_reporting_llm_plan()` now receives `retrieval_context` and `schema_context` as first-class parameters
+- `domain.py`: `run_reporting_query()` refactored into 10 numbered steps; retrieval promoted to Step 1; date extraction reads `canonical_plan.time_range`; follow-up carryover delegated to LLM via `context_block`; compare mode builds `CanonicalReportingPlan` directly (no template SQL)
+- Deleted `tests/test_reporting_filter_defects.py`, `test_reporting_regex_contract.py`, `test_reporting_scope_env.py`
+- Updated remaining tests to use canonical JSON fake LLM responses
+
+**Acceptance criteria — all met:**
+- [x] No regex pre-processing in the query path
+- [x] Retrieval is the first step before any LLM call
+- [x] LLM outputs canonical JSON (`CanonicalReportingPlan` schema) — no heuristic fallback
+- [x] Structural + semantic validation run before SQL compilation
+- [x] All 53 tests pass
+- [x] Merged to main with tag `phase-pipeline-clean`
+
+---
+
 ### Phase E — Postgres migration
 
 **Sequence note:** Do this after Phases A–D. Migrating to Postgres on top of messy SQLite code means migrating the mess.
