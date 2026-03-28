@@ -8,177 +8,292 @@
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body data-page="reporting">
-  <nav class="app-nav">
-    <a href="/" class="nav-logo" aria-label="MKC Inventory home">
-      <img src="/static/logo.png" alt="MKC" class="nav-logo-img" />
-    </a>
-    <a href="/">Collection</a>
-    <a href="/identify">Identify</a>
-    <a href="/master">Catalog</a>
-    <a href="/reporting" class="active" aria-current="page">Reporting</a>
+
+<div class="app-shell" id="appShell">
+
+  <!-- ── SIDEBAR ── -->
+  <nav class="sidebar" id="appSidebar">
+    <div class="sidebar-top">
+      <img src="/static/logo.png" alt="MKC" class="sidebar-logo" />
+      <div class="sidebar-wordmark">
+        <span class="sidebar-wordmark-title">Mountain Knife</span>
+        <span class="sidebar-wordmark-sub">Collection</span>
+      </div>
+      <button type="button" class="sidebar-toggle" id="sidebarToggle" title="Collapse sidebar" aria-label="Collapse sidebar">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
+    </div>
+    <div class="sidebar-nav">
+      <a href="/" data-tooltip="Collection">
+        <span class="nav-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></span>
+        <span class="nav-label">Collection</span>
+      </a>
+      <a href="/identify" data-tooltip="Identify">
+        <span class="nav-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>
+        <span class="nav-label">Identify</span>
+      </a>
+      <a href="/master" data-tooltip="Catalog">
+        <span class="nav-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></span>
+        <span class="nav-label">Catalog</span>
+      </a>
+      <a href="/reporting" class="active" aria-current="page" data-tooltip="Reporting">
+        <span class="nav-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/><line x1="2" y1="20" x2="22" y2="20"/></svg></span>
+        <span class="nav-label">Reporting</span>
+      </a>
+    </div>
+    <div class="sidebar-footer" id="sidebarVersionFooter"></div>
   </nav>
 
-  <header class="app-header">
-    <div>
-      <h1>Collection Reporting</h1>
-      <p>Ask questions in plain English. View answers as text, grid, or chart using your collection database as the source.</p>
-    </div>
-    <div class="header-actions">
-      <button type="button" id="newReportSessionBtn" class="secondary">New chat</button>
-      <button type="button" id="saveReportQueryBtn" class="secondary">Save prompt</button>
-    </div>
-  </header>
+  <!-- ── MAIN CONTENT ── -->
+  <div class="app-main" style="display:flex;flex-direction:column;height:100vh;overflow:hidden;">
 
-  <main class="layout reporting-layout">
-    <section class="card reporting-sidebar">
-      <div class="section-header">
-        <h2>Session</h2>
-      </div>
-      <label>Model
-        <div class="ollama-model-row">
-          <select id="reportingModelSelect"></select>
-          <button type="button" id="reportingModelDefaultBtn" class="ollama-default-btn" title="Set as default model" aria-label="Set as default model">★</button>
+    <!-- Reporting two-panel shell -->
+    <div class="reporting-shell">
+
+      <!-- LEFT: session controls + suggestions + dev tools -->
+      <div class="reporting-left-panel">
+
+        <div class="reporting-left-header">
+          <span class="reporting-left-title">Reporting</span>
+          <button type="button" class="reporting-gear-btn" id="reportingGearBtn" title="Developer tools" aria-label="Toggle developer tools">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          </button>
         </div>
-      </label>
-      <p id="reportingModelStatus" class="muted small"></p>
 
-      <label>Conversation
-        <select id="reportingSessionSelect"></select>
-      </label>
-
-      <div class="reporting-block">
-        <h3>Suggested questions</h3>
-        <div id="reportingTemplates" class="actions"></div>
-      </div>
-
-      <div class="reporting-block">
-        <h3>Saved prompts</h3>
-        <ul id="reportingSavedQueries" class="pill-list"></ul>
-      </div>
-
-      <div class="reporting-block">
-        <h3>Compare mode</h3>
-        <label class="checkbox-label"><input type="checkbox" id="reportingCompareEnabled" /> Enable compare mode</label>
-        <label>Dimension
-          <select id="reportingCompareDimension">
-            <option value="family">Family</option>
-            <option value="series">Series</option>
-            <option value="type">Type</option>
-            <option value="steel">Steel</option>
-            <option value="condition">Condition</option>
-            <option value="location">Location</option>
-          </select>
+        <!-- Session controls -->
+        <label style="font-size:0.82rem;color:#a8b3bd;font-weight:600;">Model
+          <div class="ollama-model-row">
+            <select id="reportingModelSelect"></select>
+            <button type="button" id="reportingModelDefaultBtn" class="ollama-default-btn" title="Set as default model" aria-label="Set as default model">★</button>
+          </div>
         </label>
-        <label>Value A<input id="reportingCompareA" placeholder="Traditions" /></label>
-        <label>Value B<input id="reportingCompareB" placeholder="VIP" /></label>
-      </div>
-      <div class="reporting-block">
-        <h3>Mode (debug)</h3>
-        <button type="button" id="reportingDirectLlmSqlToggleBtn" class="secondary">Mode: A (Semantic)</button>
-        <p id="reportingDirectLlmSqlStatus" class="muted small"></p>
-      </div>
-      <div class="reporting-block">
-        <h3>Hint promotion (admin)</h3>
-        <div class="actions">
-          <button type="button" id="reportingHintPromotePreviewBtn" class="secondary">Preview promotion</button>
-          <button type="button" id="reportingHintPromoteApplyBtn" class="secondary">Apply promotion</button>
+        <p id="reportingModelStatus" class="muted small"></p>
+
+        <label style="font-size:0.82rem;color:#a8b3bd;font-weight:600;">Conversation
+          <select id="reportingSessionSelect"></select>
+        </label>
+
+        <div style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-top:0.1rem;">
+          <button type="button" id="newReportSessionBtn" class="secondary" style="font-size:0.82rem;padding:0.35rem 0.65rem;">New chat</button>
+          <button type="button" id="saveReportQueryBtn" class="secondary" style="font-size:0.82rem;padding:0.35rem 0.65rem;">Save prompt</button>
         </div>
-        <p id="reportingHintPromoteStatus" class="muted small">Run preview to inspect session hint candidates before apply.</p>
-      </div>
-      <div class="reporting-block">
-        <h3>Retrieval runtime (admin)</h3>
-        <label class="full">Retrieval backend
-          <select id="reportingRetrievalBackendSelect" title="Persisted in app database; used on the next question unless env overrides.">
-            <option value="lexical">Lexical — token overlap only (baseline)</option>
-            <option value="chroma">Sentence-transformers + Chroma (target architecture)</option>
-            <option value="embedding">In-process embeddings only (sentence-transformers; no Chroma)</option>
-            <option value="vector">Local vector index file (sentence-transformers + on-disk index)</option>
-          </select>
-        </label>
-        <div class="actions">
-          <button type="button" id="reportingRetrievalBackendSaveBtn" class="secondary">Save backend</button>
-          <button type="button" id="reportingRetrievalStatusBtn" class="secondary">Refresh status</button>
-          <button type="button" id="reportingRetrievalReloadBtn" class="secondary">Reload catalog/index</button>
+
+        <!-- Suggested questions -->
+        <div class="reporting-suggestions-block">
+          <div class="reporting-suggestions-label">Suggestions</div>
+          <div id="reportingTemplates" class="reporting-suggestions-list"></div>
         </div>
-        <p id="reportingRetrievalBackendHint" class="muted small"></p>
-        <p id="reportingRetrievalRuntimeStatus" class="muted small">No retrieval status loaded yet.</p>
-      </div>
-    </section>
 
-    <section class="card reporting-main">
-      <div id="reportingMessages" class="reporting-messages"></div>
-
-      <form id="reportingForm" class="grid-form">
-        <label class="full">Question
-          <textarea id="reportingQuestion" rows="3" placeholder="Example: What did I spend by month in the last 12 months?"></textarea>
-        </label>
-        <label>Chart preference
-          <select id="reportingChartPreference">
-            <option value="">Auto</option>
-            <option value="bar">Bar</option>
-            <option value="line">Line</option>
-            <option value="pie">Pie</option>
-          </select>
-        </label>
-        <label>Max rows
-          <input id="reportingMaxRows" type="number" min="10" max="1000" step="10" value="200" />
-        </label>
-        <div class="form-actions">
-          <button type="submit">Ask</button>
-          <button type="button" id="reportingClearBtn" class="secondary">Clear input</button>
-          <button type="button" id="reportingExportCsvBtn" class="secondary">Export grid CSV</button>
+        <!-- Saved prompts -->
+        <div class="reporting-suggestions-block">
+          <div class="reporting-suggestions-label">Saved prompts</div>
+          <ul id="reportingSavedQueries" class="pill-list" style="margin:0;"></ul>
         </div>
-        <label class="full muted small">
-          <input type="checkbox" id="reportingPipelineDebug" />
-          Pipeline debug: include retrieval query text, planner/responder LLM prompts and raw responses (verbose; dev only)
-        </label>
-      </form>
 
-      <div class="reporting-followups">
-        <strong class="muted small">Follow-up ideas:</strong>
-        <div id="reportingFollowups" class="actions"></div>
-      </div>
+        <!-- Dev tools (gear-gated) -->
+        <div class="reporting-dev-tools hidden" id="reportingDevTools">
+          <div class="reporting-dev-tools-label">Developer tools</div>
 
-      <div class="identify-tabs reporting-tabs">
-        <button type="button" class="tab-btn active" data-report-tab="text">Text</button>
-        <button type="button" class="tab-btn" data-report-tab="grid">Grid</button>
-        <button type="button" class="tab-btn" data-report-tab="graph">Graph</button>
-      </div>
+          <div class="reporting-dev-section">
+            <div class="reporting-dev-section-title">Compare mode</div>
+            <label class="checkbox-label" style="font-size:0.82rem;"><input type="checkbox" id="reportingCompareEnabled" /> Enable compare mode</label>
+            <label style="font-size:0.82rem;color:#a8b3bd;margin-top:0.25rem;">Dimension
+              <select id="reportingCompareDimension">
+                <option value="family">Family</option>
+                <option value="series">Series</option>
+                <option value="type">Type</option>
+                <option value="steel">Steel</option>
+                <option value="condition">Condition</option>
+                <option value="location">Location</option>
+              </select>
+            </label>
+            <label style="font-size:0.82rem;color:#a8b3bd;">Value A<input id="reportingCompareA" placeholder="Traditions" /></label>
+            <label style="font-size:0.82rem;color:#a8b3bd;">Value B<input id="reportingCompareB" placeholder="VIP" /></label>
+          </div>
 
-      <section id="reportTextPanel" class="report-panel">
-        <div id="reportingTextResult" class="ai-output">Ask a question to start.</div>
-        <details id="reportingSemanticRetrievalPanel" class="reporting-semantic-retrieval hidden">
-          <summary>Semantic retrieval (planner grounding)</summary>
-          <p id="reportingSemanticRetrievalSummary" class="muted small"></p>
-          <pre id="reportingSemanticRetrievalJson" class="reporting-sql reporting-json-scroll"></pre>
-        </details>
-        <details id="reportingPipelineDebugPanel" class="reporting-semantic-retrieval hidden">
-          <summary>Pipeline debug (planner + responder LLM)</summary>
-          <p class="muted small">Enable the checkbox above or set server env <code>REPORTING_DEBUG_PIPELINE=1</code>.</p>
-          <pre id="reportingPipelineDebugJson" class="reporting-sql reporting-json-scroll"></pre>
-        </details>
-      </section>
-      <section id="reportGridPanel" class="report-panel hidden">
-        <div class="reporting-grid-toolbar">
-          <label class="reporting-grid-filter-label">
-            Filter rows
-            <input type="search" id="reportingGridFilter" placeholder="Match any column…" autocomplete="off" />
+          <div class="reporting-dev-section">
+            <div class="reporting-dev-section-title">Mode</div>
+            <button type="button" id="reportingDirectLlmSqlToggleBtn" class="secondary" style="font-size:0.8rem;">Mode: A (Semantic)</button>
+            <p id="reportingDirectLlmSqlStatus" class="muted small"></p>
+          </div>
+
+          <div class="reporting-dev-section">
+            <div class="reporting-dev-section-title">Hint promotion</div>
+            <div class="actions">
+              <button type="button" id="reportingHintPromotePreviewBtn" class="secondary" style="font-size:0.8rem;">Preview</button>
+              <button type="button" id="reportingHintPromoteApplyBtn" class="secondary" style="font-size:0.8rem;">Apply</button>
+            </div>
+            <p id="reportingHintPromoteStatus" class="muted small">Run preview to inspect session hint candidates before apply.</p>
+          </div>
+
+          <div class="reporting-dev-section">
+            <div class="reporting-dev-section-title">Retrieval runtime</div>
+            <label class="full" style="font-size:0.8rem;">Backend
+              <select id="reportingRetrievalBackendSelect" title="Persisted in app database; used on the next question unless env overrides.">
+                <option value="lexical">Lexical — token overlap only</option>
+                <option value="chroma">Chroma (target architecture)</option>
+                <option value="embedding">In-process embeddings only</option>
+                <option value="vector">Local vector index file</option>
+              </select>
+            </label>
+            <div class="actions" style="margin-top:0.3rem;">
+              <button type="button" id="reportingRetrievalBackendSaveBtn" class="secondary" style="font-size:0.8rem;">Save</button>
+              <button type="button" id="reportingRetrievalStatusBtn" class="secondary" style="font-size:0.8rem;">Status</button>
+              <button type="button" id="reportingRetrievalReloadBtn" class="secondary" style="font-size:0.8rem;">Reload</button>
+            </div>
+            <p id="reportingRetrievalBackendHint" class="muted small"></p>
+            <p id="reportingRetrievalRuntimeStatus" class="muted small">No retrieval status loaded yet.</p>
+          </div>
+        </div>
+
+      </div><!-- /.reporting-left-panel -->
+
+      <!-- RIGHT: messages + tabs + input -->
+      <div class="reporting-chat-panel">
+
+        <!-- Message history -->
+        <div class="reporting-chat-messages" id="reportingMessages"></div>
+
+        <!-- Follow-up chips -->
+        <div class="reporting-followup-row hidden" id="reportingFollowupsRow">
+          <div id="reportingFollowups" style="display:contents;"></div>
+        </div>
+
+        <!-- Result tabs + panels -->
+        <div class="identify-tabs reporting-tabs" style="padding:0 1.5rem;border-bottom:1px solid #343d46;">
+          <button type="button" class="tab-btn active" data-report-tab="text">Text</button>
+          <button type="button" class="tab-btn" data-report-tab="grid">Grid</button>
+          <button type="button" class="tab-btn" data-report-tab="graph">Graph</button>
+        </div>
+
+        <section id="reportTextPanel" class="report-panel" style="flex:1;overflow-y:auto;padding:1rem 1.5rem;min-height:0;">
+          <div id="reportingTextResult" class="ai-output">Ask a question to start.</div>
+          <details id="reportingSemanticRetrievalPanel" class="reporting-semantic-retrieval hidden">
+            <summary>Semantic retrieval (planner grounding)</summary>
+            <p id="reportingSemanticRetrievalSummary" class="muted small"></p>
+            <pre id="reportingSemanticRetrievalJson" class="reporting-sql reporting-json-scroll"></pre>
+          </details>
+          <details id="reportingPipelineDebugPanel" class="reporting-semantic-retrieval hidden">
+            <summary>Pipeline debug (planner + responder LLM)</summary>
+            <p class="muted small">Enable the checkbox in the input bar or set server env <code>REPORTING_DEBUG_PIPELINE=1</code>.</p>
+            <pre id="reportingPipelineDebugJson" class="reporting-sql reporting-json-scroll"></pre>
+          </details>
+        </section>
+        <section id="reportGridPanel" class="report-panel hidden" style="flex:1;overflow:hidden;display:flex;flex-direction:column;min-height:0;">
+          <div class="reporting-grid-toolbar" style="padding:0.5rem 1.5rem;flex-shrink:0;">
+            <label class="reporting-grid-filter-label">
+              Filter rows
+              <input type="search" id="reportingGridFilter" placeholder="Match any column…" autocomplete="off" />
+            </label>
+          </div>
+          <div class="table-wrap" style="flex:1;overflow:auto;padding:0 1.5rem 1rem;">
+            <table id="reportingGrid">
+              <thead><tr id="reportingGridHead"></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
+        <section id="reportGraphPanel" class="report-panel hidden" style="flex:1;overflow-y:auto;padding:1rem 1.5rem;min-height:0;">
+          <div id="reportingGraphWrap" class="reporting-graph-wrap muted">No graph available for this result.</div>
+        </section>
+
+        <!-- Input bar -->
+        <form id="reportingForm" class="reporting-input-bar">
+          <textarea id="reportingQuestion" class="reporting-input-textarea" rows="1"
+            placeholder="Ask about your collection…"></textarea>
+          <div class="reporting-input-actions">
+            <select id="reportingChartPreference" class="reporting-chart-select" title="Chart type">
+              <option value="">Auto</option>
+              <option value="bar">Bar</option>
+              <option value="line">Line</option>
+              <option value="pie">Pie</option>
+            </select>
+            <input id="reportingMaxRows" type="number" min="10" max="1000" step="10" value="200"
+              title="Max rows" style="width:60px;background:#1c2126;color:#a8b3bd;border:1px solid #343d46;border-radius:8px;padding:0.45rem 0.4rem;font:inherit;font-size:0.82rem;" />
+            <button type="button" id="reportingClearBtn" class="secondary" style="font-size:0.82rem;padding:0.45rem 0.65rem;">Clear</button>
+            <button type="button" id="reportingExportCsvBtn" class="secondary" style="font-size:0.82rem;padding:0.45rem 0.65rem;" title="Export grid CSV">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            </button>
+            <button type="submit" class="reporting-send-btn" aria-label="Ask">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            </button>
+          </div>
+          <!-- Debug checkbox — hidden but preserved for JS -->
+          <label class="hidden" style="display:none;">
+            <input type="checkbox" id="reportingPipelineDebug" />
           </label>
-        </div>
-        <div class="table-wrap">
-          <table id="reportingGrid">
-            <thead><tr id="reportingGridHead"></tr></thead>
-            <tbody></tbody>
-          </table>
-        </div>
-      </section>
-      <section id="reportGraphPanel" class="report-panel hidden">
-        <div id="reportingGraphWrap" class="reporting-graph-wrap muted">No graph available for this result.</div>
-      </section>
-    </section>
-  </main>
+        </form>
 
-  <div id="app-version-footer"></div>
-  <script src="/static/reporting.js?v=12"></script>
+      </div><!-- /.reporting-chat-panel -->
+    </div><!-- /.reporting-shell -->
+
+  </div><!-- /.app-main -->
+</div><!-- /.app-shell -->
+
+<div id="app-version-footer"></div>
+<script src="/static/reporting.js?v=12"></script>
+<script>
+(function () {
+  var shell = document.getElementById('appShell');
+  var sidebar = document.getElementById('appSidebar');
+  var btn = document.getElementById('sidebarToggle');
+  var KEY = 'mkc_sidebar_collapsed';
+  function applySidebar(collapsed) {
+    shell.classList.toggle('sidebar-collapsed', collapsed);
+    sidebar.classList.toggle('collapsed', collapsed);
+    btn.setAttribute('title', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+    btn.innerHTML = collapsed
+      ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>'
+      : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>';
+  }
+  applySidebar(localStorage.getItem(KEY) === '1');
+  btn.addEventListener('click', function () {
+    var c = !shell.classList.contains('sidebar-collapsed');
+    localStorage.setItem(KEY, c ? '1' : '0');
+    applySidebar(c);
+  });
+  var footer = document.getElementById('sidebarVersionFooter');
+  var orig = document.getElementById('app-version-footer');
+  if (footer && orig) {
+    var obs = new MutationObserver(function () { footer.textContent = orig.textContent; });
+    obs.observe(orig, { childList: true, characterData: true, subtree: true });
+  }
+
+  // Gear button toggles dev tools
+  var gearBtn = document.getElementById('reportingGearBtn');
+  var devTools = document.getElementById('reportingDevTools');
+  if (gearBtn && devTools) {
+    gearBtn.addEventListener('click', function () {
+      devTools.classList.toggle('hidden');
+    });
+  }
+
+  // Auto-grow textarea
+  var ta = document.getElementById('reportingQuestion');
+  if (ta) {
+    ta.addEventListener('input', function () {
+      this.style.height = 'auto';
+      this.style.height = Math.min(this.scrollHeight, 160) + 'px';
+    });
+    ta.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        var form = document.getElementById('reportingForm');
+        if (form) form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      }
+    });
+  }
+
+  // Follow-up row visibility — show when there are chips
+  var followupRow = document.getElementById('reportingFollowupsRow');
+  var followupDiv = document.getElementById('reportingFollowups');
+  if (followupDiv && followupRow) {
+    var fo = new MutationObserver(function () {
+      followupRow.classList.toggle('hidden', followupDiv.children.length === 0);
+    });
+    fo.observe(followupDiv, { childList: true });
+  }
+})();
+</script>
 </body>
 </html>

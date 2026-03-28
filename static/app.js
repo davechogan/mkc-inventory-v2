@@ -502,9 +502,21 @@ function renderFamilyStrip() {
     wrap.innerHTML = '<span class="muted">No inventory yet.</span>';
     return;
   }
-  wrap.innerHTML = rows.map((r) => `
-    <span class="family-chip"><strong>${escapeHtml(r.family)}</strong> · ${r.total_quantity} pcs · ${r.inventory_rows} row${r.inventory_rows === 1 ? '' : 's'}</span>
-  `).join('');
+  const activeFam = document.getElementById('inventoryFilterFamily')?.value || '';
+  wrap.innerHTML = rows.map((r) => {
+    const isActive = activeFam === r.family;
+    return `<button type="button" class="family-chip${isActive ? ' family-chip-active' : ''}" data-family="${escapeHtml(r.family)}">${escapeHtml(r.family)} <strong>${r.total_quantity}</strong></button>`;
+  }).join('');
+  wrap.querySelectorAll('.family-chip').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      const sel = document.getElementById('inventoryFilterFamily');
+      if (!sel) return;
+      sel.value = sel.value === chip.dataset.family ? '' : chip.dataset.family;
+      renderInventoryTable();
+      renderFamilyStrip();
+      if (typeof window.updateFilterBadge === 'function') window.updateFilterBadge();
+    });
+  });
 }
 
 function masterMatchesFilter(item, query) {
@@ -734,6 +746,8 @@ function renderInventoryTable() {
     });
   }
 
+  window._filteredInventory = rows;
+
   tbody.innerHTML = '';
   rows.forEach((item) => {
     const tr = document.createElement('tr');
@@ -755,6 +769,85 @@ function renderInventoryTable() {
     });
     tr.innerHTML = cells.join('');
     tbody.appendChild(tr);
+  });
+
+  // If card view is active, re-render cards too
+  const cardGrid = document.getElementById('inventoryCardGrid');
+  if (cardGrid && !cardGrid.classList.contains('hidden')) renderInventoryCards();
+}
+
+function renderInventoryCards() {
+  const grid = document.getElementById('inventoryCardGrid');
+  if (!grid) return;
+  const rows = window._filteredInventory || state.inventory || [];
+  grid.innerHTML = '';
+
+  if (!rows.length) {
+    grid.innerHTML = '<p class="muted" style="padding:1rem;">No items match your filters.</p>';
+    return;
+  }
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (!entry.isIntersecting) return;
+      const img = entry.target;
+      const src = img.dataset.src;
+      if (!src) return;
+      observer.unobserve(img);
+      img.src = src;
+      img.classList.remove('lazy-pending');
+      img.classList.add('lazy-loaded');
+    });
+  }, { rootMargin: '150px' });
+
+  rows.forEach((item) => {
+    const src = item.colorway_image_url
+      || (item.has_identifier_image && item.knife_model_id
+          ? `/api/v2/models/${item.knife_model_id}/image`
+          : null);
+
+    const card = document.createElement('div');
+    card.className = 'inv-card';
+    card.tabIndex = 0;
+    card.setAttribute('role', 'button');
+    card.setAttribute('aria-label', `Edit ${item.knife_name}`);
+    card.dataset.inventoryId = String(item.id);
+
+    const pills = [];
+    if (item.series_name) pills.push(escapeHtml(item.series_name));
+    if (item.handle_color) pills.push(escapeHtml(item.handle_color));
+    if (item.blade_steel) pills.push(escapeHtml(item.blade_steel));
+
+    card.innerHTML = `
+      <div class="inv-card-img-wrap">
+        ${src
+          ? `<img class="inv-card-img lazy-pending" data-src="${escapeHtml(src)}" alt="" />`
+          : `<div class="inv-card-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg></div>`
+        }
+        ${(item.quantity || 0) > 1 ? `<div class="inv-card-qty-badge">×${item.quantity}</div>` : ''}
+      </div>
+      <div class="inv-card-body">
+        <div class="inv-card-name">${escapeHtml(item.knife_name || '—')}</div>
+        ${item.nickname ? `<div class="inv-card-nickname">${escapeHtml(item.nickname)}</div>` : ''}
+        ${pills.length ? `<div class="inv-card-pills">${pills.map((p) => `<span class="inv-card-pill">${p}</span>`).join('')}</div>` : ''}
+        <div class="inv-card-footer">
+          ${item.purchase_price ? `<span class="inv-card-value">${currency(item.purchase_price)}</span>` : ''}
+          ${item.condition ? `<span class="inv-card-pill">${escapeHtml(item.condition)}</span>` : ''}
+        </div>
+      </div>
+    `;
+
+    if (src) {
+      const img = card.querySelector('.inv-card-img');
+      if (img) observer.observe(img);
+    }
+
+    card.addEventListener('click', () => { if (item) showInventoryForm(item); });
+    card.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); showInventoryForm(item); }
+    });
+
+    grid.appendChild(card);
   });
 }
 
@@ -1753,9 +1846,16 @@ function initInventoryPage() {
   document.getElementById('inventorySearch')?.addEventListener('input', () => renderInventoryTable());
   ['inventoryFilterType', 'inventoryFilterFamily', 'inventoryFilterForm', 'inventoryFilterSeries',
    'inventoryFilterSteel', 'inventoryFilterFinish', 'inventoryFilterHandleColor', 'inventoryFilterCondition'].forEach((id) => {
-    document.getElementById(id)?.addEventListener('change', () => renderInventoryTable());
+    document.getElementById(id)?.addEventListener('change', () => {
+      renderInventoryTable();
+      renderFamilyStrip();
+      if (typeof window.updateFilterBadge === 'function') window.updateFilterBadge();
+    });
   });
-  document.getElementById('inventoryFilterLocation')?.addEventListener('input', () => renderInventoryTable());
+  document.getElementById('inventoryFilterLocation')?.addEventListener('input', () => {
+    renderInventoryTable();
+    if (typeof window.updateFilterBadge === 'function') window.updateFilterBadge();
+  });
 
   document.getElementById('inventoryModalBackdrop')?.addEventListener('click', closeInventoryModal);
   document.getElementById('inventoryModalCloseBtn')?.addEventListener('click', closeInventoryModal);

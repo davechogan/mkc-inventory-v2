@@ -8,70 +8,130 @@
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body data-page="identify">
-  <nav class="app-nav">
-    <a href="/" class="nav-logo" aria-label="MKC Inventory home">
-      <img src="/static/logo.png" alt="MKC" class="nav-logo-img" />
-    </a>
-    <a href="/">Collection</a>
-    <a href="/identify" class="active" aria-current="page">Identify</a>
-    <a href="/master">Catalog</a>
-    <a href="/reporting">Reporting</a>
+
+<div class="app-shell" id="appShell">
+
+  <!-- ── SIDEBAR ── -->
+  <nav class="sidebar" id="appSidebar">
+    <div class="sidebar-top">
+      <img src="/static/logo.png" alt="MKC" class="sidebar-logo" />
+      <div class="sidebar-wordmark">
+        <span class="sidebar-wordmark-title">Mountain Knife</span>
+        <span class="sidebar-wordmark-sub">Collection</span>
+      </div>
+      <button type="button" class="sidebar-toggle" id="sidebarToggle" title="Collapse sidebar" aria-label="Collapse sidebar">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
+    </div>
+    <div class="sidebar-nav">
+      <a href="/" data-tooltip="Collection">
+        <span class="nav-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></span>
+        <span class="nav-label">Collection</span>
+      </a>
+      <a href="/identify" class="active" aria-current="page" data-tooltip="Identify">
+        <span class="nav-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>
+        <span class="nav-label">Identify</span>
+      </a>
+      <a href="/master" data-tooltip="Catalog">
+        <span class="nav-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></span>
+        <span class="nav-label">Catalog</span>
+      </a>
+      <a href="/reporting" data-tooltip="Reporting">
+        <span class="nav-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/><line x1="2" y1="20" x2="22" y2="20"/></svg></span>
+        <span class="nav-label">Reporting</span>
+      </a>
+    </div>
+    <div class="sidebar-footer" id="sidebarVersionFooter"></div>
   </nav>
 
-  <header class="app-header">
-    <div>
-      <h1>Identify a knife</h1>
-      <p>Not sure what model you have? Search by keywords — matches against the MKC catalog.</p>
-    </div>
-  </header>
+  <!-- ── MAIN CONTENT ── -->
+  <div class="app-main">
 
-  <main class="layout">
-    <section class="card" id="keywordPanel">
-      <div class="section-header">
-        <div>
-          <h2>Keyword search</h2>
-          <div class="muted">
-            Enter anything you see or measure — steel, finish, ring, blade length, words from the blade or packaging.
-            Matches against the <strong>master catalog</strong> only.
+    <header class="app-header">
+      <div>
+        <h1>Identify a knife</h1>
+        <p>Not sure what model you have? Search by keywords — matches against the MKC catalog.</p>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="card" id="keywordPanel">
+        <div class="section-header">
+          <div>
+            <h2>Keyword search</h2>
+            <div class="muted">
+              Enter anything you see or measure — steel, finish, ring, blade length, words from the blade or packaging.
+              Matches against the <strong>master catalog</strong> only.
+            </div>
           </div>
         </div>
-      </div>
-      <form id="identifierForm" class="grid-form compact-grid">
-        <label>Keywords (name, notes, evidence…)
-          <input name="q" placeholder="skinner, ring, fillet, orange, nock on, compact" />
-        </label>
-        <label>Use / category
-          <input name="family" placeholder="hunting, tactical, culinary…" />
-        </label>
-        <label>Blade shape<input name="blade_shape" placeholder="drop point, clip point…" /></label>
-        <label>Size class<input name="size_class" placeholder="compact, standard, large" /></label>
-        <label>Use case<input name="use_case" placeholder="skinner, hunting, culinary…" /></label>
-        <label>Blade length (in)
-          <input type="number" step="0.01" name="blade_length" placeholder="3.75" />
-        </label>
-        <label>Steel<select name="steel" id="identifierSteel"></select></label>
-        <label>Finish<select name="finish" id="identifierFinish"></select></label>
-        <label>Blade color<select name="blade_color" id="identifierBladeColor"></select></label>
-        <label>Ring<select name="has_ring"><option value="">Any</option><option value="true">Yes</option><option value="false">No</option></select></label>
-        <label>Collab<select name="is_collab"><option value="">Any</option><option value="true">Yes</option><option value="false">No</option></select></label>
-        <label>Fillet<select name="is_filleting_knife"><option value="">Any</option><option value="true">Yes</option><option value="false">No</option></select></label>
-        <label>Kitchen<select name="is_kitchen"><option value="">Any</option><option value="true">Yes</option><option value="false">No</option></select></label>
-        <label>Hatchet<select name="is_hatchet"><option value="">Any</option><option value="true">Yes</option><option value="false">No</option></select></label>
-        <label>Tactical<select name="is_tactical"><option value="">Any</option><option value="true">Yes</option><option value="false">No</option></select></label>
-        <label>Catalog line<select name="catalog_line"><option value="">Any</option><option value="standard">Standard</option><option value="VIP">VIP</option><option value="Traditions">Traditions</option></select></label>
-        <label class="checkbox-label full identifier-archive-opt">
-          <input type="checkbox" name="include_archived" /> Include archived models
-        </label>
-        <div class="form-actions full">
-          <button type="submit">Search catalog</button>
-          <button type="button" id="clearIdentifierBtn" class="secondary">Clear</button>
-        </div>
-      </form>
-      <div id="identifierResults" class="identifier-results empty-state">No matches yet. Enter keywords or filters above.</div>
-    </section>
-  </main>
+        <form id="identifierForm" class="grid-form compact-grid">
+          <label>Keywords (name, notes, evidence…)
+            <input name="q" placeholder="skinner, ring, fillet, orange, nock on, compact" />
+          </label>
+          <label>Use / category
+            <input name="family" placeholder="hunting, tactical, culinary…" />
+          </label>
+          <label>Blade shape<input name="blade_shape" placeholder="drop point, clip point…" /></label>
+          <label>Size class<input name="size_class" placeholder="compact, standard, large" /></label>
+          <label>Use case<input name="use_case" placeholder="skinner, hunting, culinary…" /></label>
+          <label>Blade length (in)
+            <input type="number" step="0.01" name="blade_length" placeholder="3.75" />
+          </label>
+          <label>Steel<select name="steel" id="identifierSteel"></select></label>
+          <label>Finish<select name="finish" id="identifierFinish"></select></label>
+          <label>Blade color<select name="blade_color" id="identifierBladeColor"></select></label>
+          <label>Ring<select name="has_ring"><option value="">Any</option><option value="true">Yes</option><option value="false">No</option></select></label>
+          <label>Collab<select name="is_collab"><option value="">Any</option><option value="true">Yes</option><option value="false">No</option></select></label>
+          <label>Fillet<select name="is_filleting_knife"><option value="">Any</option><option value="true">Yes</option><option value="false">No</option></select></label>
+          <label>Kitchen<select name="is_kitchen"><option value="">Any</option><option value="true">Yes</option><option value="false">No</option></select></label>
+          <label>Hatchet<select name="is_hatchet"><option value="">Any</option><option value="true">Yes</option><option value="false">No</option></select></label>
+          <label>Tactical<select name="is_tactical"><option value="">Any</option><option value="true">Yes</option><option value="false">No</option></select></label>
+          <label>Catalog line<select name="catalog_line"><option value="">Any</option><option value="standard">Standard</option><option value="VIP">VIP</option><option value="Traditions">Traditions</option></select></label>
+          <label class="checkbox-label full identifier-archive-opt">
+            <input type="checkbox" name="include_archived" /> Include archived models
+          </label>
+          <div class="form-actions full">
+            <button type="submit">Search catalog</button>
+            <button type="button" id="clearIdentifierBtn" class="secondary">Clear</button>
+          </div>
+        </form>
+        <div id="identifierResults" class="identifier-results empty-state">No matches yet. Enter keywords or filters above.</div>
+      </section>
+    </main>
 
-  <div id="app-version-footer"></div>
-  <script src="/static/app.js?v=8"></script>
+  </div><!-- /.app-main -->
+</div><!-- /.app-shell -->
+
+<div id="app-version-footer"></div>
+<script src="/static/app.js?v=8"></script>
+<script>
+(function () {
+  var shell = document.getElementById('appShell');
+  var sidebar = document.getElementById('appSidebar');
+  var btn = document.getElementById('sidebarToggle');
+  var KEY = 'mkc_sidebar_collapsed';
+  function applySidebar(collapsed) {
+    shell.classList.toggle('sidebar-collapsed', collapsed);
+    sidebar.classList.toggle('collapsed', collapsed);
+    btn.setAttribute('title', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+    btn.innerHTML = collapsed
+      ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>'
+      : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>';
+  }
+  applySidebar(localStorage.getItem(KEY) === '1');
+  btn.addEventListener('click', function () {
+    var c = !shell.classList.contains('sidebar-collapsed');
+    localStorage.setItem(KEY, c ? '1' : '0');
+    applySidebar(c);
+  });
+  var footer = document.getElementById('sidebarVersionFooter');
+  var orig = document.getElementById('app-version-footer');
+  if (footer && orig) {
+    var obs = new MutationObserver(function () { footer.textContent = orig.textContent; });
+    obs.observe(orig, { childList: true, characterData: true, subtree: true });
+  }
+})();
+</script>
 </body>
 </html>
