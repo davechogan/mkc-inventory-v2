@@ -73,6 +73,10 @@ def create_ai_router(
         """Backward-compatible route now powered by canonical v2 catalog."""
         return run_identify(payload)
 
+    # Same annotation fix as v2_routes: `from __future__ import annotations` makes
+    # the locally-scoped `IdentifierQuery` a string FastAPI cannot resolve.
+    identify_knives.__annotations__["payload"] = IdentifierQuery
+
     @router.get("/api/ai/ollama/config")
     def api_ollama_config():
         return {"ollama_host": blade_ai.OLLAMA_HOST}

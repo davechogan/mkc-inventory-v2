@@ -1,13 +1,26 @@
-import { StrictMode } from 'react';
+import { StrictMode, lazy, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 import './index.css';
 import App from './App';
 
+const Identify = lazy(() => import('./pages/Identify'));
+
 const rootEl = document.getElementById('root');
 if (!rootEl) throw new Error('Root element not found');
 
+const path = window.location.pathname;
+
+let Page: React.ComponentType;
+if (path === '/identify') {
+  Page = Identify;
+} else {
+  Page = App;
+}
+
 createRoot(rootEl).render(
   <StrictMode>
-    <App />
+    <Suspense fallback={null}>
+      <Page />
+    </Suspense>
   </StrictMode>
 );

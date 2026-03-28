@@ -1699,4 +1699,9 @@ def create_v2_router(
         results.sort(key=lambda item: (-item["score"], item["name"].lower()))
         return {"source": "v2_catalog", "results": results[:10]}
 
+    # Fix annotation resolution: `from __future__ import annotations` converts the
+    # closure-scoped `identifier_query_model` to a string at runtime, so FastAPI
+    # cannot resolve it as a Pydantic body model.  Overwrite with the real class.
+    v2_identify_knives.__annotations__["payload"] = identifier_query_model
+
     return router, v2_identify_knives
