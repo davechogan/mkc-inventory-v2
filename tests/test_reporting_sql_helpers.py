@@ -1,7 +1,15 @@
 import pytest
 from fastapi import HTTPException
 
-from reporting.plan_models import CanonicalReportingPlan
+from reporting.plan_models import (
+    CanonicalReportingPlan,
+    PlanDimension,
+    PlanIntent,
+    PlanMetric,
+    PlanScope,
+    SortSpec,
+    SortDirection,
+)
 
 
 def test_validate_sql_allows_whitelisted_source(invapp):
@@ -18,14 +26,11 @@ def test_validate_sql_rejects_unapproved_source(invapp):
 
 def test_plan_to_sql_grouped_uses_expected_source_view(invapp):
     # Catalog scope with group_by should compile to `reporting_models` with GROUP BY.
-    plan_catalog = CanonicalReportingPlan.from_legacy_semantic_plan(
-        {
-        "intent": "list",
-        "metric": "count",
-        "scope": "catalog",
-        "group_by": "series_name",
-        "filters": {},
-        }
+    plan_catalog = CanonicalReportingPlan(
+        intent=PlanIntent.LIST,
+        scope=PlanScope.CATALOG,
+        metric=PlanMetric.COUNT,
+        group_by=[PlanDimension.SERIES_NAME],
     )
     sql, meta = invapp._reporting_plan_to_sql(plan_catalog, date_start=None, date_end=None, max_rows=50)
     assert "FROM reporting_models" in sql
@@ -33,14 +38,11 @@ def test_plan_to_sql_grouped_uses_expected_source_view(invapp):
     assert meta.get("mode") == "semantic_compiled_aggregate"
 
     # Inventory scope with group_by should compile to `reporting_inventory` with GROUP BY.
-    plan_inventory = CanonicalReportingPlan.from_legacy_semantic_plan(
-        {
-        "intent": "list",
-        "metric": "count",
-        "scope": "inventory",
-        "group_by": "family_name",
-        "filters": {},
-        }
+    plan_inventory = CanonicalReportingPlan(
+        intent=PlanIntent.LIST,
+        scope=PlanScope.INVENTORY,
+        metric=PlanMetric.COUNT,
+        group_by=[PlanDimension.FAMILY_NAME],
     )
     sql2, meta2 = invapp._reporting_plan_to_sql(plan_inventory, date_start=None, date_end=None, max_rows=50)
     assert "FROM reporting_inventory" in sql2
@@ -51,14 +53,11 @@ def test_plan_to_sql_grouped_uses_expected_source_view(invapp):
 def test_plan_to_sql_catalog_falls_back_for_inventory_only_group_by(invapp):
     # `condition` is an inventory-only dimension; even with `scope=catalog` we should fall back
     # to the inventory view to satisfy the GROUP BY.
-    plan = CanonicalReportingPlan.from_legacy_semantic_plan(
-        {
-        "intent": "list",
-        "metric": "count",
-        "scope": "catalog",
-        "group_by": "condition",
-        "filters": {},
-        }
+    plan = CanonicalReportingPlan(
+        intent=PlanIntent.LIST,
+        scope=PlanScope.CATALOG,
+        metric=PlanMetric.COUNT,
+        group_by=[PlanDimension.CONDITION],
     )
     sql, meta = invapp._reporting_plan_to_sql(plan, date_start=None, date_end=None, max_rows=50)
     assert "FROM reporting_inventory" in sql
@@ -71,16 +70,12 @@ def test_plan_to_sql_rejects_unvalidated_dict(invapp):
 
 
 def test_plan_to_sql_list_inventory_orders_by_purchase_price_when_sort_set(invapp):
-    plan = CanonicalReportingPlan.from_legacy_semantic_plan(
-        {
-            "intent": "list_inventory",
-            "metric": "count",
-            "scope": "inventory",
-            "group_by": None,
-            "filters": {},
-            "limit": 10,
-            "sort": {"field": "purchase_price", "direction": "desc"},
-        }
+    plan = CanonicalReportingPlan(
+        intent=PlanIntent.LIST,
+        scope=PlanScope.INVENTORY,
+        metric=PlanMetric.COUNT,
+        limit=10,
+        sort=SortSpec(field="purchase_price", direction=SortDirection.DESC),
     )
     sql, meta = invapp._reporting_plan_to_sql(plan, date_start=None, date_end=None, max_rows=50)
     assert "COALESCE(purchase_price, 0)" in sql

@@ -133,7 +133,7 @@ def test_paraphrase_year_compare_normalizes_equivalently(invapp, monkeypatch) ->
 
     p1 = r1.get("semantic_plan") or {}
     p2 = r2.get("semantic_plan") or {}
-    assert p1.get("intent") == p2.get("intent") == "list_inventory"
+    assert p1.get("intent") == p2.get("intent") == "list"
     assert p1.get("metric") == p2.get("metric") == "total_spend"
     assert p1.get("year_compare") == p2.get("year_compare") == [2024, 2025]
 

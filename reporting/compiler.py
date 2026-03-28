@@ -27,7 +27,14 @@ from reporting.constants import (
     REPORTING_MAX_ROWS_DEFAULT,
     REPORTING_MAX_ROWS_HARD,
 )
-from reporting.plan_models import CanonicalReportingPlan
+from reporting.plan_models import (
+    CanonicalReportingPlan,
+    FilterClause,
+    FilterOp,
+    PlanIntent,
+    PlanMetric,
+    PlanScope,
+)
 from reporting.regex_contract import (
     RE_SQL_FROM_JOIN_IDENT,
     RE_SQL_QUOTED_RELATION_REF,
@@ -120,194 +127,235 @@ def compile_plan(
     """
     if not isinstance(plan, CanonicalReportingPlan):
         raise TypeError("Compiler requires CanonicalReportingPlan input.")
-    return _compile_legacy_dict(plan.to_legacy_semantic_plan(), date_start, date_end, max_rows)
+    return _compile_canonical(plan, date_start, date_end, max_rows)
+
+
+# ---------------------------------------------------------------------------
+# Filter expression helpers
+# ---------------------------------------------------------------------------
+
+# Columns searched by text_search per source view.
+_CATALOG_TEXT_COLS = (
+    "official_name", "family_name", "form_name", "series_name", "collaborator_name"
+)
+_INVENTORY_TEXT_COLS = (
+    "knife_name", "family_name", "form_name", "series_name", "collaborator_name"
+)
+
+
+def _esc(v: Any) -> str:
+    """Escape a scalar value for safe embedding in a SQL string literal."""
+    return str(v or "").replace("'", "''").strip()
+
+
+def _clause_expr(
+    clause: FilterClause,
+    *,
+    catalog_style: bool,
+    prefix: str = "",
+) -> Optional[str]:
+    """Translate a FilterClause to a positive SQL expression fragment.
+
+    For exclusions the caller wraps the result in NOT (...).
+    prefix is a table alias with trailing dot (e.g. "m." for missing_models JOIN).
+
+    Returns None when the clause is irrelevant for the source view (e.g. a
+    catalog-only field in an inventory query) so callers can silently skip it.
+    """
+    field = clause.field.value
+    op = clause.op
+    val = clause.value
+
+    # text_search: multi-column LIKE across name-bearing columns.
+    if field == "text_search":
+        cols = _CATALOG_TEXT_COLS if catalog_style else _INVENTORY_TEXT_COLS
+        vals: list[str] = [str(val)] if not isinstance(val, list) else [str(v) for v in val]
+        parts: list[str] = []
+        for raw_val in vals:
+            ev = _esc(raw_val)
+            col_exprs = [
+                f"lower(COALESCE({prefix}{c}, '')) LIKE lower('%{ev}%')" for c in cols
+            ]
+            parts.append(f"({' OR '.join(col_exprs)})")
+        return f"({' AND '.join(parts)})" if parts else None
+
+    # Skip fields that don't exist in the source view.
+    _inv_only = {"condition", "location", "knife_name", "acquired_date",
+                 "purchase_price", "estimated_value"}
+    _cat_only = {"msrp", "official_name", "record_status"}
+    if catalog_style and field in _inv_only:
+        return None
+    if not catalog_style and field in _cat_only:
+        return None
+
+    col = f"{prefix}{field}"
+
+    if op == FilterOp.EQ:
+        ev = _esc(str(val))
+        return f"lower(COALESCE({col}, '')) = lower('{ev}')"
+    if op == FilterOp.NEQ:
+        ev = _esc(str(val))
+        return f"lower(COALESCE({col}, '')) != lower('{ev}')"
+    if op == FilterOp.CONTAINS:
+        ev = _esc(str(val))
+        return f"lower(COALESCE({col}, '')) LIKE lower('%{ev}%')"
+    if op == FilterOp.NOT_CONTAINS:
+        ev = _esc(str(val))
+        return f"lower(COALESCE({col}, '')) NOT LIKE lower('%{ev}%')"
+    if op == FilterOp.IN:
+        items = val if isinstance(val, list) else [val]
+        quoted = ", ".join(f"lower('{_esc(str(v))}')" for v in items)
+        return f"lower(COALESCE({col}, '')) IN ({quoted})"
+    if op == FilterOp.NOT_IN:
+        items = val if isinstance(val, list) else [val]
+        quoted = ", ".join(f"lower('{_esc(str(v))}')" for v in items)
+        return f"lower(COALESCE({col}, '')) NOT IN ({quoted})"
+    if op == FilterOp.GT:
+        return f"CAST({col} AS REAL) > {float(val)}"  # type: ignore[arg-type]
+    if op == FilterOp.GTE:
+        return f"CAST({col} AS REAL) >= {float(val)}"  # type: ignore[arg-type]
+    if op == FilterOp.LT:
+        return f"CAST({col} AS REAL) < {float(val)}"  # type: ignore[arg-type]
+    if op == FilterOp.LTE:
+        return f"CAST({col} AS REAL) <= {float(val)}"  # type: ignore[arg-type]
+    if op == FilterOp.BETWEEN and isinstance(val, list) and len(val) == 2:
+        return f"CAST({col} AS REAL) BETWEEN {float(val[0])} AND {float(val[1])}"  # type: ignore[arg-type]
+    return None
+
+
+def _build_where_fragments(
+    filters: list[FilterClause],
+    exclusions: list[FilterClause],
+    *,
+    catalog_style: bool,
+    prefix: str = "",
+) -> list[str]:
+    """Build WHERE clause fragments from canonical filter/exclusion lists.
+
+    Filters produce positive conditions; exclusions are wrapped in NOT (...).
+    Clauses irrelevant to the source view are silently skipped.
+    """
+    frags: list[str] = []
+    for clause in filters:
+        expr = _clause_expr(clause, catalog_style=catalog_style, prefix=prefix)
+        if expr:
+            frags.append(expr)
+    for clause in exclusions:
+        expr = _clause_expr(clause, catalog_style=catalog_style, prefix=prefix)
+        if expr:
+            frags.append(f"NOT ({expr})")
+    return frags
 
 
 # ---------------------------------------------------------------------------
 # Internal SQL builder
 # ---------------------------------------------------------------------------
 
-def _compile_legacy_dict(
-    plan: dict[str, Any],
+def _compile_canonical(
+    plan: CanonicalReportingPlan,
     date_start: Optional[str],
     date_end: Optional[str],
     max_rows: int,
 ) -> tuple[Optional[str], dict[str, Any]]:
-    """Build SQL from a validated plan dict.
+    """Build SQL directly from a validated CanonicalReportingPlan.
 
     Called only via compile_plan() after the plan has passed both structural
-    and semantic validation.  The compiler translates; it does not repair.
+    and semantic validation. The compiler translates; it does not repair.
     """
-    intent = str(plan.get("intent") or "").strip()
-    filters = dict(plan.get("filters") or {})
-    group_by = plan.get("group_by")
-    metric = str(plan.get("metric") or "count")
-    limit = min(max_rows, int(plan.get("limit") or max_rows))
-    scope = str(plan.get("scope") or "inventory").strip().lower()
-    use_catalog = scope == "catalog"
-    plan_date_start = str(plan.get("date_start") or "").strip() or None
-    plan_date_end = str(plan.get("date_end") or "").strip() or None
-    yc = plan.get("year_compare")
+    use_catalog = plan.scope == PlanScope.CATALOG
+    limit = min(max_rows, plan.limit or max_rows)
+    group_by = plan.group_by[0].value if plan.group_by else None
+
+    # Time range: explicit plan dates take priority over caller-supplied range.
+    effective_date_start = (plan.time_range.start if plan.time_range else None) or date_start
+    effective_date_end = (plan.time_range.end if plan.time_range else None) or date_end
+
+    # Year-compare: validated at plan layer; extract as string pair.
     year_compare: Optional[tuple[str, str]] = None
-    if isinstance(yc, (list, tuple)) and len(yc) == 2:
-        ya = str(yc[0]).strip()
-        yb = str(yc[1]).strip()
+    if len(plan.year_compare) == 2:
+        ya, yb = str(plan.year_compare[0]), str(plan.year_compare[1])
         if RE_YEAR_4.fullmatch(ya) and RE_YEAR_4.fullmatch(yb):
             year_compare = (ya, yb)
 
-    def esc(v: Any) -> str:
-        return str(v or "").replace("'", "''").strip()
-
-    def cond(k: str, v: str, *, exact: bool) -> str:
-        ev = esc(v)
-        if exact:
-            return f"lower(COALESCE({k}, '')) = lower('{ev}')"
-        return f"lower(COALESCE({k}, '')) LIKE lower('%{ev}%')"
-
-    def values_of(v: Any) -> list[str]:
-        if isinstance(v, list):
-            return [str(x) for x in v if str(x).strip()]
-        return [str(v)] if str(v or "").strip() else []
-
-    model_filter_cols = {
-        "series_name", "family_name", "knife_type", "form_name", "collaborator_name", "steel", "text_search",
-        "series_name__not", "family_name__not", "knife_type__not", "form_name__not", "collaborator_name__not", "steel__not", "text_search__not",
-    }
-    inv_filter_cols = {
-        "series_name", "family_name", "knife_type", "form_name", "collaborator_name", "steel", "condition", "location", "text_search",
-        "series_name__not", "family_name__not", "knife_type__not", "form_name__not", "collaborator_name__not", "steel__not", "condition__not", "location__not", "text_search__not",
-    }
-
-    def inv_filter_where(filters_map: dict[str, Any], *, catalog_style: bool) -> list[str]:
-        """Build WHERE fragments using reporting_inventory / reporting_models column names."""
-        w: list[str] = []
-        for k, v in filters_map.items():
-            if k not in inv_filter_cols:
-                continue
-            negate = k.endswith("__not")
-            base_k = k[:-5] if negate else k
-            if catalog_style and base_k in {"condition", "location"}:
-                continue
-            if base_k == "text_search":
-                vals = values_of(v)
-                for raw_val in vals:
-                    ev = esc(raw_val)
-                    if catalog_style:
-                        expr = (
-                            "("
-                            "lower(COALESCE(official_name, '')) LIKE lower('%" + ev + "%') OR "
-                            "lower(COALESCE(family_name, '')) LIKE lower('%" + ev + "%') OR "
-                            "lower(COALESCE(form_name, '')) LIKE lower('%" + ev + "%') OR "
-                            "lower(COALESCE(series_name, '')) LIKE lower('%" + ev + "%') OR "
-                            "lower(COALESCE(collaborator_name, '')) LIKE lower('%" + ev + "%')"
-                            ")"
-                        )
-                    else:
-                        expr = (
-                            "("
-                            "lower(COALESCE(knife_name, '')) LIKE lower('%" + ev + "%') OR "
-                            "lower(COALESCE(family_name, '')) LIKE lower('%" + ev + "%') OR "
-                            "lower(COALESCE(form_name, '')) LIKE lower('%" + ev + "%') OR "
-                            "lower(COALESCE(series_name, '')) LIKE lower('%" + ev + "%') OR "
-                            "lower(COALESCE(collaborator_name, '')) LIKE lower('%" + ev + "%')"
-                            ")"
-                        )
-                    w.append(f"NOT {expr}" if negate else expr)
-                continue
-            for raw_val in values_of(v):
-                expr = cond(base_k, raw_val, exact=(base_k in {"series_name", "knife_type", "condition"}))
-                w.append(f"NOT ({expr})" if negate else expr)
-        return w
-
-    if intent == "missing_models":
-        where = ["COALESCE(inv.total_qty, 0) = 0"]
-        for k, v in filters.items():
-            if k not in model_filter_cols:
-                continue
-            negate = k.endswith("__not")
-            base_k = k[:-5] if negate else k
-            if base_k == "text_search":
-                for raw_val in values_of(v):
-                    ev = esc(raw_val)
-                    expr = (
-                        "("
-                        "lower(COALESCE(m.official_name, '')) LIKE lower('%" + ev + "%') OR "
-                        "lower(COALESCE(m.family_name, '')) LIKE lower('%" + ev + "%') OR "
-                        "lower(COALESCE(m.form_name, '')) LIKE lower('%" + ev + "%') OR "
-                        "lower(COALESCE(m.series_name, '')) LIKE lower('%" + ev + "%')"
-                        ")"
-                    )
-                    where.append(f"NOT {expr}" if negate else expr)
-                continue
-            for raw_val in values_of(v):
-                expr = cond(f"m.{base_k}", raw_val, exact=(base_k in {"series_name", "knife_type"}))
-                where.append(f"NOT ({expr})" if negate else expr)
+    # ── missing_models branch ───────────────────────────────────────────────
+    if plan.intent == PlanIntent.MISSING_MODELS:
         inv_join = (
             "LEFT JOIN (SELECT knife_model_id, SUM(COALESCE(quantity, 1)) AS total_qty "
             "FROM reporting_inventory GROUP BY knife_model_id) inv "
             "ON inv.knife_model_id = m.model_id"
         )
-        where_sql_mm = f"WHERE {' AND '.join(where)}"
-        if metric == "msrp":
-            # Completion-cost mode: total MSRP to acquire all missing models.
+        where = ["COALESCE(inv.total_qty, 0) = 0"]
+        where += _build_where_fragments(
+            plan.filters, plan.exclusions, catalog_style=True, prefix="m."
+        )
+        where_sql = f"WHERE {' AND '.join(where)}"
+
+        if plan.metric == PlanMetric.MSRP:
             sql = (
                 "SELECT "
                 "COUNT(*) AS missing_models_count, "
                 "ROUND(SUM(COALESCE(m.msrp, 0)), 2) AS estimated_completion_cost_msrp, "
                 "ROUND(AVG(COALESCE(m.msrp, 0)), 2) AS avg_missing_model_msrp "
-                f"FROM reporting_models m {inv_join} {where_sql_mm}"
+                f"FROM reporting_models m {inv_join} {where_sql}"
             )
             return sql, {"mode": "semantic_compiled_completion_cost"}
+
         sql = (
             "SELECT m.model_id, m.official_name, m.knife_type, m.family_name, m.form_name, "
-            "m.series_name, m.collaborator_name, m.record_status, COALESCE(inv.total_qty, 0) AS inventory_quantity "
-            f"FROM reporting_models m {inv_join} {where_sql_mm} "
+            "m.series_name, m.collaborator_name, m.record_status, "
+            "COALESCE(inv.total_qty, 0) AS inventory_quantity "
+            f"FROM reporting_models m {inv_join} {where_sql} "
             "ORDER BY m.official_name "
             f"LIMIT {limit}"
         )
         return sql, {"mode": "semantic_compiled_missing_models"}
 
-    where = inv_filter_where(filters, catalog_style=use_catalog)
-    effective_date_start = plan_date_start or date_start
-    effective_date_end = plan_date_end or date_end
+    # ── list branch (all other queries) ────────────────────────────────────
+    where = _build_where_fragments(
+        plan.filters, plan.exclusions, catalog_style=use_catalog
+    )
+    # Date filters only apply to inventory (reporting_models has no acquired_date).
     where_filters_only = list(where)
-    if effective_date_start:
-        where.append(f"acquired_date >= '{esc(effective_date_start)}'")
-    if effective_date_end:
-        where.append(f"acquired_date <= '{esc(effective_date_end)}'")
+    if not use_catalog:
+        if effective_date_start:
+            where.append(f"acquired_date >= '{_esc(effective_date_start)}'")
+        if effective_date_end:
+            where.append(f"acquired_date <= '{_esc(effective_date_end)}'")
     where_sql = f"WHERE {' AND '.join(where)}" if where else ""
 
-    # Aggregate routing: driven by group_by, metric, and year_compare — not intent.
-    # intent=aggregate no longer exists; list intent handles all data-returning queries.
+    # Source view: catalog unless an inventory-only group_by forces a switch.
     source_view = "reporting_models" if use_catalog else "reporting_inventory"
-    supported_catalog_group = {"series_name", "family_name", "knife_type", "form_name", "collaborator_name", "steel"}
+    supported_catalog_group = {
+        "series_name", "family_name", "knife_type", "form_name", "collaborator_name", "steel"
+    }
     if use_catalog and group_by and group_by not in supported_catalog_group:
         source_view = "reporting_inventory"
-    if metric == "total_spend":
-        if source_view == "reporting_models":
-            agg_expr = "ROUND(SUM(COALESCE(purchase_price, 0)), 2) AS total_spend"
-        else:
-            agg_expr = "ROUND(SUM(COALESCE(purchase_price, 0) * COALESCE(quantity, 1)), 2) AS total_spend"
+
+    # Aggregate expressions — guard against inventory-only columns in catalog view.
+    _inv_only_metric = (
+        plan.metric in (PlanMetric.TOTAL_SPEND, PlanMetric.ESTIMATED_VALUE)
+        and source_view == "reporting_models"
+    )
+    if plan.metric == PlanMetric.TOTAL_SPEND and not _inv_only_metric:
+        agg_expr = "ROUND(SUM(COALESCE(purchase_price, 0) * COALESCE(quantity, 1)), 2) AS total_spend"
         agg_sort_col = "total_spend"
-    elif metric == "total_estimated_value":
-        if source_view == "reporting_models":
-            agg_expr = "ROUND(SUM(COALESCE(estimated_value, 0)), 2) AS total_estimated_value"
-        else:
-            agg_expr = "ROUND(SUM(COALESCE(estimated_value, 0) * COALESCE(quantity, 1)), 2) AS total_estimated_value"
+    elif plan.metric == PlanMetric.ESTIMATED_VALUE and not _inv_only_metric:
+        agg_expr = "ROUND(SUM(COALESCE(estimated_value, 0) * COALESCE(quantity, 1)), 2) AS total_estimated_value"
         agg_sort_col = "total_estimated_value"
     else:
         agg_expr = "COUNT(*) AS rows_count"
         agg_sort_col = "rows_count"
 
+    # Year-over-year comparison.
     if year_compare and not group_by:
         ya, yb = year_compare
         yc_parts = (
-            inv_filter_where(filters, catalog_style=False)
+            _build_where_fragments(plan.filters, plan.exclusions, catalog_style=False)
             if use_catalog
             else list(where_filters_only)
         )
         yc_parts.append("acquired_date IS NOT NULL")
-        yc_parts.append(f"substr(acquired_date, 1, 4) IN ('{esc(ya)}', '{esc(yb)}')")
+        yc_parts.append(f"substr(acquired_date, 1, 4) IN ('{_esc(ya)}', '{_esc(yb)}')")
         yc_where_sql = f"WHERE {' AND '.join(yc_parts)}"
         meta: dict[str, Any] = {"mode": "semantic_compiled_year_compare"}
         if use_catalog:
@@ -325,12 +373,7 @@ def _compile_legacy_dict(
         )
         return sql, meta
 
-    # Inventory-only metrics (purchase_price/estimated_value) cannot run against the catalog
-    # view (reporting_models has neither column).  When the LLM picks one of these metrics
-    # for a catalog-scoped query, skip the aggregate branches and fall through to the list
-    # path, which will return catalog rows the responder can reason about.
-    _inv_only_metric = metric in ("total_spend", "total_estimated_value") and source_view == "reporting_models"
-
+    # Grouped aggregate.
     if group_by in REPORTING_GROUPABLE_DIMENSIONS.values() and not _inv_only_metric:
         sql = (
             f"SELECT COALESCE({group_by}, 'Unknown') AS bucket, {agg_expr} "
@@ -342,21 +385,18 @@ def _compile_legacy_dict(
         )
         return sql, {"mode": "semantic_compiled_aggregate"}
 
-    if metric in ("total_spend", "total_estimated_value") and not _inv_only_metric:
+    # Scalar aggregate (no group_by, but metric is a sum/count over the whole set).
+    if plan.metric in (PlanMetric.TOTAL_SPEND, PlanMetric.ESTIMATED_VALUE) and not _inv_only_metric:
         sql = f"SELECT {agg_expr} FROM {source_view} {where_sql}"
         return sql, {"mode": "semantic_compiled_aggregate"}
 
-    raw_sort = plan.get("sort")
-    sort_field = ""
-    sort_dir = "asc"
-    if isinstance(raw_sort, dict):
-        sort_field = str(raw_sort.get("field") or "").strip()
-        sort_dir = str(raw_sort.get("direction") or "asc").strip().lower()
+    # ── List path ───────────────────────────────────────────────────────────
+    sort_field = plan.sort.field if plan.sort else ""
+    sort_dir = plan.sort.direction.value if plan.sort else "asc"
     ord_kw = "DESC" if sort_dir == "desc" else "ASC"
     line_total_sql = "(COALESCE(purchase_price, 0) * COALESCE(quantity, 1))"
 
     if use_catalog:
-        # Supported sort fields for catalog rows.
         catalog_sort_map = {
             "msrp": ("msrp", "msrp"),
             "knife_name": ("knife_name", None),
@@ -371,7 +411,8 @@ def _compile_legacy_dict(
             extra_select = ""
             order_by = "knife_name"
         sql = (
-            "SELECT model_id, official_name AS knife_name, knife_type, family_name, form_name, series_name, collaborator_name, "
+            "SELECT model_id, official_name AS knife_name, knife_type, family_name, form_name, "
+            "series_name, collaborator_name, "
             f"steel, blade_finish, handle_color, handle_type, blade_length, msrp, record_status{extra_select} "
             "FROM reporting_models "
             f"{where_sql} "
@@ -380,19 +421,24 @@ def _compile_legacy_dict(
         )
     else:
         base_select = (
-            "SELECT inventory_id, knife_name, knife_type, family_name, form_name, series_name, collaborator_name, "
-            "steel, blade_finish, handle_color, condition, quantity, location"
+            "SELECT inventory_id, knife_name, knife_type, family_name, form_name, series_name, "
+            "collaborator_name, steel, blade_finish, handle_color, condition, quantity, location"
         )
-        # Supported sort fields for inventory rows.
         inv_sort_map = {
-            "purchase_price": (f"{line_total_sql} {ord_kw}, knife_name", f", purchase_price, {line_total_sql} AS line_purchase_total"),
-            "estimated_value": (f"COALESCE(estimated_value, 0) {ord_kw}, knife_name", ", estimated_value"),
+            "purchase_price": (
+                f"{line_total_sql} {ord_kw}, knife_name",
+                f", purchase_price, {line_total_sql} AS line_purchase_total",
+            ),
+            "estimated_value": (
+                f"COALESCE(estimated_value, 0) {ord_kw}, knife_name",
+                ", estimated_value",
+            ),
             "acquired_date": (f"acquired_date {ord_kw}, knife_name", ", acquired_date"),
             "knife_name": ("knife_name", ""),
         }
-        sort_entry = inv_sort_map.get(sort_field)
-        if sort_entry:
-            order_by, extra = sort_entry
+        sort_entry_inv = inv_sort_map.get(sort_field)
+        if sort_entry_inv:
+            order_by, extra = sort_entry_inv
         else:
             order_by = "knife_name"
             extra = ""
