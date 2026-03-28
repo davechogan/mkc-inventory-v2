@@ -13,6 +13,8 @@ data/data._untracked_bak_*/
 data/*.empty-broken.*
 *.db
 *.sqlite
+# Exception: committed test fixtures
+!tests/fixtures/*.db
 
 # Machine-local workspace: exports, scratch copies, personal artifacts (see local/README.md)
 /local/**

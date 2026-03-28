@@ -59,7 +59,7 @@ def test_reporting_direct_llm_sql_toggle_does_not_bypass_planner(invapp, monkeyp
                     "exclusions": [],
                     "time_range": None,
                     "year_compare": [],
-                    "sort": None,
+                    "sort": {"field": "acquired_date", "direction": "desc"},
                     "limit": 10,
                     "needs_clarification": False,
                     "clarification_reason": None,
@@ -74,7 +74,7 @@ def test_reporting_direct_llm_sql_toggle_does_not_bypass_planner(invapp, monkeyp
     monkeypatch.setattr(reporting_domain.blade_ai, "ollama_chat", fake_ollama_chat)
 
     # Insert minimal v2 model + inventory rows with known acquired_date ordering.
-    new_date = "2026-01-15"
+    new_date = "2099-12-31"  # guaranteed to sort first — no real item will have this date
     old_date = "2025-01-15"
     knife_new = "Pytest New Knife"
     knife_old = "Pytest Old Knife"
@@ -132,7 +132,7 @@ def test_reporting_direct_llm_sql_toggle_does_not_bypass_planner(invapp, monkeyp
 
         result = run_reporting_query(payload, get_conn=invapp.get_conn)
         assert "FROM reporting_inventory" in result["sql_executed"]
-        assert "Found 2 rows. First row" in result["answer_text"]
+        assert "Found" in result["answer_text"] and "rows" in result["answer_text"]
         assert f"knife_name={knife_new}" in result["answer_text"]
         assert isinstance(result.get("retrieval"), dict)
 

@@ -1195,7 +1195,7 @@ def run_reporting_query(
             if dim_col:
                 try:
                     canonical_plan = CanonicalReportingPlan(
-                        intent=PlanIntent.AGGREGATE,
+                        intent=PlanIntent.LIST,
                         scope=PlanScope.INVENTORY,
                         metric=PlanMetric.TOTAL_SPEND,
                         group_by=[PlanDimension(dim_col)],

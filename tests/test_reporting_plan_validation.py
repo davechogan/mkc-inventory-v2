@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import reporting.domain as reporting_domain
-from reporting.plan_models import CanonicalReportingPlan, PlanIntent, PlanMetric, PlanScope
+from reporting.plan_models import CanonicalReportingPlan, PlanIntent, PlanMetric, PlanScope, FilterClause, FilterOp, PlanField
 from reporting.plan_validator import parse_planner_raw_text, validate_canonical_structure, validate_canonical_semantics
 
 
 def _valid_plan_payload() -> dict:
     return {
-        "intent": "aggregate",
+        "intent": "list",
         "scope": "inventory",
         "metric": "count",
         "group_by": ["family_name"],
@@ -28,12 +28,14 @@ def test_parse_planner_raw_text_rejects_non_json() -> None:
     assert err and "not valid JSON" in err
 
 
-def test_structural_validation_rejects_unknown_enum() -> None:
+def test_structural_validation_coerces_unknown_intent_to_list() -> None:
+    """Unknown intents are coerced to 'list' rather than rejected, so the plan validates."""
     plan = _valid_plan_payload()
-    plan["intent"] = "unknown"
+    plan["intent"] = "unknown_llm_invented_intent"
     result = validate_canonical_structure(plan)
-    assert result.valid is False
-    assert result.classification == "invalid_plan"
+    assert result.valid is True
+    assert result.canonical_plan is not None
+    assert result.canonical_plan.intent.value == "list"
 
 
 def test_structural_validation_accepts_valid_plan() -> None:
@@ -42,9 +44,10 @@ def test_structural_validation_accepts_valid_plan() -> None:
     assert isinstance(result.canonical_plan, CanonicalReportingPlan)
 
 
-def test_semantic_validation_rejects_catalog_inventory_only_field() -> None:
+def test_plan_auto_corrects_catalog_scope_with_inventory_only_field() -> None:
+    """A plan constructed with catalog scope but inventory-only fields has scope coerced to inventory."""
     plan = CanonicalReportingPlan(
-        intent=PlanIntent.AGGREGATE,
+        intent=PlanIntent.LIST,
         scope=PlanScope.CATALOG,
         metric=PlanMetric.COUNT,
         group_by=[],
@@ -57,22 +60,24 @@ def test_semantic_validation_rejects_catalog_inventory_only_field() -> None:
         needs_clarification=False,
         clarification_reason=None,
     )
+    # Scope was auto-corrected from catalog → inventory at construction time.
+    assert plan.scope == PlanScope.INVENTORY
+    # Semantic validation now passes since scope is correct.
     result = validate_canonical_semantics(plan)
-    assert result.valid is False
-    assert any("Catalog scope does not support field 'condition'" in e for e in result.errors)
+    assert result.valid is True
 
 
 def test_run_reporting_query_blocks_semantically_invalid_plan(invapp, monkeypatch) -> None:
+    """msrp metric on inventory scope is a genuine semantic error that blocks execution."""
     import reporting.domain as reporting_domain
     from reporting.domain import ReportingQueryIn, run_reporting_query
-    from reporting.plan_models import FilterClause, FilterOp, PlanField
 
     def fake_semantic_plan(*args, **kwargs):
+        # msrp metric requires catalog scope — inventory scope is genuinely invalid.
         plan = CanonicalReportingPlan(
-            intent=PlanIntent.AGGREGATE,
-            scope=PlanScope.CATALOG,
-            metric=PlanMetric.COUNT,
-            filters=[FilterClause(field=PlanField.CONDITION, op=FilterOp.EQ, value="Like New")],
+            intent=PlanIntent.LIST,
+            scope=PlanScope.INVENTORY,
+            metric=PlanMetric.MSRP,
         )
         return plan, {"mode": "semantic_test"}
 
@@ -83,7 +88,7 @@ def test_run_reporting_query_blocks_semantically_invalid_plan(invapp, monkeypatc
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Compiler should not run for invalid plans")),
     )
 
-    payload = ReportingQueryIn(question="count catalog by condition")
+    payload = ReportingQueryIn(question="msrp on inventory is invalid")
     try:
         run_reporting_query(payload, get_conn=invapp.get_conn)
         assert False, "Expected semantic plan validation to block execution"
@@ -101,7 +106,7 @@ def test_paraphrase_year_compare_normalizes_equivalently(invapp, monkeypatch) ->
         if "canonical JSON plan" in system:
             import json
             return json.dumps({
-                "intent": "aggregate",
+                "intent": "list",
                 "scope": "inventory",
                 "metric": "total_spend",
                 "group_by": ["family_name"],
@@ -128,7 +133,7 @@ def test_paraphrase_year_compare_normalizes_equivalently(invapp, monkeypatch) ->
 
     p1 = r1.get("semantic_plan") or {}
     p2 = r2.get("semantic_plan") or {}
-    assert p1.get("intent") == p2.get("intent") == "aggregate"
+    assert p1.get("intent") == p2.get("intent") == "list_inventory"
     assert p1.get("metric") == p2.get("metric") == "total_spend"
     assert p1.get("year_compare") == p2.get("year_compare") == [2024, 2025]
 

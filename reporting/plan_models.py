@@ -13,11 +13,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 
 class PlanIntent(str, Enum):
-    AGGREGATE = "aggregate"
     LIST = "list"
     MISSING_MODELS = "missing_models"
-    COMPARE = "compare"
-    COMPLETION_COST = "completion_cost"
 
 
 class PlanScope(str, Enum):
@@ -41,6 +38,7 @@ class PlanDimension(str, Enum):
     STEEL = "steel"
     CONDITION = "condition"
     LOCATION = "location"
+    KNIFE_NAME = "knife_name"
 
 
 class PlanField(str, Enum):
@@ -150,7 +148,17 @@ class CanonicalReportingPlan(BaseModel):
     @field_validator("intent", mode="before")
     @classmethod
     def _coerce_intent(cls, v: object) -> object:
-        return v if v is not None else PlanIntent.LIST
+        if v is None:
+            return PlanIntent.LIST
+        # Collapse retired/alias intents to canonical 2-intent design.
+        if v in ("aggregate", "compare", "list_inventory", "inventory_list"):
+            return "list"
+        if v in ("completion_cost", "missing_catalog", "catalog_gap"):
+            return "missing_models"
+        # Any unrecognised string from the LLM defaults to list rather than failing validation.
+        if isinstance(v, str) and v not in ("list", "missing_models"):
+            return "list"
+        return v
 
     @field_validator("scope", mode="before")
     @classmethod
@@ -160,7 +168,14 @@ class CanonicalReportingPlan(BaseModel):
     @field_validator("group_by", "filters", "exclusions", mode="before")
     @classmethod
     def _coerce_list_fields(cls, v: object) -> object:
-        return v if v is not None else []
+        if v is None:
+            return []
+        # LLM occasionally outputs filters/exclusions as a flat dict
+        # e.g. {"series_name": "Blood Brothers"} instead of
+        # [{"field": "series_name", "op": "=", "value": "Blood Brothers"}]
+        if isinstance(v, dict):
+            return [{"field": k, "op": "=", "value": val} for k, val in v.items()]
+        return v
 
     @field_validator("needs_clarification", mode="before")
     @classmethod
@@ -198,6 +213,24 @@ class CanonicalReportingPlan(BaseModel):
         if limit < 1 or limit > 1000:
             raise ValueError("limit must be in [1, 1000].")
         return limit
+
+    @model_validator(mode="after")
+    def _coerce_scope_from_fields(self) -> "CanonicalReportingPlan":
+        """Auto-upgrade scope to inventory when inventory-only fields appear in filters/exclusions.
+
+        The LLM sometimes sets scope=catalog while using fields that only exist in
+        reporting_inventory (e.g. knife_name, condition, acquired_date). Silently
+        correct rather than rejecting the whole plan.
+        """
+        _INVENTORY_ONLY = {
+            "condition", "location", "acquired_date",
+            "purchase_price", "estimated_value", "knife_name",
+        }
+        if self.scope == PlanScope.CATALOG:
+            all_field_vals = {c.field.value for c in [*self.filters, *self.exclusions]}
+            if all_field_vals & _INVENTORY_ONLY:
+                self.scope = PlanScope.INVENTORY
+        return self
 
     @model_validator(mode="after")
     def _clarification_contract(self) -> "CanonicalReportingPlan":
@@ -249,10 +282,10 @@ class CanonicalReportingPlan(BaseModel):
         raw_intent = str(plan.get("intent") or "list_inventory").strip().lower()
         intent_map = {
             "list_inventory": PlanIntent.LIST,
-            "aggregate": PlanIntent.AGGREGATE,
+            "aggregate": PlanIntent.LIST,
+            "compare": PlanIntent.LIST,
             "missing_models": PlanIntent.MISSING_MODELS,
-            "compare": PlanIntent.COMPARE,
-            "completion_cost": PlanIntent.COMPLETION_COST,
+            "completion_cost": PlanIntent.MISSING_MODELS,
             "list": PlanIntent.LIST,
         }
         intent = intent_map.get(raw_intent, PlanIntent.LIST)

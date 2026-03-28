@@ -219,41 +219,6 @@ def _compile_legacy_dict(
                 w.append(f"NOT ({expr})" if negate else expr)
         return w
 
-    if intent == "completion_cost":
-        where = ["COALESCE(inv.total_qty, 0) = 0"]
-        for k, v in filters.items():
-            if k not in model_filter_cols:
-                continue
-            negate = k.endswith("__not")
-            base_k = k[:-5] if negate else k
-            if base_k == "text_search":
-                for raw_val in values_of(v):
-                    ev = esc(raw_val)
-                    expr = (
-                        "("
-                        "lower(COALESCE(m.official_name, '')) LIKE lower('%" + ev + "%') OR "
-                        "lower(COALESCE(m.family_name, '')) LIKE lower('%" + ev + "%') OR "
-                        "lower(COALESCE(m.form_name, '')) LIKE lower('%" + ev + "%') OR "
-                        "lower(COALESCE(m.series_name, '')) LIKE lower('%" + ev + "%')"
-                        ")"
-                    )
-                    where.append(f"NOT {expr}" if negate else expr)
-                continue
-            for raw_val in values_of(v):
-                expr = cond(f"m.{base_k}", raw_val, exact=(base_k in {"series_name", "knife_type"}))
-                where.append(f"NOT ({expr})" if negate else expr)
-        sql = (
-            "SELECT "
-            "COUNT(*) AS missing_models_count, "
-            "ROUND(SUM(COALESCE(m.msrp, 0)), 2) AS estimated_completion_cost_msrp, "
-            "ROUND(AVG(COALESCE(m.msrp, 0)), 2) AS avg_missing_model_msrp "
-            "FROM reporting_models m "
-            "LEFT JOIN (SELECT knife_model_id, SUM(COALESCE(quantity, 1)) AS total_qty FROM reporting_inventory GROUP BY knife_model_id) inv "
-            "ON inv.knife_model_id = m.model_id "
-            f"WHERE {' AND '.join(where)}"
-        )
-        return sql, {"mode": "semantic_compiled_completion_cost"}
-
     if intent == "missing_models":
         where = ["COALESCE(inv.total_qty, 0) = 0"]
         for k, v in filters.items():
@@ -277,13 +242,26 @@ def _compile_legacy_dict(
             for raw_val in values_of(v):
                 expr = cond(f"m.{base_k}", raw_val, exact=(base_k in {"series_name", "knife_type"}))
                 where.append(f"NOT ({expr})" if negate else expr)
+        inv_join = (
+            "LEFT JOIN (SELECT knife_model_id, SUM(COALESCE(quantity, 1)) AS total_qty "
+            "FROM reporting_inventory GROUP BY knife_model_id) inv "
+            "ON inv.knife_model_id = m.model_id"
+        )
+        where_sql_mm = f"WHERE {' AND '.join(where)}"
+        if metric == "msrp":
+            # Completion-cost mode: total MSRP to acquire all missing models.
+            sql = (
+                "SELECT "
+                "COUNT(*) AS missing_models_count, "
+                "ROUND(SUM(COALESCE(m.msrp, 0)), 2) AS estimated_completion_cost_msrp, "
+                "ROUND(AVG(COALESCE(m.msrp, 0)), 2) AS avg_missing_model_msrp "
+                f"FROM reporting_models m {inv_join} {where_sql_mm}"
+            )
+            return sql, {"mode": "semantic_compiled_completion_cost"}
         sql = (
             "SELECT m.model_id, m.official_name, m.knife_type, m.family_name, m.form_name, "
             "m.series_name, m.collaborator_name, m.record_status, COALESCE(inv.total_qty, 0) AS inventory_quantity "
-            "FROM reporting_models m "
-            "LEFT JOIN (SELECT knife_model_id, SUM(COALESCE(quantity, 1)) AS total_qty FROM reporting_inventory GROUP BY knife_model_id) inv "
-            "ON inv.knife_model_id = m.model_id "
-            f"WHERE {' AND '.join(where)} "
+            f"FROM reporting_models m {inv_join} {where_sql_mm} "
             "ORDER BY m.official_name "
             f"LIMIT {limit}"
         )
@@ -299,58 +277,73 @@ def _compile_legacy_dict(
         where.append(f"acquired_date <= '{esc(effective_date_end)}'")
     where_sql = f"WHERE {' AND '.join(where)}" if where else ""
 
-    if intent == "aggregate":
-        source_view = "reporting_models" if use_catalog else "reporting_inventory"
-        supported_catalog_group = {"series_name", "family_name", "knife_type", "form_name", "collaborator_name", "steel"}
-        if use_catalog and group_by and group_by not in supported_catalog_group:
-            source_view = "reporting_inventory"
-        if metric == "total_spend":
-            expr = "ROUND(SUM(COALESCE(purchase_price, 0) * COALESCE(quantity, 1)), 2) AS total_spend"
-            sort_col = "total_spend"
-        elif metric == "total_estimated_value":
-            expr = "ROUND(SUM(COALESCE(estimated_value, 0) * COALESCE(quantity, 1)), 2) AS total_estimated_value"
-            sort_col = "total_estimated_value"
+    # Aggregate routing: driven by group_by, metric, and year_compare — not intent.
+    # intent=aggregate no longer exists; list intent handles all data-returning queries.
+    source_view = "reporting_models" if use_catalog else "reporting_inventory"
+    supported_catalog_group = {"series_name", "family_name", "knife_type", "form_name", "collaborator_name", "steel"}
+    if use_catalog and group_by and group_by not in supported_catalog_group:
+        source_view = "reporting_inventory"
+    if metric == "total_spend":
+        if source_view == "reporting_models":
+            agg_expr = "ROUND(SUM(COALESCE(purchase_price, 0)), 2) AS total_spend"
         else:
-            expr = "COUNT(*) AS rows_count"
-            sort_col = "rows_count"
-            if source_view == "reporting_models":
-                expr = "COUNT(*) AS rows_count"
-        if year_compare and not group_by:
-            ya, yb = year_compare
-            yc_parts = (
-                inv_filter_where(filters, catalog_style=False)
-                if use_catalog
-                else list(where_filters_only)
-            )
-            yc_parts.append("acquired_date IS NOT NULL")
-            yc_parts.append(f"substr(acquired_date, 1, 4) IN ('{esc(ya)}', '{esc(yb)}')")
-            yc_where_sql = f"WHERE {' AND '.join(yc_parts)}"
-            meta: dict[str, Any] = {"mode": "semantic_compiled_year_compare"}
-            if use_catalog:
-                meta["year_compare_inventory_note"] = (
-                    "Catalog filters preserved; results are bucketed by inventory acquired_date "
-                    "(year-over-year needs collection dates, not the catalog view alone)."
-                )
-            sql = (
-                "SELECT substr(acquired_date, 1, 4) AS bucket, "
-                f"{expr} "
-                "FROM reporting_inventory "
-                f"{yc_where_sql} "
-                "GROUP BY bucket "
-                "ORDER BY bucket"
-            )
-            return sql, meta
-        if group_by in REPORTING_GROUPABLE_DIMENSIONS.values():
-            sql = (
-                f"SELECT COALESCE({group_by}, 'Unknown') AS bucket, {expr} "
-                f"FROM {source_view} "
-                f"{where_sql} "
-                "GROUP BY bucket "
-                f"ORDER BY {sort_col} DESC "
-                f"LIMIT {limit}"
-            )
+            agg_expr = "ROUND(SUM(COALESCE(purchase_price, 0) * COALESCE(quantity, 1)), 2) AS total_spend"
+        agg_sort_col = "total_spend"
+    elif metric == "total_estimated_value":
+        if source_view == "reporting_models":
+            agg_expr = "ROUND(SUM(COALESCE(estimated_value, 0)), 2) AS total_estimated_value"
         else:
-            sql = f"SELECT {expr} FROM {source_view} {where_sql}"
+            agg_expr = "ROUND(SUM(COALESCE(estimated_value, 0) * COALESCE(quantity, 1)), 2) AS total_estimated_value"
+        agg_sort_col = "total_estimated_value"
+    else:
+        agg_expr = "COUNT(*) AS rows_count"
+        agg_sort_col = "rows_count"
+
+    if year_compare and not group_by:
+        ya, yb = year_compare
+        yc_parts = (
+            inv_filter_where(filters, catalog_style=False)
+            if use_catalog
+            else list(where_filters_only)
+        )
+        yc_parts.append("acquired_date IS NOT NULL")
+        yc_parts.append(f"substr(acquired_date, 1, 4) IN ('{esc(ya)}', '{esc(yb)}')")
+        yc_where_sql = f"WHERE {' AND '.join(yc_parts)}"
+        meta: dict[str, Any] = {"mode": "semantic_compiled_year_compare"}
+        if use_catalog:
+            meta["year_compare_inventory_note"] = (
+                "Catalog filters preserved; results are bucketed by inventory acquired_date "
+                "(year-over-year needs collection dates, not the catalog view alone)."
+            )
+        sql = (
+            "SELECT substr(acquired_date, 1, 4) AS bucket, "
+            f"{agg_expr} "
+            "FROM reporting_inventory "
+            f"{yc_where_sql} "
+            "GROUP BY bucket "
+            "ORDER BY bucket"
+        )
+        return sql, meta
+
+    # Inventory-only metrics (purchase_price/estimated_value) cannot run against the catalog
+    # view (reporting_models has neither column).  When the LLM picks one of these metrics
+    # for a catalog-scoped query, skip the aggregate branches and fall through to the list
+    # path, which will return catalog rows the responder can reason about.
+    _inv_only_metric = metric in ("total_spend", "total_estimated_value") and source_view == "reporting_models"
+
+    if group_by in REPORTING_GROUPABLE_DIMENSIONS.values() and not _inv_only_metric:
+        sql = (
+            f"SELECT COALESCE({group_by}, 'Unknown') AS bucket, {agg_expr} "
+            f"FROM {source_view} "
+            f"{where_sql} "
+            "GROUP BY bucket "
+            f"ORDER BY {agg_sort_col} DESC "
+            f"LIMIT {limit}"
+        )
+        return sql, {"mode": "semantic_compiled_aggregate"}
+
+    if metric in ("total_spend", "total_estimated_value") and not _inv_only_metric:
+        sql = f"SELECT {agg_expr} FROM {source_view} {where_sql}"
         return sql, {"mode": "semantic_compiled_aggregate"}
 
     raw_sort = plan.get("sort")
@@ -359,15 +352,30 @@ def _compile_legacy_dict(
     if isinstance(raw_sort, dict):
         sort_field = str(raw_sort.get("field") or "").strip()
         sort_dir = str(raw_sort.get("direction") or "asc").strip().lower()
+    ord_kw = "DESC" if sort_dir == "desc" else "ASC"
     line_total_sql = "(COALESCE(purchase_price, 0) * COALESCE(quantity, 1))"
 
     if use_catalog:
+        # Supported sort fields for catalog rows.
+        catalog_sort_map = {
+            "msrp": ("msrp", "msrp"),
+            "knife_name": ("knife_name", None),
+            "official_name": ("knife_name", None),
+        }
+        sort_entry = catalog_sort_map.get(sort_field)
+        if sort_entry:
+            sort_col, extra_col = sort_entry
+            extra_select = f", {extra_col}" if extra_col else ""
+            order_by = f"{sort_col} {ord_kw}, knife_name"
+        else:
+            extra_select = ""
+            order_by = "knife_name"
         sql = (
             "SELECT model_id, official_name AS knife_name, knife_type, family_name, form_name, series_name, collaborator_name, "
-            "steel, blade_finish, handle_color, handle_type, blade_length, msrp, record_status "
+            f"steel, blade_finish, handle_color, handle_type, blade_length, msrp, record_status{extra_select} "
             "FROM reporting_models "
             f"{where_sql} "
-            "ORDER BY knife_name "
+            f"ORDER BY {order_by} "
             f"LIMIT {limit}"
         )
     else:
@@ -375,10 +383,16 @@ def _compile_legacy_dict(
             "SELECT inventory_id, knife_name, knife_type, family_name, form_name, series_name, collaborator_name, "
             "steel, blade_finish, handle_color, condition, quantity, location"
         )
-        if sort_field == "purchase_price" and sort_dir in ("asc", "desc"):
-            ord_kw = "DESC" if sort_dir == "desc" else "ASC"
-            order_by = f"{line_total_sql} {ord_kw}, knife_name"
-            extra = f", purchase_price, {line_total_sql} AS line_purchase_total"
+        # Supported sort fields for inventory rows.
+        inv_sort_map = {
+            "purchase_price": (f"{line_total_sql} {ord_kw}, knife_name", f", purchase_price, {line_total_sql} AS line_purchase_total"),
+            "estimated_value": (f"COALESCE(estimated_value, 0) {ord_kw}, knife_name", ", estimated_value"),
+            "acquired_date": (f"acquired_date {ord_kw}, knife_name", ", acquired_date"),
+            "knife_name": ("knife_name", ""),
+        }
+        sort_entry = inv_sort_map.get(sort_field)
+        if sort_entry:
+            order_by, extra = sort_entry
         else:
             order_by = "knife_name"
             extra = ""

@@ -59,7 +59,7 @@ REPORTING_FORBIDDEN_SQL = (
 # ---------------------------------------------------------------------------
 # Plan vocabulary
 # ---------------------------------------------------------------------------
-REPORTING_INTENTS = {"missing_models", "list_inventory", "aggregate", "completion_cost"}
+REPORTING_INTENTS = {"missing_models", "list_inventory"}
 
 REPORTING_GROUPABLE_DIMENSIONS = {
     "series": "series_name",

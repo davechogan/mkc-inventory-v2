@@ -52,7 +52,7 @@ _PLANNER_SYSTEM = (
     "Return JSON only — no prose, no markdown fences, no explanation. Do not generate SQL.\n\n"
     "Required JSON structure:\n"
     "{\n"
-    '  "intent": "aggregate | list | missing_models | completion_cost",\n'
+    '  "intent": "list | missing_models",\n'
     '  "scope": "inventory | catalog",\n'
     '  "metric": "count | total_spend | estimated_value | msrp",\n'
     '  "group_by": [],\n'
@@ -66,22 +66,25 @@ _PLANNER_SYSTEM = (
     '  "clarification_reason": null\n'
     "}\n\n"
     "intent:\n"
-    "  aggregate       — summaries, totals, counts, breakdowns by group\n"
-    "  list            — individual rows from inventory\n"
-    "  missing_models  — catalog models not present in my inventory\n"
-    "  completion_cost — MSRP cost to acquire all missing catalog models\n\n"
+    "  list            — all data-returning questions: individual rows, counts, totals, or breakdowns.\n"
+    "                    Use group_by to break down by a dimension. Use metric to control what is measured.\n"
+    "  missing_models  — catalog models not present in my inventory.\n"
+    "                    Use metric=msrp to get the total MSRP cost to acquire all missing models.\n\n"
     "scope: inventory (knives you own) or catalog (all MKC models ever made).\n"
-    "  inventory signals: 'I have', 'I own', 'my collection', 'my knives', 'I bought', 'I paid'\n"
+    "  inventory signals: 'I have', 'I own', 'do I own', 'do I have', 'own one', 'my collection',\n"
+    "    'my knives', 'I bought', 'I paid', 'in my collection'\n"
     "  catalog signals: 'MKC has', 'MKC makes', 'MKC offers', 'MKC produces', 'MKC carries',\n"
     "    'does MKC make', 'are available', 'has MKC released', 'MKC catalog', 'all MKC models'\n"
     "  Default to inventory when the subject is clearly the user's possessions.\n"
     "  Use catalog when the subject is MKC's product line, regardless of what the user owns.\n"
+    "  IMPORTANT: scope can change between turns. Even if prior turns used catalog scope,\n"
+    "    switch to inventory when the current question is about what the user personally owns.\n"
     "  If genuinely ambiguous and cannot be inferred from context, set needs_clarification=true.\n\n"
     "metric: count, total_spend, estimated_value, msrp\n\n"
     "group_by: array of zero or more dimension names:\n"
     "  series_name, family_name, knife_type, form_name, collaborator_name, steel, condition, location\n\n"
-    "filters: array of {\"field\": \"...\", \"op\": \"...\", \"value\": ...} for required matches.\n"
-    "exclusions: array of {\"field\": \"...\", \"op\": \"...\", \"value\": ...} for NOT/except/exclude conditions.\n"
+    "filters: ARRAY of {\"field\": \"...\", \"op\": \"...\", \"value\": ...} for required matches. Always an array, never a dict.\n"
+    "exclusions: ARRAY of {\"field\": \"...\", \"op\": \"...\", \"value\": ...} for NOT/except/exclude conditions. Always an array, never a dict.\n"
     "  Trigger words: 'exclude', 'except', 'without', 'if you take out', 'minus', 'not counting',\n"
     "    'not including', 'ignore', 'leave out'.\n"
     "  Field mapping for exclusions:\n"
@@ -201,14 +204,17 @@ def _reporting_llm_plan(
 def _reporting_has_substantive_rows(intent: Optional[str], rows: list[dict[str, Any]]) -> bool:
     if not rows:
         return False
-    if intent in {"aggregate", "completion_cost"}:
-        numeric_keys = (
-            "rows_count",
-            "total_spend",
-            "total_estimated_value",
-            "missing_models_count",
-            "estimated_completion_cost_msrp",
-        )
+    # For aggregate-style results (GROUP BY, scalar sums, completion cost), verify
+    # at least one numeric value is non-zero. Detected by known aggregate column names.
+    numeric_keys = (
+        "rows_count",
+        "total_spend",
+        "total_estimated_value",
+        "missing_models_count",
+        "estimated_completion_cost_msrp",
+    )
+    row_cols = set(rows[0].keys())
+    if row_cols & set(numeric_keys):
         for r in rows:
             for k in numeric_keys:
                 try:

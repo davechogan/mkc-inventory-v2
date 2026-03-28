@@ -44,9 +44,9 @@ def test_rpt005_missing_models_no_name_returns_none():
 
 
 def test_rpt005_non_missing_models_links_to_inventory():
-    """Negative case: aggregate/list intent must still produce inventory links."""
+    """Negative case: list intent must still produce inventory links."""
     row = {"family_name": "Blackfoot", "series_name": "Core"}
-    link = _reporting_build_drill_link(row, intent="aggregate")
+    link = _reporting_build_drill_link(row, intent="list")
     assert link is not None
     assert link.startswith("/?")
     assert "master.html" not in link

@@ -16,25 +16,26 @@ def test_validate_sql_rejects_unapproved_source(invapp):
     assert excinfo.value.status_code == 400
 
 
-def test_plan_to_sql_aggregate_uses_expected_source_view(invapp):
-    # Catalog scope should compile to `reporting_models`.
+def test_plan_to_sql_grouped_uses_expected_source_view(invapp):
+    # Catalog scope with group_by should compile to `reporting_models` with GROUP BY.
     plan_catalog = CanonicalReportingPlan.from_legacy_semantic_plan(
         {
-        "intent": "aggregate",
+        "intent": "list",
         "metric": "count",
         "scope": "catalog",
-        "group_by": None,
+        "group_by": "series_name",
         "filters": {},
         }
     )
     sql, meta = invapp._reporting_plan_to_sql(plan_catalog, date_start=None, date_end=None, max_rows=50)
     assert "FROM reporting_models" in sql
+    assert "GROUP BY bucket" in sql
     assert meta.get("mode") == "semantic_compiled_aggregate"
 
-    # Inventory scope should compile to `reporting_inventory`.
+    # Inventory scope with group_by should compile to `reporting_inventory` with GROUP BY.
     plan_inventory = CanonicalReportingPlan.from_legacy_semantic_plan(
         {
-        "intent": "aggregate",
+        "intent": "list",
         "metric": "count",
         "scope": "inventory",
         "group_by": "family_name",
@@ -52,7 +53,7 @@ def test_plan_to_sql_catalog_falls_back_for_inventory_only_group_by(invapp):
     # to the inventory view to satisfy the GROUP BY.
     plan = CanonicalReportingPlan.from_legacy_semantic_plan(
         {
-        "intent": "aggregate",
+        "intent": "list",
         "metric": "count",
         "scope": "catalog",
         "group_by": "condition",
@@ -66,7 +67,7 @@ def test_plan_to_sql_catalog_falls_back_for_inventory_only_group_by(invapp):
 
 def test_plan_to_sql_rejects_unvalidated_dict(invapp):
     with pytest.raises(TypeError):
-        invapp._reporting_plan_to_sql({"intent": "aggregate"}, date_start=None, date_end=None, max_rows=50)
+        invapp._reporting_plan_to_sql({"intent": "list"}, date_start=None, date_end=None, max_rows=50)
 
 
 def test_plan_to_sql_list_inventory_orders_by_purchase_price_when_sort_set(invapp):

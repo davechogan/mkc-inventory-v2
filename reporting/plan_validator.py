@@ -13,7 +13,6 @@ from reporting.plan_models import (
     FilterOp,
     PlanDimension,
     PlanField,
-    PlanIntent,
     PlanMetric,
     PlanScope,
 )
@@ -94,22 +93,6 @@ def validate_canonical_semantics(plan: CanonicalReportingPlan) -> PlanValidation
             canonical_plan=plan,
             raw_plan=plan.model_dump(),
         )
-
-    if plan.intent == PlanIntent.AGGREGATE and plan.metric not in {
-        PlanMetric.COUNT,
-        PlanMetric.TOTAL_SPEND,
-        PlanMetric.ESTIMATED_VALUE,
-        PlanMetric.MSRP,
-    }:
-        errors.append("Aggregate intent requires a supported aggregate metric.")
-
-    if plan.intent == PlanIntent.LIST and plan.metric not in {PlanMetric.COUNT, PlanMetric.ESTIMATED_VALUE}:
-        errors.append("List intent uses an incompatible metric.")
-
-    if plan.intent in {PlanIntent.COMPARE, PlanIntent.AGGREGATE} and not plan.group_by and not plan.year_compare:
-        # We allow scalar aggregates; compare should include grouping or year_compare.
-        if plan.intent == PlanIntent.COMPARE:
-            errors.append("Compare intent must include group_by or year_compare.")
 
     if plan.year_compare and plan.time_range and (plan.time_range.start or plan.time_range.end):
         errors.append("year_compare conflicts with explicit time_range; use only one.")
