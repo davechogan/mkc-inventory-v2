@@ -1,5 +1,5 @@
 # MKC Inventory — Master Implementation Plan
-*Created: 2026-03-27. Last updated: 2026-03-27 (Phase Intent-Refactor complete). This document is the canonical planning artifact for the current implementation effort. A new agent session should read this file first and use it to orient all work. The Artifacts repo Slice Tracker has been deprecated; this file is the single source of truth for remaining and completed work.*
+*Created: 2026-03-27. Last updated: 2026-03-28 (Phase Canonical-Bridge complete — legacy compiler removed, query rewriter added, field coverage expanded, artifacts submodule established). This document is the canonical planning artifact for the current implementation effort. A new agent session should read `CLAUDE.md` first, then this file. The Artifacts repo Slice Tracker has been deprecated; this file is the single source of truth for remaining and completed work.*
 
 ---
 
@@ -22,10 +22,14 @@ All work should follow `AI_Coding_Standards_and_Rules.md` (copy stored in the Ar
 **MKC Inventory** is a personal knife collection management and natural-language reporting application for Montana Knife Company products. It runs locally on a home network (Mac Studio or equivalent). There is no cloud dependency.
 
 **Two repos:**
-- `MKC_Inventory` — the application: `https://github.com/davechogan/mkc-inventory-v2`
+- `MKC_Inventory` — the application: `https://github.com/davechogan/mkc-inventory-v2` (public)
   - Local path: `/Users/dhogan/Applications/MKC_Inventory/`
-- `Artifacts` — snapshot/provenance store for DB backups, exports, and plans: `https://github.com/davechogan/Artifacts`
-  - Local path: `/Users/dhogan/Applications/Artifacts/`
+- `mkc-inventory-artifacts` — private artifacts submodule: `git@github.com:davechogan/mkc-inventory-artifacts.git`
+  - Mounted at `artifacts/` inside the main repo via git submodule
+  - Contains: DB snapshots, test seed DB, plans, scripts, metadata
+  - First-time setup: `git submodule update --init`
+  - **Never edit files in `artifacts/` and commit them to the main repo** — changes are tracked by the submodule's own git history
+  - Use `scripts/commit.sh "message"` for all commits to keep both repos in sync
 
 **Stack:** Python 3.11, FastAPI, Uvicorn, SQLite (migrating to Postgres), Ollama (local LLM inference), sentence-transformers, ChromaDB (optional retrieval backend).
 
@@ -365,6 +369,54 @@ After:
 
 ---
 
+### Phase Canonical-Bridge — Legacy compiler removal, query rewriter, field coverage ✅ COMPLETE (2026-03-28)
+
+**Goal:** Complete the canonical-plan-only compiler contract, improve retrieval quality for follow-up questions, and expand the field vocabulary to cover all schema columns.
+
+**CB-1 — Remove legacy compiler adapter** ✅
+- `_compile_legacy_dict` and `to_legacy_semantic_plan()` fully removed from compiler and plan_models
+- `compile_plan()` accepts only `CanonicalReportingPlan` — no fallback dict path remains
+- All tests updated to use canonical JSON fake LLM responses; zero legacy references in codebase
+
+**CB-2 — LLM query rewriter for contextual Chroma retrieval** ✅
+- Added `_reporting_rewrite_query_for_retrieval()` in `reporting/planner.py`
+- Uses `qwen2.5:7b-instruct` (lightweight, ~250ms) to rewrite follow-up questions into standalone questions before Chroma retrieval
+- Resolves pronouns ("those", "them", "it") to concrete entity names from last query state
+- Context passed to rewriter is intentionally restricted to `scope`, `filters`, `group_by`, `year_compare` — `sort` and `limit` excluded because they inject misleading signals into the rewritten query
+- Fallback to original question on any rewriter failure — retrieval always proceeds
+- Added `REPORTING_REWRITER_MODEL` constant (env-overridable, default `qwen2.5:7b-instruct`)
+
+**CB-3 — Field coverage expansion** ✅
+- Added 9 fields to `PlanField`: `blade_finish`, `blade_color`, `handle_color`, `handle_type`, `blade_length`, `quantity`, `purchase_source`, `generation_label`, `size_modifier`
+- Added `blade_finish`, `handle_color` to `PlanDimension` (group-by capable)
+- Updated `_inv_only` / `_cat_only` skip sets and `supported_catalog_group` in compiler
+- Added `blade_finish`, `handle_color` to `REPORTING_GROUPABLE_DIMENSIONS`
+- Added field glossary to planner system prompt (prevents `knife_type`/`knife_name` confusion)
+- Added 9 new entries to `reporting/corpus_docs/field_dictionary.json` (triggers Chroma auto-rebuild)
+
+**CB-4 — Artifacts submodule** ✅
+- Created private `mkc-inventory-artifacts` repo; added as git submodule at `artifacts/`
+- Migrated DB snapshots, plans, scripts, metadata from shared Artifacts repo
+- Seed DB moved from `tests/fixtures/` to `artifacts/db_snapshots/mkc_inventory_seed.db`
+- `tests/conftest.py` copies from submodule path with fallback to `tests/fixtures/` for CI without submodule access
+- Added `scripts/commit.sh` — synchronized commit wrapper for main + submodule
+- Added `.gitattributes` to exclude `artifacts/` from releases
+- Updated `.cursor/rules/artifacts-repo-workflow.mdc` and `git-workflow.mdc`
+
+**CB-5 — Documentation** ✅
+- Created `CLAUDE.md` at repo root — agent/developer orientation guide covering commit workflow, architecture, key files, DB safety, and all architectural decisions
+- Read `CLAUDE.md` before starting any work in this repo
+
+**Acceptance criteria — all met:**
+- [x] No `to_legacy_semantic_plan`, `_compile_legacy_dict`, or `from_legacy_semantic_plan` anywhere in codebase
+- [x] Query rewriter step runs before retrieval; follow-up pronouns resolve correctly
+- [x] All new `PlanField` values compile correctly in both inventory and catalog scope
+- [x] 53 unit tests pass; 3 live LLM quality tests pass
+- [x] Artifacts submodule committed and pushed; seed DB removed from main repo
+- [x] `scripts/commit.sh` in place and documented in `.cursor/rules/git-workflow.mdc`
+
+---
+
 ### Phase E — Postgres migration
 
 **Sequence note:** Do this after Phases A–D. Migrating to Postgres on top of messy SQLite code means migrating the mess.
@@ -439,13 +491,14 @@ knife_model_image_files (
 
 ---
 
-## 6. Artifacts repo integration
+## 6. Artifacts submodule integration
 
 For each major phase completion:
 1. Take a DB snapshot: `scripts/backup_mkc_db.sh`
-2. Copy snapshot to `Artifacts/projects/mkc-inventory-v2/db_snapshots/`
-3. Write a provenance JSON (based on `Artifacts/projects/mkc-inventory-v2/metadata/provenance.template.json`) with: source commit SHA, timestamp, artifact list with SHA256 hashes
-4. Commit to the Artifacts repo: `git commit -m "snapshot: phase-X-complete"`
+2. Copy compressed snapshot to `artifacts/db_snapshots/<YYYY-MM-DD>/`
+3. Update `artifacts/db_snapshots/mkc_inventory_seed.db` with the latest uncompressed DB if test expectations have changed
+4. Write a provenance JSON (based on `artifacts/metadata/provenance.template.json`) with: source commit SHA, timestamp, artifact list with SHA256 hashes
+5. Use `scripts/commit.sh "snapshot: phase-X-complete"` — this commits the submodule and main repo together
 
 ---
 
@@ -501,20 +554,30 @@ POST `/api/ai/identify` — given an uploaded photo and/or text description, the
 
 ## 9. What a new agent session should do first
 
-1. Read this file completely.
-2. Read `reporting/Reporting_AI_Architecture_vNext.md` — canonical pipeline spec.
+1. Read `CLAUDE.md` at the repo root — covers commit workflow, architecture, DB safety, and key decisions.
+2. Read this file completely.
 3. Read `reporting/plan_models.py` — canonical plan data model (2-intent design: `list` + `missing_models`).
-4. Read `docs/reference/reporting_defect_backlog.md` — known defects.
-5. Check the current git status: `git status` and `git log --oneline -10`
-6. Determine which phase is next based on the acceptance criteria above.
-7. Create the appropriate feature branch before making any changes.
-8. Begin with the first incomplete item in the current phase.
+4. Check git status: `git status` and `git log --oneline -10`
+5. Determine which phase is next based on the acceptance criteria above.
+6. Create the appropriate feature branch before making any changes.
+7. Begin with the first incomplete item in the current phase.
 
-**Current reporting architecture state (as of Phase Intent-Refactor):**
-- Intent taxonomy: 2 intents only — `list` (all data-returning queries) and `missing_models` (catalog-minus-inventory JOIN)
-- Backward compat: `to_legacy_semantic_plan()` still emits `"list_inventory"` for the legacy compiler dict interface
-- Compiler input: `CanonicalReportingPlan` object; internally calls `_compile_legacy_dict` via adapter
-- Seed DB: `tests/fixtures/mkc_inventory_seed.db` — committed snapshot; update deliberately when catalog/inventory changes affect test expectations
-- Live LLM tests: `pytest -m live_llm` — require Ollama at `192.168.50.196:11434`; conftest defaults to `lexical` retrieval backend for unit tests
+**Current architecture state (as of Phase Canonical-Bridge, 2026-03-28):**
+
+*Reporting pipeline — 6 steps in order:*
+1. Query rewriter (`qwen2.5:7b-instruct`) — resolves follow-up pronouns into standalone questions for retrieval
+2. Chroma retrieval — semantic search over `reporting/corpus_docs/` to ground the planner
+3. LLM planner (`qwen2.5:32b-instruct`) — produces `CanonicalReportingPlan` JSON
+4. Plan validation — Pydantic coercion + hard validation (`reporting/plan_models.py`, `reporting/plan_validator.py`)
+5. SQL compiler — deterministic plan→SQL (`reporting/compiler.py`); no LLM involvement
+6. Execution + response (`reporting/domain.py`)
+
+*Key facts:*
+- Intent taxonomy: 2 intents only — `list` and `missing_models`. No legacy intents anywhere.
+- Compiler input: `CanonicalReportingPlan` only — no dict adapter, no legacy path.
+- No `to_legacy_semantic_plan()`, `_compile_legacy_dict`, or `from_legacy_semantic_plan` exist anywhere.
+- Seed DB: `artifacts/db_snapshots/mkc_inventory_seed.db` (private submodule). `conftest.py` copies to temp before each test run. Update deliberately when catalog/inventory changes affect test expectations.
+- Live LLM tests: `pytest -m live_llm` — require Ollama at `192.168.50.196:11434`; unit tests default to `lexical` retrieval backend.
+- All commits must use `scripts/commit.sh "message"` to keep the artifacts submodule in sync.
 
 Do not attempt multiple phases in a single session without explicit instruction.
