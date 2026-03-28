@@ -91,12 +91,25 @@ def create_v2_router(
                 (CASE WHEN kmi.image_blob IS NOT NULL AND length(kmi.image_blob) > 0
                   THEN 1 ELSE 0 END) AS has_identifier_image,
                 COALESCE(
+                  -- Level 1: exact handle color match (normalized, slash-tolerant)
                   (SELECT url_path FROM knife_model_image_files
                    WHERE model_slug = km.slug
-                     AND LOWER(color_name) = LOWER(COALESCE(NULLIF(i.handle_color,''), km.handle_color, ''))
+                     AND REPLACE(REPLACE(LOWER(color_name), ' ', ''), '/', '')
+                       = REPLACE(REPLACE(LOWER(COALESCE(NULLIF(i.handle_color,''), km.handle_color, '')), ' ', ''), '/', '')
                    LIMIT 1),
+                  -- Level 2: blade_color + handle_color combined (e.g. "Steel Desert Ironwood")
+                  (SELECT url_path FROM knife_model_image_files
+                   WHERE model_slug = km.slug
+                     AND REPLACE(REPLACE(LOWER(color_name), ' ', ''), '/', '')
+                       = REPLACE(REPLACE(LOWER(
+                           TRIM(COALESCE(NULLIF(i.blade_color,''), km.blade_color, '')
+                             || ' ' || COALESCE(NULLIF(i.handle_color,''), km.handle_color, ''))
+                         ), ' ', ''), '/', '')
+                   LIMIT 1),
+                  -- Level 3: primary image for this model
                   (SELECT url_path FROM knife_model_image_files
                    WHERE model_slug = km.slug AND is_primary = 1 LIMIT 1),
+                  -- Level 4: any image for this model (before falling back to BLOB)
                   (SELECT url_path FROM knife_model_image_files
                    WHERE model_slug = km.slug LIMIT 1)
                 ) AS colorway_image_url
