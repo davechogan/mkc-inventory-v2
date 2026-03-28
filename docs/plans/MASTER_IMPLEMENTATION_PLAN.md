@@ -1,5 +1,5 @@
 # MKC Inventory — Master Implementation Plan
-*Created: 2026-03-27. Last updated: 2026-03-27. This document is the canonical planning artifact for the current implementation effort. A new agent session should read this file first and use it to orient all work. The Artifacts repo Slice Tracker has been deprecated; this file is the single source of truth for remaining and completed work.*
+*Created: 2026-03-27. Last updated: 2026-03-27 (Phase Intent-Refactor complete). This document is the canonical planning artifact for the current implementation effort. A new agent session should read this file first and use it to orient all work. The Artifacts repo Slice Tracker has been deprecated; this file is the single source of truth for remaining and completed work.*
 
 ---
 
@@ -314,6 +314,57 @@ After:
 
 ---
 
+### Phase Intent-Refactor — Reporting intent taxonomy & compiler robustness ✅ COMPLETE (2026-03-27)
+
+**Goal:** Replace the ad-hoc 5-intent taxonomy (grown through whack-a-mole bug fixes) with a principled 2-intent design, and make the compiler + planner robust against LLM output variation.
+
+**Key insight:** RAG/vector retrieval handles semantic understanding. The only structural SQL difference that justifies a separate intent is the LEFT JOIN catalog-minus-inventory shape. Everything else is just `SELECT` — shape is driven by `group_by`, `metric`, `sort`, and `year_compare`.
+
+**Changes:**
+
+**IR-1 — 2-intent design** ✅
+- `PlanIntent` enum reduced to `LIST` (all data-returning queries) and `MISSING_MODELS` (catalog-minus-inventory JOIN)
+- `_coerce_intent` backward-compat validator maps: `aggregate/compare/list_inventory → list`, `completion_cost → missing_models`, any unknown LLM string → `list` (robust against hallucinated intent names)
+- `missing_models` branch routes on `metric`: `metric=msrp` → completion cost aggregate; else → list of missing rows
+
+**IR-2 — Compiler robustness** ✅
+- Inventory-only metrics (`total_spend`, `total_estimated_value`) skip aggregate path when `source_view=reporting_models` (catalog view has no `quantity`/`purchase_price`/`estimated_value` columns) — falls through to list path
+- Full sort support: `acquired_date`, `estimated_value`, `knife_name` for inventory; `msrp`, `knife_name` for catalog
+- Guard added at grouped-aggregate branch for same catalog-incompatible metric case
+
+**IR-3 — Scope auto-correction** ✅
+- New model validator `_coerce_scope_from_fields`: if `scope=catalog` but any filter/exclusion uses an inventory-only field (`knife_name`, `condition`, `acquired_date`, `purchase_price`, `estimated_value`, `location`), silently upgrades scope to `inventory`. Recovers from LLM scope misattribution without rejecting the plan.
+
+**IR-4 — Planner prompt improvements** ✅
+- Intent list reduced to `list | missing_models`
+- Scope inventory signals expanded: added `do I own`, `do I have`, `own one`, `in my collection`
+- Explicit note that scope can switch between turns even when prior turns used catalog scope
+
+**IR-5 — Test seed DB** ✅
+- `tests/fixtures/mkc_inventory_seed.db` committed: point-in-time snapshot (90 catalog models, 88 inventory items, 2026-03-27)
+- Key known facts: Blood Brothers catalog = 3 models (Blackfoot 2.0 $400, Mini Speedgoat 2.0 $250, Wargoat $400); owned = Blackfoot 2.0 (qty 2, $800 line total) + Mini Speedgoat 2.0 ($250) = $1,050
+- `conftest.py` copies seed to temp path before tests — tests never touch the production DB
+- `.gitignore` updated: `!tests/fixtures/*.db` exception added
+
+**IR-6 — Live LLM quality tests** ✅
+- `tests/test_reporting_live_llm_quality.py` rewritten: uses seed DB, correct line-total dollar amounts (qty×price), 3 multi-turn regression scenarios covering exclusions, filter chains, and catalog→inventory scope switching
+- `pytest -m live_llm` runs all 3 tests consistently green
+
+**IR-7 — Validation tests updated** ✅
+- `test_structural_validation_rejects_unknown_enum` → `test_structural_validation_coerces_unknown_intent_to_list`
+- `test_semantic_validation_rejects_catalog_inventory_only_field` → `test_plan_auto_corrects_catalog_scope_with_inventory_only_field`
+- `test_run_reporting_query_blocks_semantically_invalid_plan` updated to use `metric=msrp + scope=inventory` (still a genuine semantic error) as the blocking case
+
+**Acceptance criteria — all met:**
+- [x] `PlanIntent` has exactly 2 values; all old intents coerced without breaking existing code
+- [x] `to_legacy_semantic_plan()` still returns `"list_inventory"` for legacy compiler wire format
+- [x] Compiler never generates SQL referencing `quantity`/`estimated_value` against `reporting_models`
+- [x] All 53 unit tests pass
+- [x] All 3 live LLM quality tests pass (run twice consecutively)
+- [x] Committed to main (commit `d90b7c2`)
+
+---
+
 ### Phase E — Postgres migration
 
 **Sequence note:** Do this after Phases A–D. Migrating to Postgres on top of messy SQLite code means migrating the mess.
@@ -452,11 +503,18 @@ POST `/api/ai/identify` — given an uploaded photo and/or text description, the
 
 1. Read this file completely.
 2. Read `reporting/Reporting_AI_Architecture_vNext.md` — canonical pipeline spec.
-3. Read `reporting/plan_models.py` — canonical plan data model.
+3. Read `reporting/plan_models.py` — canonical plan data model (2-intent design: `list` + `missing_models`).
 4. Read `docs/reference/reporting_defect_backlog.md` — known defects.
 5. Check the current git status: `git status` and `git log --oneline -10`
 6. Determine which phase is next based on the acceptance criteria above.
 7. Create the appropriate feature branch before making any changes.
 8. Begin with the first incomplete item in the current phase.
+
+**Current reporting architecture state (as of Phase Intent-Refactor):**
+- Intent taxonomy: 2 intents only — `list` (all data-returning queries) and `missing_models` (catalog-minus-inventory JOIN)
+- Backward compat: `to_legacy_semantic_plan()` still emits `"list_inventory"` for the legacy compiler dict interface
+- Compiler input: `CanonicalReportingPlan` object; internally calls `_compile_legacy_dict` via adapter
+- Seed DB: `tests/fixtures/mkc_inventory_seed.db` — committed snapshot; update deliberately when catalog/inventory changes affect test expectations
+- Live LLM tests: `pytest -m live_llm` — require Ollama at `192.168.50.196:11434`; conftest defaults to `lexical` retrieval backend for unit tests
 
 Do not attempt multiple phases in a single session without explicit instruction.
