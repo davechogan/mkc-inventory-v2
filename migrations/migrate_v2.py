@@ -47,6 +47,19 @@ def ensure_v2_exclusive_schema(conn: sqlite3.Connection) -> None:
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(option_type, name)
         );
+
+        CREATE TABLE IF NOT EXISTS knife_model_image_files (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            model_slug TEXT NOT NULL,
+            color_name TEXT,
+            filename TEXT NOT NULL UNIQUE,
+            url_path TEXT NOT NULL,
+            is_primary INTEGER NOT NULL DEFAULT 0,
+            sha256 TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_kmif_slug ON knife_model_image_files(model_slug);
+        CREATE INDEX IF NOT EXISTS idx_kmif_slug_color ON knife_model_image_files(model_slug, color_name);
         """
     )
 

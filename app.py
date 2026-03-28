@@ -70,6 +70,7 @@ DB_PATH = (
     else (BASE_DIR / "data" / "mkc_inventory.db")
 )
 STATIC_DIR = BASE_DIR / "static"
+IMAGES_COLORS_DIR = BASE_DIR / "Images" / "MKC_Colors"
 LOG_PATH = BASE_DIR / "data" / "mkc_app.log"
 
 def _parse_log_level(value: Optional[str], default: int = logging.INFO) -> int:
@@ -1357,6 +1358,8 @@ class IdentifierQuery(BaseModel):
 app = FastAPI(title="MKC Inventory Manager")
 init_db()
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+if IMAGES_COLORS_DIR.exists():
+    app.mount("/images/colors", StaticFiles(directory=IMAGES_COLORS_DIR), name="images_colors")
 
 # ---------------------------------------------------------------------------
 # Version endpoint — reads git info once at startup

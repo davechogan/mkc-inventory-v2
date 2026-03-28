@@ -744,9 +744,10 @@ function renderInventoryTable() {
     tr.setAttribute('aria-label', `Edit ${item.knife_name}`);
     const cells = columns.map((col) => {
       if (col.id === 'image') {
-        const src = item.has_identifier_image && item.knife_model_id
-          ? `/api/v2/models/${item.knife_model_id}/image`
-          : null;
+        const src = item.colorway_image_url
+          || (item.has_identifier_image && item.knife_model_id
+              ? `/api/v2/models/${item.knife_model_id}/image`
+              : null);
         return `<td class="col-thumb">${src ? `<img class="inventory-thumb" src="${escapeHtml(src)}" alt="" loading="lazy" />` : '<span class="muted">—</span>'}</td>`;
       }
       const out = col.render(item);

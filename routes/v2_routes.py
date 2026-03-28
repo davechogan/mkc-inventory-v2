@@ -89,7 +89,17 @@ def create_v2_router(
                 ks.name AS series_name,
                 (COALESCE(NULLIF(i.collaboration_name, ''), c.name) IS NOT NULL) AS is_collab,
                 (CASE WHEN kmi.image_blob IS NOT NULL AND length(kmi.image_blob) > 0
-                  THEN 1 ELSE 0 END) AS has_identifier_image
+                  THEN 1 ELSE 0 END) AS has_identifier_image,
+                COALESCE(
+                  (SELECT url_path FROM knife_model_image_files
+                   WHERE model_slug = km.slug
+                     AND LOWER(color_name) = LOWER(COALESCE(NULLIF(i.handle_color,''), km.handle_color, ''))
+                   LIMIT 1),
+                  (SELECT url_path FROM knife_model_image_files
+                   WHERE model_slug = km.slug AND is_primary = 1 LIMIT 1),
+                  (SELECT url_path FROM knife_model_image_files
+                   WHERE model_slug = km.slug LIMIT 1)
+                ) AS colorway_image_url
             FROM inventory_items_v2 i
             LEFT JOIN knife_models_v2 km ON km.id = i.knife_model_id
             LEFT JOIN knife_types kt ON kt.id = km.type_id
