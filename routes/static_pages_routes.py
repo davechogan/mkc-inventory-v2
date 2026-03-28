@@ -12,7 +12,9 @@ def create_static_pages_router(*, static_dir: Path) -> APIRouter:
 
     @router.get("/")
     def root():
-        return FileResponse(static_dir / "index.html")
+        # Serve the React SPA build; falls back to legacy HTML if build is missing
+        react_build = static_dir / "dist" / "index.html"
+        return FileResponse(react_build if react_build.exists() else static_dir / "index.html")
 
     @router.get("/identify")
     def identify_page():
