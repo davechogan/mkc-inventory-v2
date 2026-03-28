@@ -267,6 +267,165 @@
   },
   {
     "kind": "field",
+    "artifact_id": "field.blade_finish",
+    "tags": [
+      "blade finish",
+      "finish",
+      "stonewash",
+      "satin",
+      "pvd",
+      "surface treatment"
+    ],
+    "content": "blade_finish is the canonical field for the surface treatment applied to the blade. Use when the user asks about stonewash, satin, PVD, or other finishes. Can be used as a filter or group_by dimension.",
+    "canonical_field": "blade_finish",
+    "aliases": [
+      "finish",
+      "blade finish",
+      "surface",
+      "treatment"
+    ]
+  },
+  {
+    "kind": "field",
+    "artifact_id": "field.blade_color",
+    "tags": [
+      "blade color",
+      "color",
+      "black blade",
+      "bronze",
+      "sniper grey"
+    ],
+    "content": "blade_color is the canonical field for the blade color. Use when the user asks about black, bronze, sniper grey, or other blade color values.",
+    "canonical_field": "blade_color",
+    "aliases": [
+      "blade color",
+      "color"
+    ]
+  },
+  {
+    "kind": "field",
+    "artifact_id": "field.handle_color",
+    "tags": [
+      "handle color",
+      "handle",
+      "od green",
+      "fde",
+      "black handle"
+    ],
+    "content": "handle_color is the canonical field for the handle color. Use when the user asks about handle color, OD green, FDE, black, or other handle color values. Can be used as a filter or group_by dimension.",
+    "canonical_field": "handle_color",
+    "aliases": [
+      "handle color",
+      "handle"
+    ]
+  },
+  {
+    "kind": "field",
+    "artifact_id": "field.handle_type",
+    "tags": [
+      "handle type",
+      "handle material",
+      "g10",
+      "micarta",
+      "carbon fiber"
+    ],
+    "content": "handle_type is the canonical field for handle material or construction type. Use when the user asks about G10, Micarta, Carbon Fiber, or other handle material values. This is a catalog-side field.",
+    "canonical_field": "handle_type",
+    "aliases": [
+      "handle type",
+      "handle material"
+    ]
+  },
+  {
+    "kind": "field",
+    "artifact_id": "field.blade_length",
+    "tags": [
+      "blade length",
+      "length",
+      "inches"
+    ],
+    "content": "blade_length is the canonical field for the physical blade length in inches. Use for numeric comparisons or listing blade length. Supports >, >=, <, <=, between operators.",
+    "canonical_field": "blade_length",
+    "aliases": [
+      "blade length",
+      "length"
+    ]
+  },
+  {
+    "kind": "field",
+    "artifact_id": "field.quantity",
+    "tags": [
+      "quantity",
+      "qty",
+      "how many",
+      "count owned"
+    ],
+    "content": "quantity is the number of units owned for an inventory row. Use when the user asks how many of a specific knife they own, or when aggregating total counts using quantity rather than row count.",
+    "canonical_field": "quantity",
+    "aliases": [
+      "quantity",
+      "qty",
+      "how many"
+    ]
+  },
+  {
+    "kind": "field",
+    "artifact_id": "field.purchase_source",
+    "tags": [
+      "purchase source",
+      "source",
+      "where bought",
+      "vendor",
+      "retailer"
+    ],
+    "content": "purchase_source is the canonical field for where a knife was purchased. Use when the user asks about purchase source, vendor, retailer, or where they bought a knife.",
+    "canonical_field": "purchase_source",
+    "aliases": [
+      "purchase source",
+      "source",
+      "vendor",
+      "where bought"
+    ]
+  },
+  {
+    "kind": "field",
+    "artifact_id": "field.generation_label",
+    "tags": [
+      "generation",
+      "gen",
+      "version",
+      "2.0",
+      "revision"
+    ],
+    "content": "generation_label is the canonical catalog field for product generation or version. Use when the user asks about Gen 2, version 2.0, or generational differences. This is a catalog-side field.",
+    "canonical_field": "generation_label",
+    "aliases": [
+      "generation",
+      "gen",
+      "version"
+    ]
+  },
+  {
+    "kind": "field",
+    "artifact_id": "field.size_modifier",
+    "tags": [
+      "size",
+      "mini",
+      "large",
+      "compact",
+      "full size"
+    ],
+    "content": "size_modifier is the canonical catalog field for size variants such as Mini, Large, or Compact. Use when the user asks about size variants within a product family. This is a catalog-side field.",
+    "canonical_field": "size_modifier",
+    "aliases": [
+      "size",
+      "mini",
+      "large",
+      "compact"
+    ]
+  },
+  {
+    "kind": "field",
     "artifact_id": "field.text_search",
     "tags": [
       "search",

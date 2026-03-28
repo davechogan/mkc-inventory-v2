@@ -23,6 +23,8 @@ Known data facts (from seed DB — verified against real inventory):
 """
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from reporting.domain import ReportingQueryIn, run_reporting_query
@@ -45,6 +47,27 @@ def _rows_contain(rows: list, value: str) -> bool:
     return False
 
 
+def _print_turn_debug(label: str, result: dict) -> None:
+    """Print full pipeline debug for a turn so failures show exact LLM I/O."""
+    dbg = result.get("pipeline_debug") or {}
+    rewriter = dbg.get("rewriter_llm") or {}
+    # planner_llm is {"primary": {...}, "retry": {...}}; use primary attempt
+    planner_attempts = dbg.get("planner_llm") or {}
+    planner = planner_attempts.get("primary") or planner_attempts.get("retry") or {}
+    print(f"\n{'='*60}")
+    print(f"[{label}] SQL: {result.get('sql_executed')}")
+    print(f"[{label}] semantic_plan: {json.dumps(result.get('semantic_plan'), indent=2)}")
+    print(f"[{label}] rows ({len(result.get('rows') or [])}): {(result.get('rows') or [])[:5]}")
+    print(f"[{label}] answer: {result.get('answer_text')}")
+    if rewriter.get("rewritten_query"):
+        print(f"[{label}] retrieval_query (rewritten): {rewriter['rewritten_query']}")
+    if planner:
+        print(f"[{label}] planner system:\n{str(planner.get('system', ''))[:2000]}")
+        print(f"[{label}] planner user:\n{str(planner.get('user', ''))[:4000]}")
+        print(f"[{label}] planner raw response: {str(planner.get('raw_response', ''))[:500]}")
+    print('='*60)
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -65,8 +88,10 @@ def test_spend_by_family_then_blackfoot_excluding_variants(invapp):
     q1 = ReportingQueryIn(
         question="show me my total spend broken down by knife family",
         max_rows=50,
+        debug=True,
     )
     r1 = run_reporting_query(q1, get_conn=invapp.get_conn)
+    _print_turn_debug("T1", r1)
 
     assert r1.get("session_id"), "Expected a session_id"
     session_id = r1["session_id"]
@@ -88,8 +113,10 @@ def test_spend_by_family_then_blackfoot_excluding_variants(invapp):
         ),
         session_id=session_id,
         max_rows=50,
+        debug=True,
     )
     r2 = run_reporting_query(q2, get_conn=invapp.get_conn)
+    _print_turn_debug("T2", r2)
 
     sql2 = (r2.get("sql_executed") or "").lower()
     answer2 = (r2.get("answer_text") or "").lower()
@@ -121,8 +148,10 @@ def test_list_knives_then_filter_by_series(invapp):
     q1 = ReportingQueryIn(
         question="list all the knives in my collection",
         max_rows=50,
+        debug=True,
     )
     r1 = run_reporting_query(q1, get_conn=invapp.get_conn)
+    _print_turn_debug("T1", r1)
     session_id = r1.get("session_id")
     assert session_id
 
@@ -137,8 +166,10 @@ def test_list_knives_then_filter_by_series(invapp):
         question="show me only the Blood Brothers versions",
         session_id=session_id,
         max_rows=50,
+        debug=True,
     )
     r2 = run_reporting_query(q2, get_conn=invapp.get_conn)
+    _print_turn_debug("T2", r2)
 
     sql2 = (r2.get("sql_executed") or "").lower()
     rows2 = r2.get("rows") or []
@@ -162,8 +193,10 @@ def test_list_knives_then_filter_by_series(invapp):
         question="what did I spend on those?",
         session_id=session_id,
         max_rows=50,
+        debug=True,
     )
     r3 = run_reporting_query(q3, get_conn=invapp.get_conn)
+    _print_turn_debug("T3", r3)
 
     answer3 = (r3.get("answer_text") or "").lower()
     rows3 = r3.get("rows") or []
@@ -190,8 +223,10 @@ def test_catalog_blood_brothers_chain_with_scope_switch(invapp):
     q1 = ReportingQueryIn(
         question="how many blood brothers knives does MKC offer?",
         max_rows=50,
+        debug=True,
     )
     r1 = run_reporting_query(q1, get_conn=invapp.get_conn)
+    _print_turn_debug("T1", r1)
     session_id = r1.get("session_id")
     assert session_id
 
@@ -209,8 +244,10 @@ def test_catalog_blood_brothers_chain_with_scope_switch(invapp):
         question="which ones are they?",
         session_id=session_id,
         max_rows=50,
+        debug=True,
     )
     r2 = run_reporting_query(q2, get_conn=invapp.get_conn)
+    _print_turn_debug("T2", r2)
     rows2 = r2.get("rows") or []
     answer2 = (r2.get("answer_text") or "").lower()
 
@@ -230,8 +267,10 @@ def test_catalog_blood_brothers_chain_with_scope_switch(invapp):
         question="which of those is the most expensive?",
         session_id=session_id,
         max_rows=50,
+        debug=True,
     )
     r3 = run_reporting_query(q3, get_conn=invapp.get_conn)
+    _print_turn_debug("T3", r3)
     sql3 = (r3.get("sql_executed") or "").lower()
     answer3 = (r3.get("answer_text") or "").lower()
     rows3 = r3.get("rows") or []
@@ -251,8 +290,10 @@ def test_catalog_blood_brothers_chain_with_scope_switch(invapp):
         question="do I own one of those?",
         session_id=session_id,
         max_rows=50,
+        debug=True,
     )
     r4 = run_reporting_query(q4, get_conn=invapp.get_conn)
+    _print_turn_debug("T4", r4)
     sql4 = (r4.get("sql_executed") or "").lower()
     answer4 = (r4.get("answer_text") or "").lower()
     rows4 = r4.get("rows") or []

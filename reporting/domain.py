@@ -53,6 +53,7 @@ from reporting.constants import (
     REPORTING_PLANNER_MODEL,
     REPORTING_PLANNER_RETRY_MODEL,
     REPORTING_RESPONDER_MODEL,
+    REPORTING_REWRITER_MODEL,
     GetConn,
 )
 from reporting.plan_models import (
@@ -73,6 +74,7 @@ from reporting.planner import (
     _reporting_build_prompt_schema,
     _reporting_has_substantive_rows,
     _reporting_llm_plan,
+    _reporting_rewrite_query_for_retrieval,
     _reporting_summarize_state_for_hints,
 )
 from reporting.retrieval import format_retrieval_context, retrieve_artifacts_with_meta
@@ -527,7 +529,7 @@ def _reporting_learn_semantic_hints(
     *,
     session_id: str,
     question: str,
-    plan: Optional[dict[str, Any]],
+    plan: Optional["CanonicalReportingPlan"],
     row_count: int,
 ) -> None:
     # Learn only from successful, non-empty answers with a semantic plan.
@@ -536,7 +538,11 @@ def _reporting_learn_semantic_hints(
     candidates = _reporting_extract_hint_entities(question)
     if not candidates:
         return
-    plan_filters = dict(plan.get("filters") or {})
+    plan_filters: dict[str, str] = {
+        c.field.value: str(c.value)
+        for c in plan.filters
+        if c.op.value == "=" and isinstance(c.value, (str, int, float))
+    }
     if not plan_filters:
         return
 
@@ -959,8 +965,7 @@ def _reporting_generate_answer(
     rows: list[dict[str, Any]],
     sql_executed: str,
     context_block: str,
-    semantic_intent: Optional[str] = None,
-    semantic_plan: Optional[dict[str, Any]] = None,
+    canonical_plan: Optional["CanonicalReportingPlan"] = None,
     *,
     debug: bool = False,
 ) -> tuple[str, list[str], Optional[str], Optional[float], dict[str, Any]]:
@@ -973,47 +978,51 @@ def _reporting_generate_answer(
             0.6,
             dbg,
         )
-    if semantic_intent == "list_inventory" and isinstance(semantic_plan, dict):
-        s = semantic_plan.get("sort")
-        if isinstance(s, dict) and str(s.get("field") or "") == "purchase_price" and str(s.get("direction") or "").lower() == "desc":
-            lines: list[str] = []
-            for i, r in enumerate(rows[:40], start=1):
-                name = str(r.get("knife_name") or "").strip() or "(unnamed)"
-                lt_raw = r.get("line_purchase_total")
+    if (
+        canonical_plan is not None
+        and canonical_plan.intent.value == "list"
+        and canonical_plan.sort is not None
+        and canonical_plan.sort.field == "purchase_price"
+        and canonical_plan.sort.direction.value == "desc"
+    ):
+        lines: list[str] = []
+        for i, r in enumerate(rows[:40], start=1):
+            name = str(r.get("knife_name") or "").strip() or "(unnamed)"
+            lt_raw = r.get("line_purchase_total")
+            try:
+                lt_f = float(lt_raw) if lt_raw is not None else None
+            except (TypeError, ValueError):
+                lt_f = None
+            if lt_f is None:
                 try:
-                    lt_f = float(lt_raw) if lt_raw is not None else None
+                    pp = r.get("purchase_price")
+                    qty = float(r.get("quantity") or 1) or 1.0
+                    lt_f = float(pp) * qty if pp is not None else None
                 except (TypeError, ValueError):
                     lt_f = None
-                if lt_f is None:
-                    try:
-                        pp = r.get("purchase_price")
-                        qty = float(r.get("quantity") or 1) or 1.0
-                        lt_f = float(pp) * qty if pp is not None else None
-                    except (TypeError, ValueError):
-                        lt_f = None
-                if lt_f is not None:
-                    price_str = f"${lt_f:,.2f}"
-                else:
-                    price_str = "—"
-                qty_v = r.get("quantity")
-                try:
-                    qn = int(qty_v) if qty_v is not None else 1
-                except (TypeError, ValueError):
-                    qn = 1
-                qsuffix = f" (qty {qn})" if qn != 1 else ""
-                lines.append(f"{i}. {name}{qsuffix}: {price_str} line total")
-            body = "\n".join(lines)
-            dbg2: dict[str, Any] = (
-                {"path": "deterministic_ranked_purchase_lines", "model": model} if debug else {}
-            )
-            return (
-                f"Most expensive purchase lines (by line total: price × quantity), showing {len(lines)}:\n{body}",
-                _reporting_default_followups(question, columns, rows),
-                "Deterministic ranked purchase list.",
-                0.88,
-                dbg2,
-            )
-    if semantic_intent == "missing_models":
+            if lt_f is not None:
+                price_str = f"${lt_f:,.2f}"
+            else:
+                price_str = "—"
+            qty_v = r.get("quantity")
+            try:
+                qn = int(qty_v) if qty_v is not None else 1
+            except (TypeError, ValueError):
+                qn = 1
+            qsuffix = f" (qty {qn})" if qn != 1 else ""
+            lines.append(f"{i}. {name}{qsuffix}: {price_str} line total")
+        body = "\n".join(lines)
+        dbg2: dict[str, Any] = (
+            {"path": "deterministic_ranked_purchase_lines", "model": model} if debug else {}
+        )
+        return (
+            f"Most expensive purchase lines (by line total: price × quantity), showing {len(lines)}:\n{body}",
+            _reporting_default_followups(question, columns, rows),
+            "Deterministic ranked purchase list.",
+            0.88,
+            dbg2,
+        )
+    if canonical_plan is not None and canonical_plan.intent.value == "missing_models":
         names = [str(r.get("official_name") or "").strip() for r in rows if str(r.get("official_name") or "").strip()]
         if names:
             max_list = 30
@@ -1167,9 +1176,22 @@ def run_reporting_query(
                 meta={"classification": classification} if classification else {},
             )
 
-        # ── Step 1: Retrieval ──────────────────────────────────────────────
+        # ── Step 1a: Query rewriting ───────────────────────────────────────
+        # For follow-up questions the raw question often contains pronouns
+        # ("those", "it", "them") that embed poorly. Rewrite into a standalone
+        # question using last_query_state so Chroma retrieves field-relevant
+        # artifacts rather than generic scope/intent documents.
+        last_query_state = _reporting_get_last_query_state(conn, session_id)
+        retrieval_query, rewriter_debug = _reporting_rewrite_query_for_retrieval(
+            REPORTING_REWRITER_MODEL,
+            question,
+            last_query_state or {},
+            debug=debug_pipeline,
+        )
+
+        # ── Step 1b: Retrieval ─────────────────────────────────────────────
         retrieval_artifacts, retrieval_meta = retrieve_artifacts_with_meta(
-            question, top_k=6, conn=conn, debug=debug_pipeline
+            retrieval_query, top_k=6, conn=conn, debug=debug_pipeline
         )
         retrieval_context = format_retrieval_context(retrieval_artifacts)
 
@@ -1310,10 +1332,9 @@ def run_reporting_query(
         if hint_ids_used:
             _reporting_feedback_semantic_hints(conn, hint_ids_used, success=substantive)
 
-        plan_legacy = canonical_plan.to_legacy_semantic_plan()
         _reporting_learn_semantic_hints(
             conn, session_id=session_id, question=question,
-            plan=plan_legacy, row_count=(1 if substantive else 0),
+            plan=canonical_plan, row_count=(1 if substantive else 0),
         )
 
         # ── Step 9: Response generation ────────────────────────────────────
@@ -1323,8 +1344,7 @@ def run_reporting_query(
         )
         answer_text, follow_ups, limitations, confidence, responder_debug = _reporting_generate_answer(
             responder_model, question, columns, rows_out, sql, context_block,
-            semantic_intent=primary_intent,
-            semantic_plan=plan_legacy,
+            canonical_plan=canonical_plan,
             debug=debug_pipeline,
         )
         if compile_meta.get("limitations") and not limitations:
@@ -1348,13 +1368,15 @@ def run_reporting_query(
             "limitations": limitations,
             "follow_ups": follow_ups,
             "execution_ms": execution_ms,
-            "semantic_plan": plan_legacy,
+            "semantic_plan": canonical_plan.model_dump(mode="json"),
             "timestamp": _reporting_iso_now(),
             "semantic_hints": plan_meta.get("hints") or [],
             "retrieval": retrieval_meta,
         }
         if debug_pipeline:
             meta["pipeline_debug"] = {
+                "rewriter_llm": rewriter_debug,
+                "retrieval_query": retrieval_query,
                 "retrieval": retrieval_meta,
                 "planner_llm": plan_meta.get("planner_llm") or {},
                 "responder_llm": responder_debug,
@@ -1366,7 +1388,7 @@ def run_reporting_query(
             sql_executed=sql, result=result_payload, chart_spec=chart_spec, meta=meta,
         )
         _reporting_set_last_query_state(
-            conn, session_id, {**plan_legacy, "_result_row_count": len(rows_out)}
+            conn, session_id, {**canonical_plan.to_planner_context_dict(), "_result_row_count": len(rows_out)}
         )
         _reporting_update_summary(conn, session_id)
 
@@ -1381,7 +1403,7 @@ def run_reporting_query(
             meta={
                 "date_window": {"start": date_start, "end": date_end, "label": date_label},
                 "planner_attempts": plan_meta.get("planner_attempts"),
-                "semantic_plan": plan_legacy,
+                "semantic_plan": canonical_plan.model_dump(mode="json"),
                 "semantic_hints": plan_meta.get("hints") or [],
                 "retrieval": retrieval_meta,
             },
@@ -1403,7 +1425,7 @@ def run_reporting_query(
             "execution_ms": execution_ms,
             "date_window": {"start": date_start, "end": date_end, "label": date_label},
             "assistant_message_id": assistant_message_id,
-            "semantic_plan": plan_legacy,
+            "semantic_plan": canonical_plan.model_dump(mode="json"),
             "retrieval": retrieval_meta,
         }
         if debug_pipeline:

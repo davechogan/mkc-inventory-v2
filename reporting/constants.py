@@ -29,6 +29,9 @@ REPORTING_RESPONDER_MODEL = (
 REPORTING_PLANNER_RETRY_MODEL = (
     (os.environ.get("REPORTING_PLANNER_RETRY_MODEL") or "").strip() or None
 )
+REPORTING_REWRITER_MODEL = (
+    os.environ.get("REPORTING_REWRITER_MODEL") or "qwen2.5:7b-instruct"
+).strip() or "qwen2.5:7b-instruct"
 
 # ---------------------------------------------------------------------------
 # Row limits
@@ -73,6 +76,8 @@ REPORTING_GROUPABLE_DIMENSIONS = {
     "collaborator": "collaborator_name",
     "collaborator_name": "collaborator_name",
     "steel": "steel",
+    "blade_finish": "blade_finish",
+    "handle_color": "handle_color",
     "condition": "condition",
     "location": "location",
 }

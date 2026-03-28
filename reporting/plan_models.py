@@ -36,6 +36,8 @@ class PlanDimension(str, Enum):
     FORM_NAME = "form_name"
     COLLABORATOR_NAME = "collaborator_name"
     STEEL = "steel"
+    BLADE_FINISH = "blade_finish"
+    HANDLE_COLOR = "handle_color"
     CONDITION = "condition"
     LOCATION = "location"
     KNIFE_NAME = "knife_name"
@@ -48,6 +50,11 @@ class PlanField(str, Enum):
     FORM_NAME = "form_name"
     COLLABORATOR_NAME = "collaborator_name"
     STEEL = "steel"
+    BLADE_FINISH = "blade_finish"
+    BLADE_COLOR = "blade_color"
+    HANDLE_COLOR = "handle_color"
+    HANDLE_TYPE = "handle_type"
+    BLADE_LENGTH = "blade_length"
     CONDITION = "condition"
     LOCATION = "location"
     KNIFE_NAME = "knife_name"
@@ -57,6 +64,10 @@ class PlanField(str, Enum):
     PURCHASE_PRICE = "purchase_price"
     ESTIMATED_VALUE = "estimated_value"
     MSRP = "msrp"
+    QUANTITY = "quantity"
+    PURCHASE_SOURCE = "purchase_source"
+    GENERATION_LABEL = "generation_label"
+    SIZE_MODIFIER = "size_modifier"
     TEXT_SEARCH = "text_search"
 
 
@@ -225,6 +236,7 @@ class CanonicalReportingPlan(BaseModel):
         _INVENTORY_ONLY = {
             "condition", "location", "acquired_date",
             "purchase_price", "estimated_value", "knife_name",
+            "quantity", "purchase_source",
         }
         if self.scope == PlanScope.CATALOG:
             all_field_vals = {c.field.value for c in [*self.filters, *self.exclusions]}
@@ -238,153 +250,36 @@ class CanonicalReportingPlan(BaseModel):
             raise ValueError("clarification_reason is required when needs_clarification=true.")
         return self
 
-    def to_legacy_semantic_plan(self) -> dict[str, Any]:
-        """Convert canonical plan to the current compiler's legacy dict shape.
+    def to_planner_context_dict(self) -> dict[str, Any]:
+        """Produce a compact dict for storage in last_query_state_json.
 
-        This adapter is temporary while we migrate the compiler internals to consume
-        canonical objects directly. It preserves deterministic translation.
+        This format is optimised for LLM readability: filters as a flat
+        {field: value} dict, only EQ filters included (non-EQ ops are rare in
+        session carry-forward), and a minimal set of keys so the LLM context
+        block stays focused.
         """
         filters_map: dict[str, Any] = {}
         for clause in self.filters:
-            if clause.op != FilterOp.EQ:
-                continue
-            filters_map[str(clause.field.value)] = clause.value
+            if clause.op == FilterOp.EQ:
+                filters_map[str(clause.field.value)] = clause.value
         for clause in self.exclusions:
-            if clause.op != FilterOp.EQ:
-                continue
-            filters_map[f"{clause.field.value}__not"] = clause.value
+            if clause.op == FilterOp.EQ:
+                filters_map[f"{clause.field.value}__not"] = clause.value
 
         group_by = self.group_by[0].value if self.group_by else None
-        metric = self.metric.value
-        if metric == PlanMetric.ESTIMATED_VALUE.value:
-            metric = "total_estimated_value"
         out: dict[str, Any] = {
-            "intent": "list_inventory" if self.intent == PlanIntent.LIST else self.intent.value,
+            "intent": self.intent.value,
             "scope": self.scope.value,
-            "metric": metric,
+            "metric": self.metric.value,
             "group_by": group_by,
             "filters": filters_map,
-            "limit": self.limit,
             "year_compare": self.year_compare or None,
             "date_start": (self.time_range.start if self.time_range else None),
             "date_end": (self.time_range.end if self.time_range else None),
-            "date_label": (self.time_range.label if self.time_range else None),
-            "needs_clarification": self.needs_clarification,
-            "clarification_reason": self.clarification_reason,
         }
         if self.sort is not None:
             out["sort"] = {"field": self.sort.field, "direction": self.sort.direction.value}
+        if self.limit is not None:
+            out["limit"] = self.limit
         return out
 
-    @classmethod
-    def from_legacy_semantic_plan(cls, plan: dict[str, Any]) -> "CanonicalReportingPlan":
-        """Adapt the current legacy semantic-plan dict to canonical typed shape."""
-        raw_intent = str(plan.get("intent") or "list_inventory").strip().lower()
-        intent_map = {
-            "list_inventory": PlanIntent.LIST,
-            "aggregate": PlanIntent.LIST,
-            "compare": PlanIntent.LIST,
-            "missing_models": PlanIntent.MISSING_MODELS,
-            "completion_cost": PlanIntent.MISSING_MODELS,
-            "list": PlanIntent.LIST,
-        }
-        intent = intent_map.get(raw_intent, PlanIntent.LIST)
-
-        raw_metric = str(plan.get("metric") or "count").strip().lower()
-        metric_map = {
-            "count": PlanMetric.COUNT,
-            "total_spend": PlanMetric.TOTAL_SPEND,
-            "total_estimated_value": PlanMetric.ESTIMATED_VALUE,
-            "estimated_value": PlanMetric.ESTIMATED_VALUE,
-            "msrp": PlanMetric.MSRP,
-        }
-        metric = metric_map.get(raw_metric, PlanMetric.COUNT)
-
-        group_by_values: list[PlanDimension] = []
-        group_raw = plan.get("group_by")
-        if isinstance(group_raw, str) and group_raw.strip():
-            try:
-                group_by_values = [PlanDimension(group_raw.strip())]
-            except ValueError:
-                group_by_values = []
-        elif isinstance(group_raw, list):
-            for item in group_raw:
-                try:
-                    group_by_values.append(PlanDimension(str(item).strip()))
-                except ValueError:
-                    continue
-
-        filters: list[FilterClause] = []
-        exclusions: list[FilterClause] = []
-        for key, value in dict(plan.get("filters") or {}).items():
-            if value is None:
-                continue
-            base_key = str(key).strip()
-            negate = base_key.endswith("__not")
-            field_name = base_key[:-5] if negate else base_key
-            try:
-                field = PlanField(field_name)
-            except ValueError:
-                continue
-            clause = FilterClause(
-                field=field,
-                op=FilterOp.EQ,
-                value=value,
-            )
-            if negate:
-                exclusions.append(clause)
-            else:
-                filters.append(clause)
-
-        time_range = None
-        if plan.get("date_start") or plan.get("date_end") or plan.get("date_label"):
-            time_range = TimeRange(
-                start=(str(plan.get("date_start")) if plan.get("date_start") else None),
-                end=(str(plan.get("date_end")) if plan.get("date_end") else None),
-                label=(str(plan.get("date_label")) if plan.get("date_label") else None),
-            )
-
-        years: list[int] = []
-        for y in list(plan.get("year_compare") or []):
-            try:
-                years.append(int(str(y)))
-            except (TypeError, ValueError):
-                continue
-
-        scope_raw = str(plan.get("scope") or "inventory").strip().lower()
-        scope = PlanScope.CATALOG if scope_raw == "catalog" else PlanScope.INVENTORY
-
-        sort_spec: Optional[SortSpec] = None
-        raw_sort = plan.get("sort")
-        if isinstance(raw_sort, dict):
-            sf = str(raw_sort.get("field") or "").strip()
-            sd = str(raw_sort.get("direction") or "asc").strip().lower()
-            if sf and sd in ("asc", "desc"):
-                try:
-                    PlanField(sf)  # validate allowed field name
-                    sort_spec = SortSpec(field=sf, direction=SortDirection(sd))
-                except ValueError:
-                    sort_spec = None
-
-        lim = plan.get("limit")
-        try:
-            lim_i = int(lim) if lim is not None else None
-        except (TypeError, ValueError):
-            lim_i = None
-
-        return cls(
-            intent=intent,
-            scope=scope,
-            metric=metric,
-            group_by=group_by_values,
-            filters=filters,
-            exclusions=exclusions,
-            time_range=time_range,
-            year_compare=years,
-            sort=sort_spec,
-            limit=lim_i,
-            needs_clarification=bool(plan.get("needs_clarification")),
-            clarification_reason=(
-                str(plan.get("clarification_reason")).strip() if plan.get("clarification_reason") else None
-            ),
-        )
