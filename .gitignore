@@ -13,8 +13,8 @@ data/data._untracked_bak_*/
 data/*.empty-broken.*
 *.db
 *.sqlite
-# Exception: committed test fixtures
-!tests/fixtures/*.db
+# Seed DB lives in artifacts/ submodule — not tracked here
+# tests/fixtures/mkc_inventory_seed.db is gitignored; conftest.py copies from artifacts/
 
 # Machine-local workspace: exports, scratch copies, personal artifacts (see local/README.md)
 /local/**

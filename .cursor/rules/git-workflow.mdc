@@ -20,6 +20,9 @@ Use **`main`** below as the **protected integration branch**; in this repo that 
 
 ## Commits
 
+- **Always use `scripts/commit.sh "message"` instead of bare `git commit`.**
+  This ensures the `artifacts/` submodule is committed with the same message before the main repo commit.
+  Only use bare `git commit` if you are certain no artifact changes are pending.
 - Include the **feature or fix name** in every message on that branch.
 - Prefer a **prefix**, e.g. `[year-compare-reporting] compile year_compare into grouped SQL`.
 - One **coherent step** per commit; avoid mixing unrelated refactor, behavior, tests, and formatting when you can split.

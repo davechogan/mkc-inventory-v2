@@ -1,48 +1,60 @@
 ---
-description: Route non-release artifacts to shared Artifacts repo
+description: Route non-release artifacts to the artifacts/ submodule (private repo)
 alwaysApply: true
 ---
 
 # Artifacts Routing Policy
 
-Use `https://github.com/davechogan/Artifacts.git` for non-release assets.
+Non-release artifacts for this project live in the **`artifacts/`** directory, which is a
+private git submodule pointing to `git@github.com:davechogan/mkc-inventory-artifacts.git`.
 
 ## Decision rule
 
-- If a file is required for app runtime, build, or CI: keep it in this app repo.
-- If a file is historical, investigative, environment-specific, or snapshot data: store it in `Artifacts.git`.
+- If a file is required for app runtime, build, or CI: keep it in the main repo.
+- If a file is historical, investigative, environment-specific, or snapshot data: store it in `artifacts/`.
 
 ## Artifact mapping (required)
 
-| Artifact type | Target in Artifacts repo |
+| Artifact type | Path in artifacts/ |
 |---|---|
-| Architecture plans, implementation specs | `projects/<project-slug>/plans/` |
-| Investigation notes, postmortems | `projects/<project-slug>/plans/` |
-| One-off helper scripts (non-runtime) | `projects/<project-slug>/scripts/` |
-| DB snapshots/backups (compressed) | `projects/<project-slug>/db_snapshots/<YYYY-MM-DD>/` |
-| Exports (CSV/JSON), ad hoc reports | `projects/<project-slug>/exports/<YYYY-MM-DD>/` |
-| Diagnostic logs | `projects/<project-slug>/logs/<YYYY-MM-DD>/` |
-| Provenance/checksums/restore metadata | `projects/<project-slug>/metadata/` |
+| Architecture plans, implementation specs | `artifacts/plans/` |
+| Investigation notes, postmortems | `artifacts/plans/` |
+| One-off helper scripts (non-runtime) | `artifacts/scripts/` |
+| DB snapshots/backups (compressed) | `artifacts/db_snapshots/<YYYY-MM-DD>/` |
+| Test seed DB (uncompressed, canonical) | `artifacts/db_snapshots/mkc_inventory_seed.db` |
+| Exports (CSV/JSON), ad hoc reports | `artifacts/exports/` (gitignored — local use only) |
+| Diagnostic logs | `artifacts/logs/` (gitignored — local use only) |
+| Provenance/checksums/restore metadata | `artifacts/metadata/` |
+
+## Submodule setup (first-time / new dev machine)
+
+```bash
+git submodule update --init
+```
+
+Requires access to `git@github.com:davechogan/mkc-inventory-artifacts.git` (private).
+If you do not have access, the test suite falls back to `tests/fixtures/mkc_inventory_seed.db`.
+
+## Committing artifacts alongside code
+
+**Always use `scripts/commit.sh` instead of bare `git commit`.**
+This commits any pending artifact changes to the submodule first, then commits
+the updated submodule pointer and all main-repo changes together with the same message.
+
+```bash
+scripts/commit.sh "feat(reporting): add query rewriter and field coverage expansion"
+```
 
 ## Required controls for DB snapshots
 
-- Prefer compressed snapshots (`.zst`/`.gz`), not raw DB when possible.
+- Prefer compressed snapshots (`.gz`), not raw DB for dated backups.
 - Include `SHA256SUMS.txt` for each snapshot batch.
 - Include provenance metadata (`source repo`, `commit`, `timestamp`, `author`, `artifact list`).
 - Never store secrets/credentials.
 
-## New project onboarding
-
-When creating artifacts for a new project:
-
-1. Clone/open `Artifacts.git`.
-2. Run scaffold:
-   - `scripts/new_project.sh <project-slug> [source-repo-url]`
-3. Add first artifacts under `projects/<project-slug>/...`.
-4. Commit and push in `Artifacts.git`.
-
-## Do not commit to app repo
+## Do not commit to the main repo
 
 - `data/*.db`, backup DB snapshots, local logs, exported CSV/JSON artifacts.
+- `tests/fixtures/mkc_inventory_seed.db` — canonical copy lives in `artifacts/`.
 - Machine-local workspace files and worktree internals.
-- Any artifact that is not needed to run/test/release the app.
+- Any artifact not needed to run, test, or release the app.

@@ -180,9 +180,14 @@ def _clause_expr(
         return f"({' AND '.join(parts)})" if parts else None
 
     # Skip fields that don't exist in the source view.
-    _inv_only = {"condition", "location", "knife_name", "acquired_date",
-                 "purchase_price", "estimated_value"}
-    _cat_only = {"msrp", "official_name", "record_status"}
+    _inv_only = {
+        "condition", "location", "knife_name", "acquired_date",
+        "purchase_price", "estimated_value", "quantity", "purchase_source",
+    }
+    _cat_only = {
+        "msrp", "official_name", "record_status",
+        "handle_type", "generation_label", "size_modifier",
+    }
     if catalog_style and field in _inv_only:
         return None
     if not catalog_style and field in _cat_only:
@@ -326,7 +331,9 @@ def _compile_canonical(
     # Source view: catalog unless an inventory-only group_by forces a switch.
     source_view = "reporting_models" if use_catalog else "reporting_inventory"
     supported_catalog_group = {
-        "series_name", "family_name", "knife_type", "form_name", "collaborator_name", "steel"
+        "series_name", "family_name", "knife_type", "form_name", "collaborator_name", "steel",
+        "blade_finish", "handle_color", "blade_color", "blade_length",
+        "handle_type", "generation_label", "size_modifier",
     }
     if use_catalog and group_by and group_by not in supported_catalog_group:
         source_view = "reporting_inventory"

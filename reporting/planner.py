@@ -82,7 +82,8 @@ _PLANNER_SYSTEM = (
     "  If genuinely ambiguous and cannot be inferred from context, set needs_clarification=true.\n\n"
     "metric: count, total_spend, estimated_value, msrp\n\n"
     "group_by: array of zero or more dimension names:\n"
-    "  series_name, family_name, knife_type, form_name, collaborator_name, steel, condition, location\n\n"
+    "  series_name, family_name, knife_type, form_name, collaborator_name, steel,\n"
+    "  blade_finish, handle_color, condition, location\n\n"
     "filters: ARRAY of {\"field\": \"...\", \"op\": \"...\", \"value\": ...} for required matches. Always an array, never a dict.\n"
     "exclusions: ARRAY of {\"field\": \"...\", \"op\": \"...\", \"value\": ...} for NOT/except/exclude conditions. Always an array, never a dict.\n"
     "  Trigger words: 'exclude', 'except', 'without', 'if you take out', 'minus', 'not counting',\n"
@@ -90,14 +91,26 @@ _PLANNER_SYSTEM = (
     "  Field mapping for exclusions:\n"
     "    - Named series (e.g. 'Traditions', 'Blood Brothers'): field=series_name, op==\n"
     "    - Text pattern in knife name (e.g. 'Damascus', 'Sprint'): field=text_search, op==\n"
-    "    - Condition values (e.g. 'Used'): field=condition, op==\n"
+    "    - Blade finish values (e.g. 'Stonewash'): field=blade_finish, op==\n"
     "  Example: 'how much on Blackfoot, excluding Damascus and Traditions versions'\n"
     "    filters: [{\"field\": \"family_name\", \"op\": \"=\", \"value\": \"Blackfoot\"}]\n"
     "    exclusions: [{\"field\": \"text_search\", \"op\": \"=\", \"value\": \"Damascus\"},\n"
     "                 {\"field\": \"series_name\",  \"op\": \"=\", \"value\": \"Traditions\"}]\n"
     "  Allowed fields: series_name, family_name, knife_type, form_name, collaborator_name,\n"
-    "    steel, condition, location, knife_name, official_name, record_status, acquired_date,\n"
-    "    purchase_price, estimated_value, msrp, text_search\n"
+    "    steel, blade_finish, blade_color, handle_color, handle_type, blade_length,\n"
+    "    condition, location, knife_name, official_name, record_status, acquired_date,\n"
+    "    purchase_price, estimated_value, msrp, quantity, purchase_source,\n"
+    "    generation_label, size_modifier, text_search\n"
+    "  Field glossary — use the correct field; do NOT mix up knife_type and knife_name:\n"
+    "    knife_type     — knife CATEGORY, e.g. 'Hunting', 'Tactical', 'Everyday Carry', 'Culinary'.\n"
+    "                     Never put a knife model name (e.g. 'Blackfoot 2.0') in knife_type.\n"
+    "    knife_name     — specific knife model name, e.g. 'Blood Brothers Blackfoot 2.0'.\n"
+    "    family_name    — product family, e.g. 'Blackfoot', 'Speedgoat', 'Wargoat'.\n"
+    "    series_name    — named series or collaboration, e.g. 'Blood Brothers', 'Traditions'.\n"
+    "    blade_finish   — surface treatment, e.g. 'Stonewash', 'Satin', 'PVD'.\n"
+    "    blade_color    — blade color, e.g. 'Black', 'Bronze', 'Sniper Grey'.\n"
+    "    handle_color   — handle color, e.g. 'OD Green', 'FDE', 'Black'.\n"
+    "    handle_type    — handle material or type, e.g. 'G10', 'Micarta', 'Carbon Fiber'.\n"
     "  Allowed ops: =, !=, contains, not_contains, in, not_in, >, >=, <, <=, between\n"
     "  Use a single = for equality — never ==.\n"
     "  For 'in' and 'not_in', value must be a JSON array. For all others, value is a scalar.\n\n"
@@ -114,6 +127,82 @@ _PLANNER_SYSTEM = (
     "Carry forward scope, group_by, filters, AND exclusions from the prior turn when the user refers to "
     "the same subject. Do not drop exclusions just because the follow-up question does not re-state them."
 )
+
+
+# ---------------------------------------------------------------------------
+# Query rewriter — context-aware retrieval query expansion
+# ---------------------------------------------------------------------------
+
+_REWRITER_SYSTEM = (
+    "You rewrite follow-up questions into fully standalone questions for a knife collection database.\n\n"
+    "Rules:\n"
+    "1. Use first person (\"I\", \"my\") throughout.\n"
+    "2. Replace ALL pronouns (\"those\", \"them\", \"it\", \"ones\", \"which\") with the exact entity names from the context filters.\n"
+    "3. Preserve domain values EXACTLY — never substitute synonyms. \"like new\" stays \"like new\". "
+    "\"MagnaCut\" stays \"MagnaCut\". \"Blood Brothers\" stays \"Blood Brothers\".\n"
+    "4. If context has year_compare, include both years explicitly (e.g. \"in 2023 vs 2024\").\n"
+    "5. Output ONLY the rewritten question — one sentence, no quotes, no explanation.\n\n"
+    "Examples:\n"
+    "Context: {\"scope\":\"catalog\",\"filters\":{\"series_name\":\"Blood Brothers\"}}\n"
+    "Follow-up: do I own one of those?\n"
+    "Output: do I own any Blood Brothers series knives in my inventory?\n\n"
+    "Context: {\"scope\":\"inventory\",\"metric\":\"total_spend\",\"year_compare\":[2023,2024],\"filters\":{}}\n"
+    "Follow-up: which year was higher?\n"
+    "Output: which year had higher total spend in my inventory, 2023 or 2024?"
+)
+
+
+def _reporting_rewrite_query_for_retrieval(
+    model: str,
+    question: str,
+    last_state: dict[str, Any],
+    *,
+    debug: bool = False,
+) -> tuple[str, dict[str, Any]]:
+    """Rewrite a follow-up question into a standalone question for Chroma retrieval.
+
+    Uses the last query state to resolve pronouns and inject entity names so the
+    embedding search surfaces field-relevant artifacts instead of generic
+    scope/intent documents.
+
+    Returns (retrieval_query, debug_dict). Falls back to the original question
+    on any failure so retrieval always proceeds.
+    """
+    dbg: dict[str, Any] = {}
+    if not last_state:
+        return question, dbg
+
+    # Compact context: only entity-bearing fields matter for pronoun resolution.
+    # Exclude sort/limit — they are query implementation details, not entity
+    # references, and including them causes the rewriter to inject noise like
+    # "highest msrp" or "listed in the catalog" which degrades retrieval quality.
+    ctx = {
+        k: v for k, v in last_state.items()
+        if k in ("scope", "filters", "group_by", "year_compare")
+        and v not in (None, [], {})
+    }
+    user_msg = f"Context: {json.dumps(ctx, ensure_ascii=False)}\nFollow-up: {question}"
+
+    if debug:
+        dbg = {"model": model, "system": _REWRITER_SYSTEM, "user": user_msg}
+
+    try:
+        raw = blade_ai.ollama_chat(model, _REWRITER_SYSTEM, user_msg, timeout=15.0)
+        if debug:
+            dbg["raw_response"] = raw
+        rewritten = (raw or "").strip()
+        if rewritten.startswith('"') and rewritten.endswith('"'):
+            rewritten = rewritten[1:-1]
+        # guard against multi-line output from verbose models
+        rewritten = rewritten.split("\n")[0].strip()
+        if rewritten:
+            if debug:
+                dbg["rewritten_query"] = rewritten
+            return rewritten, dbg
+    except Exception:
+        pass
+
+    return question, dbg
 
 
 def _reporting_llm_plan(

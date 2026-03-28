@@ -53,6 +53,7 @@ from reporting.constants import (
     REPORTING_PLANNER_MODEL,
     REPORTING_PLANNER_RETRY_MODEL,
     REPORTING_RESPONDER_MODEL,
+    REPORTING_REWRITER_MODEL,
     GetConn,
 )
 from reporting.plan_models import (
@@ -73,6 +74,7 @@ from reporting.planner import (
     _reporting_build_prompt_schema,
     _reporting_has_substantive_rows,
     _reporting_llm_plan,
+    _reporting_rewrite_query_for_retrieval,
     _reporting_summarize_state_for_hints,
 )
 from reporting.retrieval import format_retrieval_context, retrieve_artifacts_with_meta
@@ -1174,9 +1176,22 @@ def run_reporting_query(
                 meta={"classification": classification} if classification else {},
             )
 
-        # ── Step 1: Retrieval ──────────────────────────────────────────────
+        # ── Step 1a: Query rewriting ───────────────────────────────────────
+        # For follow-up questions the raw question often contains pronouns
+        # ("those", "it", "them") that embed poorly. Rewrite into a standalone
+        # question using last_query_state so Chroma retrieves field-relevant
+        # artifacts rather than generic scope/intent documents.
+        last_query_state = _reporting_get_last_query_state(conn, session_id)
+        retrieval_query, rewriter_debug = _reporting_rewrite_query_for_retrieval(
+            REPORTING_REWRITER_MODEL,
+            question,
+            last_query_state or {},
+            debug=debug_pipeline,
+        )
+
+        # ── Step 1b: Retrieval ─────────────────────────────────────────────
         retrieval_artifacts, retrieval_meta = retrieve_artifacts_with_meta(
-            question, top_k=6, conn=conn, debug=debug_pipeline
+            retrieval_query, top_k=6, conn=conn, debug=debug_pipeline
         )
         retrieval_context = format_retrieval_context(retrieval_artifacts)
 
@@ -1360,6 +1375,8 @@ def run_reporting_query(
         }
         if debug_pipeline:
             meta["pipeline_debug"] = {
+                "rewriter_llm": rewriter_debug,
+                "retrieval_query": retrieval_query,
                 "retrieval": retrieval_meta,
                 "planner_llm": plan_meta.get("planner_llm") or {},
                 "responder_llm": responder_debug,

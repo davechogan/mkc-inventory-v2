@@ -6,13 +6,17 @@ from pathlib import Path
 
 import pytest
 
-_FIXTURES_DIR = Path(__file__).parent / "fixtures"
-_SEED_DB = _FIXTURES_DIR / "mkc_inventory_seed.db"
+_REPO_ROOT = Path(__file__).parent.parent
+_ARTIFACTS_SEED = _REPO_ROOT / "artifacts" / "db_snapshots" / "mkc_inventory_seed.db"
+_FIXTURES_SEED = _REPO_ROOT / "tests" / "fixtures" / "mkc_inventory_seed.db"
+# Prefer the artifacts submodule seed; fall back to tests/fixtures for CI
+# environments where the private submodule is not initialized.
+_SEED_DB = _ARTIFACTS_SEED if _ARTIFACTS_SEED.exists() else _FIXTURES_SEED
 
 # Ensure importing `app.py` uses a throwaway DB during unit tests.
-# The DB is seeded from tests/fixtures/mkc_inventory_seed.db — a known-good
-# snapshot committed to the repo. Update the snapshot deliberately when the
-# catalog or inventory changes in a way that should be reflected in tests.
+# The canonical seed DB lives in artifacts/db_snapshots/mkc_inventory_seed.db
+# (private submodule). Update it deliberately when the catalog or inventory
+# changes in a way that should be reflected in tests.
 _TEST_DB_DIR = Path(tempfile.mkdtemp(prefix="mkc_pytest_db_"))
 _TEST_DB_PATH = _TEST_DB_DIR / f"mkc_inventory.test.{uuid.uuid4().hex}.db"
 

@@ -36,6 +36,8 @@ class PlanDimension(str, Enum):
     FORM_NAME = "form_name"
     COLLABORATOR_NAME = "collaborator_name"
     STEEL = "steel"
+    BLADE_FINISH = "blade_finish"
+    HANDLE_COLOR = "handle_color"
     CONDITION = "condition"
     LOCATION = "location"
     KNIFE_NAME = "knife_name"
@@ -48,6 +50,11 @@ class PlanField(str, Enum):
     FORM_NAME = "form_name"
     COLLABORATOR_NAME = "collaborator_name"
     STEEL = "steel"
+    BLADE_FINISH = "blade_finish"
+    BLADE_COLOR = "blade_color"
+    HANDLE_COLOR = "handle_color"
+    HANDLE_TYPE = "handle_type"
+    BLADE_LENGTH = "blade_length"
     CONDITION = "condition"
     LOCATION = "location"
     KNIFE_NAME = "knife_name"
@@ -57,6 +64,10 @@ class PlanField(str, Enum):
     PURCHASE_PRICE = "purchase_price"
     ESTIMATED_VALUE = "estimated_value"
     MSRP = "msrp"
+    QUANTITY = "quantity"
+    PURCHASE_SOURCE = "purchase_source"
+    GENERATION_LABEL = "generation_label"
+    SIZE_MODIFIER = "size_modifier"
     TEXT_SEARCH = "text_search"
 
 
@@ -225,6 +236,7 @@ class CanonicalReportingPlan(BaseModel):
         _INVENTORY_ONLY = {
             "condition", "location", "acquired_date",
             "purchase_price", "estimated_value", "knife_name",
+            "quantity", "purchase_source",
         }
         if self.scope == PlanScope.CATALOG:
             all_field_vals = {c.field.value for c in [*self.filters, *self.exclusions]}
