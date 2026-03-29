@@ -517,6 +517,29 @@ All work must comply with `AI_Coding_Standards_and_Rules.md`. The most relevant 
 
 ## 8. Deferred Features
 
+### DF-000 — Complete attribute schema normalization (MUST DO before form rewrites)
+
+**What it does:**
+In 2026-03-29 session, `handle_color`, `blade_color`, `steel`, `blade_finish`, and `condition` were normalized out of free-text columns into proper FK lookup tables (`handle_colors`, `blade_colors`, `blade_steels`, `blade_finishes`, `conditions`). FK `*_id` columns were added to both `knife_models_v2` and `inventory_items_v2` and fully backfilled.
+
+**What is NOT yet done — must be completed:**
+1. **Drop the legacy text columns** — `handle_color`, `blade_color`, `steel`, `blade_finish` on `knife_models_v2` and `inventory_items_v2`; `condition` on `inventory_items_v2`. SQLite requires a table rebuild to drop columns (create new table, copy, drop old, rename). Do this only after step 2 is verified working.
+2. **Migrate the inventory add/edit form** — `POST /api/v2/inventory` and `PUT /api/v2/inventory/{id}` currently write free text into the old text columns. Rewrite them to accept IDs (or names that resolve to IDs) and write to the `*_id` FK columns instead.
+3. **Migrate the catalog add/edit form** — same pattern for `knife_models_v2` create/update endpoints.
+4. **Update the reporting views** — `reporting_inventory` and `reporting_models` views currently read directly from the text columns. Once those are dropped, update the views to JOIN to the lookup tables and expose `handle_color`, `blade_color`, etc. as derived text columns so the reporting pipeline sees no change.
+5. **Remove `v2_option_values` rows for normalized types** — `handle-colors`, `blade-colors`, `blade-steels`, `blade-finishes`, `conditions` rows in `v2_option_values` are now redundant. After the API is fully migrated, delete them to avoid confusion.
+
+**Why deferred:**
+The normalization groundwork was done mid-session while fixing a different bug (color dropdowns showing nothing). The form layer and reporting views are separate work that should be done intentionally, with tests.
+
+**DB state at deferral:**
+- Snapshot: `data/mkc_inventory.db.backup.20260329T162956Z`
+- Commit: `d168dec` — "normalize handle/blade color, steel, finish, condition into FK lookup tables"
+- All `*_id` FK columns are populated; zero unmatched rows.
+
+---
+
+
 Features that were scoped, understood, and explicitly deferred for future work. Each entry records what the feature does, why it was deferred, and what needs to happen to resume it.
 
 ### DF-001 — Image-based knife identification (AI / Photo)
