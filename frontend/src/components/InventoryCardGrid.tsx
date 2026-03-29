@@ -60,7 +60,7 @@ function LazyImage({ src, alt }: LazyImageProps) {
           <img
             src={src}
             alt={alt}
-            className={`w-full h-full object-cover transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0'}`}
+            className={`w-full h-full object-contain transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0'}`}
             onLoad={() => setLoaded(true)}
             onError={() => setError(true)}
           />
@@ -94,8 +94,8 @@ function Card({ item, onClick }: CardProps) {
       onClick={onClick}
       className="bg-card border border-border rounded-2xl overflow-hidden cursor-pointer group hover:border-gold/40 hover:shadow-lg hover:shadow-gold/5 transition-all duration-200"
     >
-      {/* Image area — 16:9 */}
-      <div className="relative w-full" style={{ paddingBottom: '56.25%' }}>
+      {/* Image area — 4:3 */}
+      <div className="relative w-full" style={{ paddingBottom: '75%' }}>
         <div className="absolute inset-0 bg-card">
           {url ? (
             <LazyImage src={url} alt={item.knife_name} />
