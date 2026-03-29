@@ -68,7 +68,9 @@ def create_reporting_router(
 
     @router.get("/reporting")
     def reporting_page() -> FileResponse:
-        return FileResponse(static_dir / "reporting.html")
+        # Serve the React SPA build; falls back to legacy HTML if build is missing
+        react_build = static_dir / "dist" / "index.html"
+        return FileResponse(react_build if react_build.exists() else static_dir / "reporting.html")
 
     @router.get("/api/reporting/schema")
     def reporting_schema() -> dict[str, Any]:
