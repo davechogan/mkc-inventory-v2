@@ -43,6 +43,7 @@ export interface Summary {
   total_estimated_value?: number;
   master_count?: number;
   master_models?: number;
+  catalog_total?: number;
   by_family: FamilyStat[];
 }
 

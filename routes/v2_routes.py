@@ -210,6 +210,9 @@ def create_v2_router(
             master_models = conn.execute(
                 "SELECT COUNT(DISTINCT knife_model_id) AS c FROM inventory_items_v2 WHERE knife_model_id IS NOT NULL"
             ).fetchone()["c"]
+            catalog_total = conn.execute(
+                "SELECT COUNT(*) AS c FROM knife_models_v2"
+            ).fetchone()["c"]
             by_family = conn.execute(
                 """
                 SELECT
@@ -230,6 +233,7 @@ def create_v2_router(
                 "estimated_value": summary["estimated_value"],
                 "master_models": master_models,
                 "master_count": master_models,
+                "catalog_total": catalog_total,
                 "by_family": by_family,
             }
 

@@ -43,10 +43,9 @@ function SkeletonStat() {
 }
 
 export function StatStrip({ summary, loading }: StatStripProps) {
-  const avgCost =
-    summary && summary.total_quantity > 0
-      ? summary.total_spend / summary.total_quantity
-      : null;
+  const owned = summary?.master_models ?? 0;
+  const total = summary?.catalog_total ?? 0;
+  const coverageValue = total > 0 ? `${owned} / ${total}` : `${owned}`;
 
   return (
     <div className="flex items-center gap-10 px-8 py-4 border-b border-border">
@@ -72,9 +71,8 @@ export function StatStrip({ summary, loading }: StatStripProps) {
           />
           <div className="w-px h-10 bg-border flex-shrink-0" />
           <StatItem
-            label="Avg. Cost"
-            value={formatCurrency(avgCost)}
-            gold
+            label="Models"
+            value={coverageValue}
           />
         </>
       )}
