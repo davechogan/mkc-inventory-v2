@@ -204,80 +204,104 @@ function ModelCard({
 
 // ── Detail panel ──────────────────────────────────────────────────────────────
 
-interface ColorwayImage {
+interface Colorway {
   id: number;
-  color_name: string;
-  filename: string;
-  url_path: string;
+  handle_color_id: number;
+  handle_color: string;
+  blade_color_id: number | null;
+  blade_color: string | null;
+  has_image: number;
+  is_transparent: number;
+}
+
+interface ColorOption {
+  id: number;
+  name: string;
 }
 
 function ModelDetail({ model, onClose }: { model: CatalogModel; onClose: () => void }) {
   const [imgLoaded, setImgLoaded] = useState(false);
   const imgSrc = model.colorway_image_url ?? (model.has_identifier_image ? `/api/v2/models/${model.id}/image` : null);
 
-  // Colorway image list
-  const [colorwayImages, setColorwayImages] = useState<ColorwayImage[]>([]);
+  // Colorway list
+  const [colorways, setColorways] = useState<Colorway[]>([]);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [uploadingId, setUploadingId] = useState<number | null>(null);
 
-  const fetchColorwayImages = useCallback(async () => {
-    const res = await fetch(`/api/v2/models/${model.id}/colorway-images`);
-    if (res.ok) setColorwayImages(await res.json() as ColorwayImage[]);
+  const fetchColorways = useCallback(async () => {
+    const res = await fetch(`/api/v2/models/${model.id}/colorways`);
+    if (res.ok) setColorways(await res.json() as Colorway[]);
   }, [model.id]);
 
-  // Upload state
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
-  const [handleColor, setHandleColor] = useState('');
-  const [bladeColor, setBladeColor] = useState('');
-  const [uploading, setUploading] = useState(false);
-  const [uploadMsg, setUploadMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const [colorOptions, setColorOptions] = useState<{ handle_colors: string[]; blade_colors: string[] }>({ handle_colors: [], blade_colors: [] });
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  // Add-colorway state
+  const [handleColorId, setHandleColorId] = useState('');
+  const [bladeColorId, setBladeColorId] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [colorOptions, setColorOptions] = useState<{ handle_colors: ColorOption[]; blade_colors: ColorOption[] }>({ handle_colors: [], blade_colors: [] });
 
   useEffect(() => {
-    fetchColorwayImages();
+    fetchColorways();
     fetch('/api/v2/colors')
       .then((r) => r.json())
-      .then((d) => setColorOptions(d as { handle_colors: string[]; blade_colors: string[] }))
+      .then((d) => setColorOptions(d as { handle_colors: ColorOption[]; blade_colors: ColorOption[] }))
       .catch(() => {});
-  }, [fetchColorwayImages]);
+  }, [fetchColorways]);
 
-  const handleUpload = async () => {
-    if (!uploadFile || !handleColor.trim()) return;
-    setUploading(true);
-    setUploadMsg(null);
-    const fd = new FormData();
-    fd.append('file', uploadFile);
-    fd.append('handle_color', handleColor.trim());
-    if (bladeColor.trim()) fd.append('blade_color', bladeColor.trim());
+  const handleAddColorway = async () => {
+    if (!handleColorId) return;
+    setAdding(true);
+    setMsg(null);
     try {
-      const res = await fetch(`/api/v2/models/${model.id}/colorway-image`, { method: 'POST', body: fd });
+      const body: Record<string, number> = { handle_color_id: Number(handleColorId) };
+      if (bladeColorId) body.blade_color_id = Number(bladeColorId);
+      const res = await fetch(`/api/v2/models/${model.id}/colorways`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
       if (!res.ok) {
         const err = await res.json().catch(() => ({})) as { detail?: string };
         throw new Error(err.detail ?? `Error ${res.status}`);
       }
-      const data = await res.json() as { filename: string };
-      setUploadMsg({ ok: true, text: `Saved as ${data.filename}` });
-      setUploadFile(null);
-      setHandleColor('');
-      setBladeColor('');
-      if (fileInputRef.current) fileInputRef.current.value = '';
-      fetchColorwayImages();
+      setMsg({ ok: true, text: 'Colorway added' });
+      setHandleColorId('');
+      setBladeColorId('');
+      fetchColorways();
     } catch (e) {
-      setUploadMsg({ ok: false, text: e instanceof Error ? e.message : 'Upload failed' });
+      setMsg({ ok: false, text: e instanceof Error ? e.message : 'Failed' });
     } finally {
-      setUploading(false);
+      setAdding(false);
     }
   };
 
-  const handleDelete = async (imgId: number) => {
-    setDeletingId(imgId);
+  const handleUploadImage = async (cwId: number, file: File) => {
+    setUploadingId(cwId);
+    const fd = new FormData();
+    fd.append('file', file);
     try {
-      const res = await fetch(`/api/v2/models/${model.id}/colorway-images/${imgId}`, { method: 'DELETE' });
+      const res = await fetch(`/api/v2/models/${model.id}/colorways/${cwId}/image`, { method: 'PUT', body: fd });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { detail?: string };
+        throw new Error(err.detail ?? `Error ${res.status}`);
+      }
+      fetchColorways();
+    } catch (e) {
+      setMsg({ ok: false, text: e instanceof Error ? e.message : 'Upload failed' });
+    } finally {
+      setUploadingId(null);
+    }
+  };
+
+  const handleDelete = async (cwId: number) => {
+    setDeletingId(cwId);
+    try {
+      const res = await fetch(`/api/v2/models/${model.id}/colorways/${cwId}`, { method: 'DELETE' });
       if (!res.ok) {
         const err = await res.json().catch(() => ({})) as { detail?: string };
         throw new Error(err.detail ?? 'Delete failed');
       }
-      setColorwayImages((prev) => prev.filter((img) => img.id !== imgId));
+      setColorways((prev) => prev.filter((cw) => cw.id !== cwId));
     } finally {
       setDeletingId(null);
     }
@@ -371,28 +395,79 @@ function ModelDetail({ model, onClose }: { model: CatalogModel; onClose: () => v
           </a>
         )}
 
-        {/* Existing colorway images */}
+        {/* Colorways */}
         <div className="border-t border-border/40 pt-4">
-          <div className="text-muted text-xs uppercase tracking-widest mb-3">Colorway Images</div>
-          {colorwayImages.length === 0 ? (
-            <p className="text-muted text-xs italic">No images uploaded yet.</p>
+          <div className="text-muted text-xs uppercase tracking-widest mb-3">
+            Colorways
+            {colorways.length > 0 && <span className="ml-2 text-muted/60">({colorways.filter(c => !!c.has_image).length}/{colorways.length} with images)</span>}
+          </div>
+          {colorways.length === 0 ? (
+            <p className="text-muted text-xs italic">No colorways defined yet.</p>
           ) : (
             <div className="flex flex-col gap-2">
-              {colorwayImages.map((img) => (
-                <div key={img.id} className="flex items-center gap-3 group">
-                  <img
-                    src={img.url_path}
-                    alt={img.color_name}
-                    className="w-14 h-10 object-contain rounded bg-card flex-shrink-0 border border-border"
-                  />
-                  <span className="flex-1 text-xs text-ink truncate">{img.color_name}</span>
+              {colorways.map((cw) => (
+                <div key={cw.id} className="flex items-center gap-3 group">
+                  {/* Thumbnail or placeholder */}
+                  {!!cw.has_image ? (
+                    <img
+                      src={`/api/v2/colorway-images/${cw.id}`}
+                      alt={cw.handle_color}
+                      className="w-14 h-10 object-contain rounded bg-card flex-shrink-0 border border-border"
+                    />
+                  ) : (
+                    <label className="w-14 h-10 rounded bg-card flex-shrink-0 border border-dashed border-border/60 flex items-center justify-center cursor-pointer hover:border-gold/40 transition-colors">
+                      {uploadingId === cw.id ? (
+                        <span className="text-muted text-[10px]">...</span>
+                      ) : (
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-muted/40">
+                          <path d="M12 5v14M5 12h14" strokeLinecap="round" />
+                        </svg>
+                      )}
+                      <input
+                        type="file"
+                        accept=".png,image/png"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) handleUploadImage(cw.id, f);
+                          e.target.value = '';
+                        }}
+                      />
+                    </label>
+                  )}
+                  {/* Color names */}
+                  <div className="flex-1 min-w-0">
+                    <span className="text-xs text-ink truncate block">{cw.handle_color}</span>
+                    {cw.blade_color && (
+                      <span className="text-[10px] text-muted truncate block">{cw.blade_color} blade</span>
+                    )}
+                  </div>
+                  {/* Upload button for existing images (replace) */}
+                  {!!cw.has_image && (
+                    <label className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 text-muted hover:text-ink p-1 cursor-pointer" title="Replace image">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" />
+                      </svg>
+                      <input
+                        type="file"
+                        accept=".png,image/png"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) handleUploadImage(cw.id, f);
+                          e.target.value = '';
+                        }}
+                      />
+                    </label>
+                  )}
+                  {/* Delete button */}
                   <button
-                    onClick={() => handleDelete(img.id)}
-                    disabled={deletingId === img.id}
-                    title="Remove image"
+                    onClick={() => handleDelete(cw.id)}
+                    disabled={deletingId === cw.id}
+                    title="Remove colorway"
                     className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 text-red-400 hover:text-red-300 disabled:opacity-30 p-1"
                   >
-                    {deletingId === img.id ? '…' : (
+                    {deletingId === cw.id ? '...' : (
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14H6L5 6" /><path d="M10 11v6M14 11v6" /><path d="M9 6V4h6v2" />
                       </svg>
@@ -404,47 +479,40 @@ function ModelDetail({ model, onClose }: { model: CatalogModel; onClose: () => v
           )}
         </div>
 
-        {/* Colorway image upload */}
+        {/* Add colorway */}
         <div className="border-t border-border/40 pt-4">
-          <div className="text-muted text-xs uppercase tracking-widest mb-3">Add Colorway Image</div>
+          <div className="text-muted text-xs uppercase tracking-widest mb-3">Add Colorway</div>
           <div className="flex flex-col gap-2">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".png,image/png"
-              onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)}
-              className="text-xs text-muted file:mr-3 file:py-1 file:px-3 file:rounded-md file:border file:border-border file:bg-card file:text-ink file:text-xs file:cursor-pointer hover:file:border-gold/40 transition-colors"
-            />
             <select
-              value={handleColor}
-              onChange={(e) => setHandleColor(e.target.value)}
+              value={handleColorId}
+              onChange={(e) => setHandleColorId(e.target.value)}
               className="w-full px-3 py-1.5 bg-card border border-border rounded-lg text-xs text-ink focus:outline-none focus:border-gold/60 transition-colors"
             >
               <option value="">Handle color *</option>
               {colorOptions.handle_colors.map((c) => (
-                <option key={c} value={c}>{c}</option>
+                <option key={c.id} value={c.id}>{c.name}</option>
               ))}
             </select>
             <select
-              value={bladeColor}
-              onChange={(e) => setBladeColor(e.target.value)}
+              value={bladeColorId}
+              onChange={(e) => setBladeColorId(e.target.value)}
               className="w-full px-3 py-1.5 bg-card border border-border rounded-lg text-xs text-ink focus:outline-none focus:border-gold/60 transition-colors"
             >
               <option value="">Blade color — optional</option>
               {colorOptions.blade_colors.map((c) => (
-                <option key={c} value={c}>{c}</option>
+                <option key={c.id} value={c.id}>{c.name}</option>
               ))}
             </select>
             <button
-              onClick={handleUpload}
-              disabled={!uploadFile || !handleColor.trim() || uploading}
+              onClick={handleAddColorway}
+              disabled={!handleColorId || adding}
               className="w-full py-1.5 rounded-lg bg-gold text-black text-xs font-semibold hover:bg-gold-bright disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
-              {uploading ? 'Uploading…' : 'Upload PNG'}
+              {adding ? 'Adding...' : 'Add Colorway'}
             </button>
-            {uploadMsg && (
-              <p className={`text-xs ${uploadMsg.ok ? 'text-gold' : 'text-red-400'}`}>
-                {uploadMsg.text}
+            {msg && (
+              <p className={`text-xs ${msg.ok ? 'text-gold' : 'text-red-400'}`}>
+                {msg.text}
               </p>
             )}
           </div>

@@ -1358,8 +1358,6 @@ class IdentifierQuery(BaseModel):
 app = FastAPI(title="MKC Inventory Manager")
 init_db()
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-if IMAGES_COLORS_DIR.exists():
-    app.mount("/images/colors", StaticFiles(directory=IMAGES_COLORS_DIR), name="images_colors")
 
 # ---------------------------------------------------------------------------
 # Version endpoint — reads git info once at startup
@@ -1398,7 +1396,6 @@ v2_router, run_v2_identify = create_v2_router(
     get_conn=get_conn,
     ollama_vision_model=OLLAMA_VISION_MODEL,
     inventory_csv_columns=INVENTORY_CSV_COLUMNS,
-    images_colors_dir=IMAGES_COLORS_DIR,
     migrate_legacy_media_to_v2=migrate_legacy_media_to_v2,
     backfill_v2_model_identity=backfill_v2_model_identity,
     normalize_v2_additional_fields=normalize_v2_additional_fields,

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -8,6 +8,23 @@ interface OptionItem {
 }
 
 type OptionsMap = Record<string, OptionItem[]>;
+
+interface AuditModel {
+  id: number;
+  official_name: string;
+  total_colorways: number;
+  with_image: number;
+}
+
+interface AuditColorway {
+  id: number;
+  handle_color_id: number;
+  handle_color: string;
+  blade_color_id: number | null;
+  blade_color: string | null;
+  has_image: number;
+  is_transparent: number;
+}
 
 const OPTION_TYPES: { key: string; label: string }[] = [
   { key: 'blade-steels',      label: 'Blade Steels' },
@@ -106,12 +123,187 @@ function OptionSection({ optionKey, label, items, onAdd, onDelete }: OptionSecti
   );
 }
 
+// ── ImageAudit ───────────────────────────────────────────────────────────────
+
+function AuditRow({ model, onUploaded }: { model: AuditModel; onUploaded: () => void }) {
+  const [expanded, setExpanded] = useState(false);
+  const [colorways, setColorways] = useState<AuditColorway[]>([]);
+  const [uploadingId, setUploadingId] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!expanded) return;
+    fetch(`/api/v2/models/${model.id}/colorways`)
+      .then(r => r.json())
+      .then(d => setColorways(d as AuditColorway[]))
+      .catch(() => {});
+  }, [expanded, model.id]);
+
+  const handleUpload = async (cwId: number, file: File) => {
+    setUploadingId(cwId);
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      const res = await fetch(`/api/v2/models/${model.id}/colorways/${cwId}/image`, { method: 'PUT', body: fd });
+      if (res.ok) {
+        setColorways(prev => prev.map(c => c.id === cwId ? { ...c, has_image: 1 } : c));
+        onUploaded();
+      }
+    } finally {
+      setUploadingId(null);
+    }
+  };
+
+  const pct = model.total_colorways > 0 ? Math.round((model.with_image / model.total_colorways) * 100) : 0;
+  const missing = model.total_colorways - model.with_image;
+
+  return (
+    <div className="border border-border rounded-lg overflow-hidden">
+      <button
+        onClick={() => setExpanded(e => !e)}
+        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-card/50 transition-colors"
+      >
+        <svg
+          width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+          className={`text-muted flex-shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`}
+        >
+          <polyline points="9 18 15 12 9 6" />
+        </svg>
+        <span className="flex-1 text-sm text-ink truncate">{model.official_name}</span>
+        <span className="text-xs text-muted flex-shrink-0 w-20 text-right">
+          {model.with_image}/{model.total_colorways}
+        </span>
+        {/* Progress bar */}
+        <div className="w-24 h-1.5 bg-border rounded-full flex-shrink-0 overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all ${pct === 100 ? 'bg-green-500' : missing > 0 ? 'bg-gold' : 'bg-border'}`}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      </button>
+
+      {expanded && (
+        <div className="border-t border-border bg-surface/50 px-4 py-3 flex flex-col gap-2">
+          {colorways.length === 0 ? (
+            <p className="text-muted text-xs italic">No colorways defined.</p>
+          ) : colorways.map(cw => (
+            <div key={cw.id} className="flex items-center gap-3">
+              {!!cw.has_image ? (
+                <img
+                  src={`/api/v2/colorway-images/${cw.id}`}
+                  alt={cw.handle_color}
+                  className="w-12 h-8 object-contain rounded bg-card border border-border flex-shrink-0"
+                />
+              ) : (
+                <UploadSlot cwId={cw.id} uploading={uploadingId === cw.id} onFile={f => handleUpload(cw.id, f)} />
+              )}
+              <span className="text-xs text-ink flex-1 truncate">
+                {cw.handle_color}{cw.blade_color ? ` / ${cw.blade_color}` : ''}
+              </span>
+              {!cw.has_image && (
+                <span className="text-[10px] text-red-400/80 flex-shrink-0">needs image</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function UploadSlot({ uploading, onFile }: { cwId: number; uploading: boolean; onFile: (f: File) => void }) {
+  const ref = useRef<HTMLInputElement>(null);
+  return (
+    <label className="w-12 h-8 rounded bg-card border border-dashed border-border/60 flex items-center justify-center cursor-pointer hover:border-gold/40 transition-colors flex-shrink-0">
+      {uploading ? (
+        <span className="text-muted text-[10px]">...</span>
+      ) : (
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-muted/40">
+          <path d="M12 5v14M5 12h14" strokeLinecap="round" />
+        </svg>
+      )}
+      <input
+        ref={ref}
+        type="file"
+        accept=".png,image/png"
+        className="hidden"
+        onChange={e => {
+          const f = e.target.files?.[0];
+          if (f) onFile(f);
+          if (ref.current) ref.current.value = '';
+        }}
+      />
+    </label>
+  );
+}
+
+function ImageAudit() {
+  const [models, setModels] = useState<AuditModel[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<'all' | 'missing' | 'complete'>('missing');
+
+  const fetchAudit = useCallback(async () => {
+    const res = await fetch('/api/v2/colorway-audit');
+    if (res.ok) setModels(await res.json() as AuditModel[]);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { fetchAudit(); }, [fetchAudit]);
+
+  const filtered = models.filter(m => {
+    if (filter === 'missing') return m.total_colorways > 0 && m.with_image < m.total_colorways;
+    if (filter === 'complete') return m.total_colorways > 0 && m.with_image === m.total_colorways;
+    return true;
+  });
+
+  const totalColorways = models.reduce((s, m) => s + m.total_colorways, 0);
+  const totalWithImage = models.reduce((s, m) => s + m.with_image, 0);
+
+  return (
+    <div>
+      {/* Summary */}
+      <div className="flex items-center gap-6 mb-4">
+        <p className="text-muted text-sm">
+          {totalWithImage}/{totalColorways} colorways have images ({totalColorways > 0 ? Math.round((totalWithImage / totalColorways) * 100) : 0}%)
+        </p>
+        <div className="flex gap-2">
+          {(['missing', 'complete', 'all'] as const).map(f => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              className={`px-2.5 py-1 rounded-md text-xs transition-colors capitalize ${
+                filter === f ? 'bg-gold/20 text-gold' : 'text-muted hover:text-ink'
+              }`}
+            >
+              {f === 'missing' ? `Missing (${models.filter(m => m.total_colorways > 0 && m.with_image < m.total_colorways).length})` :
+               f === 'complete' ? `Complete (${models.filter(m => m.total_colorways > 0 && m.with_image === m.total_colorways).length})` :
+               `All (${models.length})`}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="text-muted text-sm">Loading...</div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {filtered.map(m => (
+            <AuditRow key={m.id} model={m} onUploaded={fetchAudit} />
+          ))}
+          {filtered.length === 0 && (
+            <p className="text-muted text-sm py-8 text-center">No models match this filter.</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Admin page ────────────────────────────────────────────────────────────────
 
 export default function Admin() {
   const [options, setOptions] = useState<OptionsMap>({});
   const [loading, setLoading] = useState(true);
-  const [activeSection, setActiveSection] = useState<'options' | 'catalog'>('options');
+  const [activeSection, setActiveSection] = useState<'options' | 'images' | 'catalog'>('options');
 
   const fetchOptions = useCallback(async () => {
     const res = await fetch('/api/v2/options');
@@ -181,17 +373,17 @@ export default function Admin() {
       {/* Nav tabs */}
       <div className="border-b border-border px-6">
         <nav className="flex gap-6">
-          {(['options', 'catalog'] as const).map(section => (
+          {([['options', 'Dropdown Options'], ['images', 'Image Audit'], ['catalog', 'Catalog']] as const).map(([key, label]) => (
             <button
-              key={section}
-              onClick={() => setActiveSection(section)}
-              className={`py-3 text-sm font-medium border-b-2 transition-colors capitalize ${
-                activeSection === section
+              key={key}
+              onClick={() => setActiveSection(key)}
+              className={`py-3 text-sm font-medium border-b-2 transition-colors ${
+                activeSection === key
                   ? 'border-gold text-gold'
                   : 'border-transparent text-muted hover:text-ink'
               }`}
             >
-              {section === 'options' ? 'Dropdown Options' : 'Catalog'}
+              {label}
             </button>
           ))}
         </nav>
@@ -221,6 +413,10 @@ export default function Admin() {
               </div>
             )}
           </>
+        )}
+
+        {activeSection === 'images' && (
+          <ImageAudit />
         )}
 
         {activeSection === 'catalog' && (
