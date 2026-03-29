@@ -128,17 +128,17 @@ function ModelCard({
   return (
     <button
       onClick={onClick}
-      className={`group text-left flex flex-col rounded-xl border overflow-hidden transition-all duration-150 ${
+      className={`group text-left flex flex-col rounded-xl border overflow-hidden transition-all duration-200 hover:shadow-lg hover:shadow-gold/10 ${
         selected
           ? 'border-gold/50 ring-1 ring-gold/20'
-          : 'border-border hover:border-border/70'
+          : 'border-border hover:border-gold/30'
       }`}
       style={{ backgroundColor: '#0f1114' }}
     >
       {/* Image area */}
       <div
         ref={containerRef}
-        className="relative w-full aspect-[4/3] bg-border/10 flex items-center justify-center overflow-hidden flex-shrink-0"
+        className="relative w-full aspect-[4/3] bg-card flex items-center justify-center overflow-hidden flex-shrink-0"
       >
         {model.has_identifier_image && !imgError ? (
           <>
@@ -150,7 +150,7 @@ function ModelCard({
               alt={model.official_name}
               onLoad={() => setImgLoaded(true)}
               onError={() => setImgError(true)}
-              className={`w-full h-full object-contain transition-opacity duration-300 ${imgLoaded ? 'opacity-100' : 'opacity-0'}`}
+              className={`w-full h-full object-contain transition-all duration-300 group-hover:scale-110 ${imgLoaded ? 'opacity-100' : 'opacity-0'}`}
             />
           </>
         ) : (

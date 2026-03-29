@@ -67,7 +67,7 @@ function LazyImage({ src, alt }: LazyImageProps) {
           <img
             src={src}
             alt={alt}
-            className={`w-full h-full object-contain transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0'}`}
+            className={`w-full h-full object-contain transition-all duration-300 group-hover:scale-110 ${loaded ? 'opacity-100' : 'opacity-0'}`}
             onLoad={() => setLoaded(true)}
             onError={() => setError(true)}
           />
