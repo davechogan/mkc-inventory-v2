@@ -103,11 +103,11 @@ export function DetailSheet({ item, onClose }: DetailSheetProps) {
 
             {/* Image */}
             {imageUrl(item) && (
-              <div className="flex-shrink-0 w-full" style={{ aspectRatio: '16/9' }}>
+              <div className="flex-shrink-0 w-full bg-white" style={{ aspectRatio: '4/3' }}>
                 <img
                   src={imageUrl(item)!}
                   alt={item.knife_name}
-                  className="w-full h-full object-cover"
+                  className="w-full h-full object-contain"
                   onError={(e) => { e.currentTarget.parentElement!.style.display = 'none'; }}
                 />
               </div>
@@ -139,13 +139,6 @@ export function DetailSheet({ item, onClose }: DetailSheetProps) {
                 <FieldRow label="Acquired" value={formatDate(item.acquired_date)} />
                 <FieldRow label="Order #" value={item.mkc_order_number} />
                 <FieldRow label="Source" value={item.purchase_source} />
-              </Section>
-
-              <Section title="Condition &amp; Storage">
-                <FieldRow label="Condition" value={item.condition} />
-                <FieldRow label="Quantity" value={item.quantity.toString()} />
-                <FieldRow label="Location" value={item.location} />
-                <FieldRow label="Last Sharpened" value={formatDate(item.last_sharpened)} />
               </Section>
 
               {item.notes && (

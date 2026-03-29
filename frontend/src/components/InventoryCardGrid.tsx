@@ -87,7 +87,6 @@ function Card({ item, onClick }: CardProps) {
   const pills: string[] = [];
   if (item.handle_color) pills.push(item.handle_color);
   if (item.blade_steel) pills.push(item.blade_steel.split(' ')[0]);
-  if (item.condition) pills.push(item.condition);
 
   return (
     <div
@@ -96,7 +95,7 @@ function Card({ item, onClick }: CardProps) {
     >
       {/* Image area — 4:3 */}
       <div className="relative w-full" style={{ paddingBottom: '75%' }}>
-        <div className="absolute inset-0 bg-card">
+        <div className="absolute inset-0 bg-white">
           {url ? (
             <LazyImage src={url} alt={item.knife_name} />
           ) : (
@@ -136,13 +135,10 @@ function Card({ item, onClick }: CardProps) {
         )}
 
         {/* Footer */}
-        <div className="flex items-center justify-between mt-1.5">
+        <div className="mt-1.5">
           <span className="text-gold text-sm font-bold">
             {formatCurrency(item.purchase_price)}
           </span>
-          {item.location && (
-            <span className="text-muted text-xs truncate max-w-[100px]">{item.location}</span>
-          )}
         </div>
       </div>
     </div>

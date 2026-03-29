@@ -6,6 +6,7 @@ import { FilterDrawer } from './components/FilterDrawer';
 import { InventoryTable } from './components/InventoryTable';
 import { InventoryCardGrid } from './components/InventoryCardGrid';
 import { DetailSheet } from './components/DetailSheet';
+import { AddInventoryDrawer } from './components/AddInventoryDrawer';
 import { useInventoryData } from './hooks/useInventoryData';
 import type { FilterState, SortState, InventoryItem } from './types';
 
@@ -159,6 +160,7 @@ export default function App() {
   const [filters, setFilters] = useState<FilterState>(emptyFilters);
   const [sort, setSort] = useState<SortState>({ col: 'knife_name', dir: 'asc' });
   const [filterOpen, setFilterOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
 
   const { items, summary, loading, error, reload } = useInventoryData();
@@ -211,6 +213,16 @@ export default function App() {
         <div className="flex items-center justify-between px-8 py-4 border-b border-border flex-shrink-0">
           <h1 className="text-ink text-xl font-bold">Collection</h1>
           <div className="flex items-center gap-2">
+            {/* Add knife */}
+            <button
+              onClick={() => setAddOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-gold text-black text-sm font-semibold hover:bg-gold-bright transition-colors"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              Add Knife
+            </button>
             {/* View toggle */}
             <div className="flex items-center rounded-lg border border-border overflow-hidden">
               <button
@@ -373,6 +385,12 @@ export default function App() {
       <DetailSheet
         item={selectedItem}
         onClose={() => setSelectedItem(null)}
+      />
+
+      <AddInventoryDrawer
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        onAdded={() => { void reload(); }}
       />
     </div>
   );
