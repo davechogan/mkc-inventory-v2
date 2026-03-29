@@ -438,6 +438,31 @@ def create_v2_router(
             }
 
 
+    @router.get("/api/v2/colors")
+    def v2_colors() -> dict[str, list[str]]:
+        """Return distinct handle and blade colors for use in dropdowns."""
+        with get_conn() as conn:
+            handle = conn.execute(
+                """SELECT DISTINCT handle_color FROM knife_models_v2
+                   WHERE handle_color IS NOT NULL AND handle_color != ''
+                   UNION
+                   SELECT DISTINCT handle_color FROM inventory_items_v2
+                   WHERE handle_color IS NOT NULL AND handle_color != ''
+                   ORDER BY handle_color COLLATE NOCASE"""
+            ).fetchall()
+            blade = conn.execute(
+                """SELECT DISTINCT blade_color FROM knife_models_v2
+                   WHERE blade_color IS NOT NULL AND blade_color != ''
+                   UNION
+                   SELECT DISTINCT blade_color FROM inventory_items_v2
+                   WHERE blade_color IS NOT NULL AND blade_color != ''
+                   ORDER BY blade_color COLLATE NOCASE"""
+            ).fetchall()
+            return {
+                "handle_colors": [r[0] for r in handle],
+                "blade_colors": [r[0] for r in blade],
+            }
+
     @router.get("/api/v2/models/by-legacy-master/{legacy_id}")
     def v2_model_by_legacy_master(legacy_id: int) -> dict[str, Any]:
         """Resolve legacy master_knives.id to v2 model for ?add= flow from Identify page."""

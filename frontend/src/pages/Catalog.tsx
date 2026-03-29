@@ -214,7 +214,15 @@ function ModelDetail({ model, onClose }: { model: CatalogModel; onClose: () => v
   const [bladeColor, setBladeColor] = useState('');
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [colorOptions, setColorOptions] = useState<{ handle_colors: string[]; blade_colors: string[] }>({ handle_colors: [], blade_colors: [] });
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    fetch('/api/v2/colors')
+      .then((r) => r.json())
+      .then((d) => setColorOptions(d as { handle_colors: string[]; blade_colors: string[] }))
+      .catch(() => {});
+  }, []);
 
   const handleUpload = async () => {
     if (!uploadFile || !handleColor.trim()) return;
@@ -342,20 +350,26 @@ function ModelDetail({ model, onClose }: { model: CatalogModel; onClose: () => v
               onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)}
               className="text-xs text-muted file:mr-3 file:py-1 file:px-3 file:rounded-md file:border file:border-border file:bg-card file:text-ink file:text-xs file:cursor-pointer hover:file:border-gold/40 transition-colors"
             />
-            <input
-              type="text"
-              placeholder="Handle color (e.g. Orange/Black)"
+            <select
               value={handleColor}
               onChange={(e) => setHandleColor(e.target.value)}
-              className="w-full px-3 py-1.5 bg-card border border-border rounded-lg text-xs text-ink placeholder:text-muted focus:outline-none focus:border-gold/60 transition-colors"
-            />
-            <input
-              type="text"
-              placeholder="Blade color — optional (tactical knives)"
+              className="w-full px-3 py-1.5 bg-card border border-border rounded-lg text-xs text-ink focus:outline-none focus:border-gold/60 transition-colors"
+            >
+              <option value="">Handle color *</option>
+              {colorOptions.handle_colors.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+            <select
               value={bladeColor}
               onChange={(e) => setBladeColor(e.target.value)}
-              className="w-full px-3 py-1.5 bg-card border border-border rounded-lg text-xs text-ink placeholder:text-muted focus:outline-none focus:border-gold/60 transition-colors"
-            />
+              className="w-full px-3 py-1.5 bg-card border border-border rounded-lg text-xs text-ink focus:outline-none focus:border-gold/60 transition-colors"
+            >
+              <option value="">Blade color — optional</option>
+              {colorOptions.blade_colors.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
             <button
               onClick={handleUpload}
               disabled={!uploadFile || !handleColor.trim() || uploading}
@@ -454,7 +468,7 @@ export default function Catalog() {
     <div className="min-h-screen bg-surface">
       <Sidebar />
 
-      <main className={`${marginClass} transition-[margin] duration-200 flex flex-col min-h-screen`}>
+      <main className={`${marginClass} transition-[margin] duration-200 flex flex-col h-screen overflow-hidden`}>
         {/* Top bar */}
         <div className="flex items-center justify-between px-8 py-4 border-b border-border flex-shrink-0 gap-4 flex-wrap">
           <h1 className="text-ink text-xl font-bold flex-shrink-0">Catalog</h1>
