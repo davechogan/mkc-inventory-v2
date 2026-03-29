@@ -20,6 +20,9 @@ data/*.empty-broken.*
 /local/**
 !/local/README.md
 
+# Retired colorway images — now stored as blobs in model_colorways table
+Images/MKC_Colors_TO_DELETE/
+
 # Artifact policy reference:
 # Non-release artifacts belong in Artifacts.git per:
 # .cursor/rules/artifacts-repo-workflow.mdc
