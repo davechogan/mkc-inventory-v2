@@ -130,7 +130,7 @@ function ModelCard({
   return (
     <button
       onClick={onClick}
-      className={`relative group text-left flex flex-col rounded-xl border overflow-hidden transition-all duration-300 hover:scale-[1.07] hover:z-10 hover:shadow-xl hover:shadow-gold/10 ${
+      className={`relative group text-left flex flex-col rounded-xl border overflow-hidden transition-all duration-300 hover:scale-[1.1] hover:z-10 hover:shadow-xl hover:shadow-gold/20 ${
         selected
           ? 'border-gold/50 ring-1 ring-gold/20'
           : 'border-border hover:border-gold/30'

@@ -111,7 +111,7 @@ function Card({ item, onClick }: CardProps) {
   return (
     <div
       onClick={onClick}
-      className="relative bg-card border border-border rounded-2xl overflow-hidden cursor-pointer group hover:border-gold/40 hover:shadow-xl hover:shadow-gold/10 hover:scale-[1.07] hover:z-10 transition-all duration-300"
+      className="relative bg-card border border-border rounded-2xl overflow-hidden cursor-pointer group hover:border-gold/40 hover:shadow-xl hover:shadow-gold/20 hover:scale-[1.1] hover:z-10 transition-all duration-300"
     >
       {/* Image area — 4:3 */}
       <div className="relative w-full" style={{ paddingBottom: '75%' }}>
