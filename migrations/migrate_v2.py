@@ -19,6 +19,27 @@ logger = logging.getLogger("mkc_app.migrations")
 def ensure_v2_exclusive_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(
         """
+        CREATE TABLE IF NOT EXISTS handle_colors (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE
+        );
+        CREATE TABLE IF NOT EXISTS blade_colors (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE
+        );
+        CREATE TABLE IF NOT EXISTS blade_steels (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE
+        );
+        CREATE TABLE IF NOT EXISTS blade_finishes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE
+        );
+        CREATE TABLE IF NOT EXISTS conditions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE
+        );
+
         CREATE TABLE IF NOT EXISTS knife_model_images (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             knife_model_id INTEGER NOT NULL UNIQUE,
@@ -60,6 +81,19 @@ def ensure_v2_exclusive_schema(conn: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_kmif_slug ON knife_model_image_files(model_slug);
         CREATE INDEX IF NOT EXISTS idx_kmif_slug_color ON knife_model_image_files(model_slug, color_name);
+
+        CREATE TABLE IF NOT EXISTS model_colorways (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            knife_model_id  INTEGER NOT NULL REFERENCES knife_models_v2(id),
+            handle_color_id INTEGER NOT NULL REFERENCES handle_colors(id),
+            blade_color_id  INTEGER REFERENCES blade_colors(id),
+            image_blob      BLOB,
+            is_transparent  INTEGER NOT NULL DEFAULT 0,
+            created_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_model_colorway
+            ON model_colorways (knife_model_id, handle_color_id, COALESCE(blade_color_id, -1));
         """
     )
 

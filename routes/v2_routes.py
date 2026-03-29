@@ -5,10 +5,8 @@ import base64
 import csv
 import io
 import json
-import re
 import sqlite3
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any, Optional, Type
 
 import blade_ai
@@ -44,22 +42,11 @@ class InventoryItemV2In(BaseModel):
     notes: Optional[str] = None
 
 
-def _color_to_filename_part(color: str) -> str:
-    """Normalize a color string for use in a filename. 'Orange/Black' → 'Orange_Black'."""
-    return re.sub(r'[\s/]+', '_', color.strip()).title()
-
-
-def _slug_to_title(slug: str) -> str:
-    """Convert a model slug to title-cased filename prefix. 'cutbank-paring-knife' → 'Cutbank_Paring_Knife'."""
-    return "_".join(word.capitalize() for word in slug.split("-"))
-
-
 def create_v2_router(
     *,
     get_conn: GetConn,
     ollama_vision_model: str,
     inventory_csv_columns: list[str],
-    images_colors_dir: Path,
     migrate_legacy_media_to_v2,
     backfill_v2_model_identity,
     normalize_v2_additional_fields,
@@ -104,27 +91,18 @@ def create_v2_router(
                 (CASE WHEN kmi.image_blob IS NOT NULL AND length(kmi.image_blob) > 0
                   THEN 1 ELSE 0 END) AS has_identifier_image,
                 COALESCE(
-                  -- Level 1: exact handle color match (normalized, slash-tolerant)
-                  (SELECT url_path FROM knife_model_image_files
-                   WHERE model_slug = km.slug
-                     AND REPLACE(REPLACE(LOWER(color_name), ' ', ''), '/', '')
-                       = REPLACE(REPLACE(LOWER(COALESCE(NULLIF(i.handle_color,''), km.handle_color, '')), ' ', ''), '/', '')
+                  -- Level 1: exact handle color match for this model
+                  (SELECT '/api/v2/colorway-images/' || mc.id FROM model_colorways mc
+                   JOIN handle_colors hc ON hc.id = mc.handle_color_id
+                   WHERE mc.knife_model_id = km.id
+                     AND LOWER(hc.name) = LOWER(COALESCE(i.handle_color, km.handle_color))
+                     AND mc.image_blob IS NOT NULL
                    LIMIT 1),
-                  -- Level 2: blade_color + handle_color combined (e.g. "Steel Desert Ironwood")
-                  (SELECT url_path FROM knife_model_image_files
-                   WHERE model_slug = km.slug
-                     AND REPLACE(REPLACE(LOWER(color_name), ' ', ''), '/', '')
-                       = REPLACE(REPLACE(LOWER(
-                           TRIM(COALESCE(NULLIF(i.blade_color,''), km.blade_color, '')
-                             || ' ' || COALESCE(NULLIF(i.handle_color,''), km.handle_color, ''))
-                         ), ' ', ''), '/', '')
-                   LIMIT 1),
-                  -- Level 3: primary image for this model
-                  (SELECT url_path FROM knife_model_image_files
-                   WHERE model_slug = km.slug AND is_primary = 1 LIMIT 1),
-                  -- Level 4: any image for this model (before falling back to BLOB)
-                  (SELECT url_path FROM knife_model_image_files
-                   WHERE model_slug = km.slug LIMIT 1)
+                  -- Level 2: any image for this model
+                  (SELECT '/api/v2/colorway-images/' || mc.id FROM model_colorways mc
+                   WHERE mc.knife_model_id = km.id
+                     AND mc.image_blob IS NOT NULL
+                   LIMIT 1)
                 ) AS colorway_image_url
             FROM inventory_items_v2 i
             LEFT JOIN knife_models_v2 km ON km.id = i.knife_model_id
@@ -385,7 +363,8 @@ def create_v2_router(
                        km.official_product_url, km.official_image_url,
                        (SELECT COUNT(*) FROM inventory_items_v2 WHERE knife_model_id = km.id) AS in_inventory_count,
                        (CASE WHEN kmi.image_blob IS NOT NULL AND length(kmi.image_blob) > 0 THEN 1 ELSE 0 END) AS has_identifier_image,
-                       (SELECT url_path FROM knife_model_image_files WHERE model_slug = km.slug LIMIT 1) AS colorway_image_url
+                       (SELECT '/api/v2/colorway-images/' || mc.id FROM model_colorways mc
+                        WHERE mc.knife_model_id = km.id AND mc.image_blob IS NOT NULL LIMIT 1) AS colorway_image_url
                 FROM knife_models_v2 km
                 LEFT JOIN knife_model_images kmi ON kmi.knife_model_id = km.id
                 LEFT JOIN knife_types kt ON kt.id = km.type_id
@@ -439,18 +418,18 @@ def create_v2_router(
 
 
     @router.get("/api/v2/colors")
-    def v2_colors() -> dict[str, list[str]]:
+    def v2_colors():
         """Return handle and blade colors from the normalized lookup tables."""
         with get_conn() as conn:
             handle = conn.execute(
-                "SELECT name FROM handle_colors ORDER BY name COLLATE NOCASE"
+                "SELECT id, name FROM handle_colors ORDER BY name COLLATE NOCASE"
             ).fetchall()
             blade = conn.execute(
-                "SELECT name FROM blade_colors ORDER BY name COLLATE NOCASE"
+                "SELECT id, name FROM blade_colors ORDER BY name COLLATE NOCASE"
             ).fetchall()
             return {
-                "handle_colors": [r["name"] for r in handle],
-                "blade_colors": [r["name"] for r in blade],
+                "handle_colors": [{"id": r["id"], "name": r["name"]} for r in handle],
+                "blade_colors": [{"id": r["id"], "name": r["name"]} for r in blade],
             }
 
     @router.get("/api/v2/models/by-legacy-master/{legacy_id}")
@@ -887,95 +866,125 @@ def create_v2_router(
             return {"message": "Reference image cleared."}
 
 
-    @router.post("/api/v2/models/{model_id}/colorway-image")
-    async def v2_upload_colorway_image(
-        model_id: int,
-        file: UploadFile = File(...),
-        handle_color: str = Form(...),
-        blade_color: str = Form(""),
-    ):
-        """Upload a transparent PNG for a specific model colorway.
+    # ── model_colorways endpoints ──────────────────────────────────────
 
-        Saves to Images/MKC_Colors/ with a slug-derived filename and registers
-        it in knife_model_image_files.
-        """
-        if not (file.content_type or "").startswith("image/png") and not (file.filename or "").lower().endswith(".png"):
-            raise HTTPException(status_code=400, detail="File must be a PNG.")
-
+    @router.get("/api/v2/colorway-images/{colorway_id}")
+    def v2_get_colorway_image(colorway_id: int):
+        """Serve the PNG blob for a colorway."""
         with get_conn() as conn:
-            model = conn.execute(
-                "SELECT slug FROM knife_models_v2 WHERE id = ?", (model_id,)
+            row = conn.execute(
+                "SELECT image_blob FROM model_colorways WHERE id = ?",
+                (colorway_id,),
             ).fetchone()
-            if not model or not model["slug"]:
-                raise HTTPException(status_code=404, detail="Model not found or has no slug.")
+            if not row or not row["image_blob"]:
+                raise HTTPException(status_code=404, detail="No image for this colorway.")
+            return Response(content=row["image_blob"], media_type="image/png")
 
-            slug = model["slug"]
-            slug_part = _slug_to_title(slug)
-            handle_part = _color_to_filename_part(handle_color)
-            blade_part = _color_to_filename_part(blade_color) if blade_color.strip() else ""
-
-            if blade_part:
-                filename = f"{slug_part}_{blade_part}_{handle_part}.png"
-                color_name = f"{blade_color.strip()} {handle_color.strip()}"
-            else:
-                filename = f"{slug_part}_{handle_part}.png"
-                color_name = handle_color.strip()
-
-            dest = images_colors_dir / filename
-            content = await file.read()
-            dest.write_bytes(content)
-
-            url_path = f"/images/colors/{filename}"
-            conn.execute(
-                """INSERT INTO knife_model_image_files (model_slug, color_name, filename, url_path)
-                   VALUES (?, ?, ?, ?)
-                   ON CONFLICT(filename) DO UPDATE SET
-                     model_slug=excluded.model_slug,
-                     color_name=excluded.color_name,
-                     url_path=excluded.url_path""",
-                (slug, color_name, filename, url_path),
-            )
-
-        return {"filename": filename, "url_path": url_path, "color_name": color_name}
-
-    @router.get("/api/v2/models/{model_id}/colorway-images")
-    def v2_list_colorway_images(model_id: int):
-        """Return all colorway images registered for a model."""
+    @router.get("/api/v2/models/{model_id}/colorways")
+    def v2_list_colorways(model_id: int):
+        """List all colorways for a model with color names and image status."""
         with get_conn() as conn:
-            model = conn.execute(
-                "SELECT slug FROM knife_models_v2 WHERE id = ?", (model_id,)
-            ).fetchone()
-            if not model:
+            if not conn.execute(
+                "SELECT 1 FROM knife_models_v2 WHERE id = ?", (model_id,)
+            ).fetchone():
                 raise HTTPException(status_code=404, detail="Model not found.")
             rows = conn.execute(
-                """SELECT id, color_name, filename, url_path
-                   FROM knife_model_image_files
-                   WHERE model_slug = ?
-                   ORDER BY color_name COLLATE NOCASE""",
-                (model["slug"],),
+                """SELECT mc.id, mc.handle_color_id, hc.name AS handle_color,
+                          mc.blade_color_id, bc.name AS blade_color,
+                          mc.image_blob IS NOT NULL AS has_image,
+                          mc.is_transparent
+                   FROM model_colorways mc
+                   JOIN handle_colors hc ON mc.handle_color_id = hc.id
+                   LEFT JOIN blade_colors bc ON mc.blade_color_id = bc.id
+                   WHERE mc.knife_model_id = ?
+                   ORDER BY hc.name COLLATE NOCASE, bc.name COLLATE NOCASE""",
+                (model_id,),
             ).fetchall()
             return [dict(r) for r in rows]
 
-    @router.delete("/api/v2/models/{model_id}/colorway-images/{image_id}")
-    def v2_delete_colorway_image(model_id: int, image_id: int):
-        """Remove a colorway image from the DB and delete the file from disk."""
+    @router.post("/api/v2/models/{model_id}/colorways")
+    def v2_add_colorway(model_id: int, payload: dict = Body(...)):
+        """Add a colorway row (no image yet). Expects handle_color_id, optional blade_color_id."""
+        handle_color_id = payload.get("handle_color_id")
+        blade_color_id = payload.get("blade_color_id") or None
+        if not handle_color_id:
+            raise HTTPException(status_code=400, detail="handle_color_id is required.")
         with get_conn() as conn:
-            model = conn.execute(
-                "SELECT slug FROM knife_models_v2 WHERE id = ?", (model_id,)
-            ).fetchone()
-            if not model:
+            if not conn.execute(
+                "SELECT 1 FROM knife_models_v2 WHERE id = ?", (model_id,)
+            ).fetchone():
                 raise HTTPException(status_code=404, detail="Model not found.")
+            if not conn.execute(
+                "SELECT 1 FROM handle_colors WHERE id = ?", (handle_color_id,)
+            ).fetchone():
+                raise HTTPException(status_code=400, detail="Invalid handle_color_id.")
+            if blade_color_id and not conn.execute(
+                "SELECT 1 FROM blade_colors WHERE id = ?", (blade_color_id,)
+            ).fetchone():
+                raise HTTPException(status_code=400, detail="Invalid blade_color_id.")
+            try:
+                cur = conn.execute(
+                    """INSERT INTO model_colorways (knife_model_id, handle_color_id, blade_color_id)
+                       VALUES (?, ?, ?)""",
+                    (model_id, handle_color_id, blade_color_id),
+                )
+            except sqlite3.IntegrityError:
+                raise HTTPException(status_code=409, detail="This colorway already exists for the model.")
+            return {"id": cur.lastrowid, "message": "Colorway added."}
+
+    @router.put("/api/v2/models/{model_id}/colorways/{colorway_id}/image")
+    async def v2_upload_colorway_image(
+        model_id: int,
+        colorway_id: int,
+        file: UploadFile = File(...),
+    ):
+        """Upload a PNG blob for an existing colorway."""
+        if not (file.content_type or "").startswith("image/png") and not (file.filename or "").lower().endswith(".png"):
+            raise HTTPException(status_code=400, detail="File must be a PNG.")
+        content = await file.read()
+        if len(content) > 10 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Image larger than 10 MB.")
+        with get_conn() as conn:
             row = conn.execute(
-                "SELECT filename FROM knife_model_image_files WHERE id = ? AND model_slug = ?",
-                (image_id, model["slug"]),
+                "SELECT id FROM model_colorways WHERE id = ? AND knife_model_id = ?",
+                (colorway_id, model_id),
             ).fetchone()
             if not row:
-                raise HTTPException(status_code=404, detail="Image not found.")
-            conn.execute("DELETE FROM knife_model_image_files WHERE id = ?", (image_id,))
-        file_path = images_colors_dir / row["filename"]
-        if file_path.exists():
-            file_path.unlink()
-        return {"message": "Deleted"}
+                raise HTTPException(status_code=404, detail="Colorway not found for this model.")
+            conn.execute(
+                """UPDATE model_colorways
+                   SET image_blob = ?, is_transparent = 1, updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ?""",
+                (content, colorway_id),
+            )
+        return {"message": "Image uploaded."}
+
+    @router.delete("/api/v2/models/{model_id}/colorways/{colorway_id}")
+    def v2_delete_colorway(model_id: int, colorway_id: int):
+        """Remove a colorway and its image."""
+        with get_conn() as conn:
+            cur = conn.execute(
+                "DELETE FROM model_colorways WHERE id = ? AND knife_model_id = ?",
+                (colorway_id, model_id),
+            )
+            if cur.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Colorway not found for this model.")
+        return {"message": "Colorway deleted."}
+
+    @router.get("/api/v2/colorway-audit")
+    def v2_colorway_audit():
+        """Per-model colorway image completeness for the admin audit view."""
+        with get_conn() as conn:
+            rows = conn.execute(
+                """SELECT km.id, km.official_name,
+                          COUNT(mc.id) AS total_colorways,
+                          SUM(CASE WHEN mc.image_blob IS NOT NULL THEN 1 ELSE 0 END) AS with_image
+                   FROM knife_models_v2 km
+                   LEFT JOIN model_colorways mc ON mc.knife_model_id = km.id
+                   GROUP BY km.id
+                   ORDER BY with_image ASC, total_colorways DESC, km.official_name COLLATE NOCASE"""
+            ).fetchall()
+            return [dict(r) for r in rows]
 
     @router.post("/api/v2/models/{model_id}/recompute-descriptors")
     def v2_recompute_model_descriptors(model_id: int, model: Optional[str] = None):
