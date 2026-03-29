@@ -86,6 +86,17 @@ type SortableKey = keyof InventoryItem;
 function applySort(items: InventoryItem[], sort: SortState): InventoryItem[] {
   if (!sort.col) return items;
   return [...items].sort((a, b) => {
+    // When sorting by family or name, always group by family first then name within
+    if (sort.col === 'knife_family' || sort.col === 'knife_name') {
+      const famA = (a.knife_family ?? '').toLowerCase();
+      const famB = (b.knife_family ?? '').toLowerCase();
+      const famCmp = famA.localeCompare(famB);
+      if (famCmp !== 0) return sort.dir === 'asc' ? famCmp : -famCmp;
+      const nameA = (a.knife_name ?? '').toLowerCase();
+      const nameB = (b.knife_name ?? '').toLowerCase();
+      const nameCmp = nameA.localeCompare(nameB);
+      return sort.dir === 'asc' ? nameCmp : -nameCmp;
+    }
     const key = sort.col as SortableKey;
     const av = a[key];
     const bv = b[key];
@@ -158,7 +169,7 @@ export default function App() {
   );
   const [view, setView] = useState<ViewMode>(getInitialView);
   const [filters, setFilters] = useState<FilterState>(emptyFilters);
-  const [sort, setSort] = useState<SortState>({ col: 'knife_name', dir: 'asc' });
+  const [sort, setSort] = useState<SortState>({ col: 'knife_family', dir: 'asc' });
   const [filterOpen, setFilterOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
@@ -207,7 +218,7 @@ export default function App() {
 
       <main
         id="appMain"
-        className={`${marginClass} transition-[margin] duration-200 flex flex-col min-h-screen`}
+        className={`${marginClass} transition-[margin] duration-200 flex flex-col h-screen overflow-hidden`}
       >
         {/* Top bar */}
         <div className="flex items-center justify-between px-8 py-4 border-b border-border flex-shrink-0">

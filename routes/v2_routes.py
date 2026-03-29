@@ -98,12 +98,10 @@ def create_v2_router(
                      AND LOWER(hc.name) = LOWER(COALESCE(i.handle_color, km.handle_color))
                      AND mc.image_blob IS NOT NULL
                    LIMIT 1),
-                  -- Level 2: prefer Orange/Black, then any image
+                  -- Level 2: any image for this model
                   (SELECT '/api/v2/colorway-images/' || mc.id FROM model_colorways mc
-                   JOIN handle_colors hc ON hc.id = mc.handle_color_id
                    WHERE mc.knife_model_id = km.id
                      AND mc.image_blob IS NOT NULL
-                   ORDER BY CASE WHEN LOWER(hc.name) = 'orange/black' THEN 0 ELSE 1 END
                    LIMIT 1)
                 ) AS colorway_image_url
             FROM inventory_items_v2 i
@@ -181,7 +179,7 @@ def create_v2_router(
                 params.append(f"%{location.strip()}%")
 
             where_sql = " AND ".join(conditions) if conditions else "1=1"
-            sql = f"{base} WHERE {where_sql} ORDER BY km.sortable_name COLLATE NOCASE, i.id DESC"
+            sql = f"{base} WHERE {where_sql} ORDER BY fam.name COLLATE NOCASE, km.sortable_name COLLATE NOCASE, i.id DESC"
             rows = conn.execute(sql, params).fetchall()
             return rows
 
@@ -378,7 +376,7 @@ def create_v2_router(
                 LEFT JOIN knife_series ks ON ks.id = km.series_id
                 LEFT JOIN collaborators c ON c.id = km.collaborator_id
                 WHERE {where_sql}
-                ORDER BY km.sortable_name COLLATE NOCASE, km.official_name
+                ORDER BY fam.name COLLATE NOCASE, km.sortable_name COLLATE NOCASE
                 """,
                 params,
             ).fetchall()
@@ -486,7 +484,7 @@ def create_v2_router(
                 LEFT JOIN knife_series ks ON ks.id = km.series_id
                 LEFT JOIN collaborators c ON c.id = km.collaborator_id
                 WHERE {where}
-                ORDER BY km.sortable_name COLLATE NOCASE
+                ORDER BY fam.name COLLATE NOCASE, km.sortable_name COLLATE NOCASE
                 LIMIT ?
                 """,
                 params,
@@ -1541,7 +1539,7 @@ def create_v2_router(
                 FROM inventory_items_v2 i
                 LEFT JOIN knife_models_v2 km ON km.id = i.knife_model_id
                 LEFT JOIN knife_families fam ON fam.id = km.family_id
-                ORDER BY km.sortable_name COLLATE NOCASE, i.id DESC
+                ORDER BY fam.name COLLATE NOCASE, km.sortable_name COLLATE NOCASE, i.id DESC
                 """
             ).fetchall()
         buffer = io.StringIO()
@@ -1723,7 +1721,7 @@ def create_v2_router(
                 LEFT JOIN knife_families fam ON fam.id = km.family_id
                 LEFT JOIN knife_series ks ON ks.id = km.series_id
                 LEFT JOIN collaborators c ON c.id = km.collaborator_id
-                ORDER BY km.sortable_name COLLATE NOCASE, km.id
+                ORDER BY fam.name COLLATE NOCASE, km.sortable_name COLLATE NOCASE, km.id
                 """
             ).fetchall()
         collab_like_series = {"archery country", "bearded butchers", "meat church", "nock on"}
@@ -1800,7 +1798,8 @@ def create_v2_router(
                 LEFT JOIN collaborators c ON c.id = km.collaborator_id
                 LEFT JOIN knife_model_descriptors d ON d.knife_model_id = km.id
                 LEFT JOIN knife_model_images kmi ON kmi.knife_model_id = km.id
-                ORDER BY km.sortable_name COLLATE NOCASE
+                LEFT JOIN knife_families fam ON fam.id = km.family_id
+                ORDER BY fam.name COLLATE NOCASE, km.sortable_name COLLATE NOCASE
                 """
             ).fetchall()
         tokens = [token.strip().lower() for token in (payload.q or "").replace("/", " ").replace(",", " ").split() if token.strip()]

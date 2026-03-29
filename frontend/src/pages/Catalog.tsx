@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Sidebar } from '../components/Sidebar';
+import { FamilyChips } from '../components/FamilyChips';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -866,6 +867,18 @@ export default function Catalog() {
 
   const activeCount = Object.entries(filters).filter(([k, v]) => k !== 'search' && v).length;
 
+  // Family chips: count models per family from loaded data
+  const familyStats = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const m of models) {
+      const f = m.family_name ?? 'Other';
+      counts.set(f, (counts.get(f) ?? 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .map(([family, total_quantity]) => ({ family, total_quantity, inventory_rows: total_quantity }))
+      .sort((a, b) => a.family.localeCompare(b.family));
+  }, [models]);
+
   const marginClass = sidebarCollapsed ? 'ml-16' : 'ml-56';
   const hasDetail = selected !== null || addingNew;
 
@@ -948,6 +961,17 @@ export default function Catalog() {
             </span>
           )}
         </div>
+
+        {/* Family chips */}
+        {!loading && familyStats.length > 0 && (
+          <div className="px-8 py-2 border-b border-border overflow-x-auto flex-shrink-0">
+            <FamilyChips
+              families={familyStats}
+              activeFamily={filters.family}
+              onSelect={(f) => handleFilterChange('family', f)}
+            />
+          </div>
+        )}
 
         {/* Body */}
         <div className="flex flex-1 overflow-hidden">
