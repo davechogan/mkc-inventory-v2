@@ -99,8 +99,9 @@ export function Sidebar() {
     >
       {collapsed ? (
         /* ── Collapsed header ── */
-        <div className="flex flex-col items-center pt-4 pb-3 border-b border-border flex-shrink-0 gap-2">
+        <div className="flex flex-col items-center pt-4 pb-3 border-b border-border flex-shrink-0 gap-1.5">
           <img src="/static/logo.png" alt="MKC" className="w-10 h-10 object-contain" />
+          <span className="text-gold text-xs font-bold tracking-widest">MKC</span>
           <button
             onClick={toggle}
             title="Expand sidebar"
@@ -114,7 +115,7 @@ export function Sidebar() {
         <div className="relative flex flex-col items-center px-4 pt-6 pb-4 border-b border-border flex-shrink-0 gap-2">
           <img src="/static/logo.png" alt="MKC Logo" className="w-24 h-24 object-contain" />
           <div className="text-center">
-            <div className="text-ink font-bold text-sm leading-tight tracking-wide">Mountain Knife Co.</div>
+            <div className="text-ink font-bold text-sm leading-tight tracking-wide">Montana Knife Company</div>
             <div className="text-muted text-xs tracking-widest uppercase mt-0.5">Collection</div>
           </div>
           <button
