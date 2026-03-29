@@ -71,12 +71,6 @@ function LazyImage({ src, alt }: LazyImageProps) {
             onLoad={() => setLoaded(true)}
             onError={() => setError(true)}
           />
-          {loaded && (
-            <div
-              className="absolute inset-0 pointer-events-none"
-              style={{ background: 'radial-gradient(ellipse at center, transparent 45%, rgba(9,9,12,0.92) 100%)' }}
-            />
-          )}
         </>
       ) : error ? (
         <div className="w-full h-full flex items-center justify-center">
@@ -121,7 +115,7 @@ function Card({ item, onClick }: CardProps) {
     >
       {/* Image area — 4:3 */}
       <div className="relative w-full" style={{ paddingBottom: '75%' }}>
-        <div className="absolute inset-0 bg-white">
+        <div className="absolute inset-0 bg-card">
           {url ? (
             <LazyImage src={url} alt={item.knife_name} />
           ) : (

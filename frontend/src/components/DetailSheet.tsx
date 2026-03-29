@@ -103,7 +103,7 @@ export function DetailSheet({ item, onClose }: DetailSheetProps) {
 
             {/* Image */}
             {imageUrl(item) && (
-              <div className="flex-shrink-0 w-full bg-white" style={{ aspectRatio: '4/3' }}>
+              <div className="flex-shrink-0 w-full bg-card" style={{ aspectRatio: '4/3' }}>
                 <img
                   src={imageUrl(item)!}
                   alt={item.knife_name}
