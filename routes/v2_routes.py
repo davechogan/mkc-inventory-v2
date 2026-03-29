@@ -371,7 +371,8 @@ def create_v2_router(
                        km.record_status, km.is_current_catalog, km.is_discontinued, km.msrp,
                        km.official_product_url, km.official_image_url,
                        (SELECT COUNT(*) FROM inventory_items_v2 WHERE knife_model_id = km.id) AS in_inventory_count,
-                       (CASE WHEN kmi.image_blob IS NOT NULL AND length(kmi.image_blob) > 0 THEN 1 ELSE 0 END) AS has_identifier_image
+                       (CASE WHEN kmi.image_blob IS NOT NULL AND length(kmi.image_blob) > 0 THEN 1 ELSE 0 END) AS has_identifier_image,
+                       (SELECT url_path FROM knife_model_image_files WHERE model_slug = km.slug LIMIT 1) AS colorway_image_url
                 FROM knife_models_v2 km
                 LEFT JOIN knife_model_images kmi ON kmi.knife_model_id = km.id
                 LEFT JOIN knife_types kt ON kt.id = km.type_id

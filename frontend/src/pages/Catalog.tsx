@@ -31,6 +31,7 @@ interface CatalogModel {
   official_image_url: string | null;
   in_inventory_count: number;
   has_identifier_image: boolean;
+  colorway_image_url: string | null;
 }
 
 interface CatalogFilters {
@@ -105,15 +106,16 @@ function ModelCard({
   const [imgLoaded, setImgLoaded] = useState(false);
   const [imgError, setImgError] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const imgSrc = model.colorway_image_url ?? (model.has_identifier_image ? `/api/v2/models/${model.id}/image` : null);
 
   useEffect(() => {
-    if (!model.has_identifier_image) return;
+    if (!imgSrc) return;
     const el = containerRef.current;
     if (!el) return;
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting && imgRef.current && !imgRef.current.src) {
-          imgRef.current.src = `/api/v2/models/${model.id}/image`;
+          imgRef.current.src = imgSrc;
           observer.disconnect();
         }
       },
@@ -121,14 +123,14 @@ function ModelCard({
     );
     observer.observe(el);
     return () => observer.disconnect();
-  }, [model.id, model.has_identifier_image]);
+  }, [imgSrc]);
 
   const specs = specsLine(model);
 
   return (
     <button
       onClick={onClick}
-      className={`relative group text-left flex flex-col rounded-xl border overflow-hidden transition-all duration-200 hover:scale-[1.04] hover:z-10 hover:shadow-xl hover:shadow-gold/10 ${
+      className={`relative group text-left flex flex-col rounded-xl border overflow-hidden transition-all duration-300 hover:scale-[1.07] hover:z-10 hover:shadow-xl hover:shadow-gold/10 ${
         selected
           ? 'border-gold/50 ring-1 ring-gold/20'
           : 'border-border hover:border-gold/30'
@@ -140,7 +142,7 @@ function ModelCard({
         ref={containerRef}
         className="relative w-full aspect-[4/3] bg-card flex items-center justify-center overflow-hidden flex-shrink-0"
       >
-        {model.has_identifier_image && !imgError ? (
+        {imgSrc && !imgError ? (
           <>
             {!imgLoaded && (
               <div className="absolute inset-0 skeleton" />
@@ -169,7 +171,7 @@ function ModelCard({
         )}
 
         {/* Discontinued badge */}
-        {model.is_discontinued && (
+        {!!model.is_discontinued && (
           <div className="absolute top-2 left-2 bg-surface/80 text-muted text-xs px-1.5 py-0.5 rounded-md leading-none border border-border">
             Discontinued
           </div>
