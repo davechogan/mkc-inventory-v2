@@ -5,8 +5,10 @@ import base64
 import csv
 import io
 import json
+import re
 import sqlite3
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, Optional, Type
 
 import blade_ai
@@ -42,11 +44,22 @@ class InventoryItemV2In(BaseModel):
     notes: Optional[str] = None
 
 
+def _color_to_filename_part(color: str) -> str:
+    """Normalize a color string for use in a filename. 'Orange/Black' → 'Orange_Black'."""
+    return re.sub(r'[\s/]+', '_', color.strip()).title()
+
+
+def _slug_to_title(slug: str) -> str:
+    """Convert a model slug to title-cased filename prefix. 'cutbank-paring-knife' → 'Cutbank_Paring_Knife'."""
+    return "_".join(word.capitalize() for word in slug.split("-"))
+
+
 def create_v2_router(
     *,
     get_conn: GetConn,
     ollama_vision_model: str,
     inventory_csv_columns: list[str],
+    images_colors_dir: Path,
     migrate_legacy_media_to_v2,
     backfill_v2_model_identity,
     normalize_v2_additional_fields,
@@ -858,6 +871,57 @@ def create_v2_router(
                 raise HTTPException(status_code=404, detail="Image not found.")
             return {"message": "Reference image cleared."}
 
+
+    @router.post("/api/v2/models/{model_id}/colorway-image")
+    async def v2_upload_colorway_image(
+        model_id: int,
+        file: UploadFile = File(...),
+        handle_color: str = Form(...),
+        blade_color: str = Form(""),
+    ):
+        """Upload a transparent PNG for a specific model colorway.
+
+        Saves to Images/MKC_Colors/ with a slug-derived filename and registers
+        it in knife_model_image_files.
+        """
+        if not (file.content_type or "").startswith("image/png") and not (file.filename or "").lower().endswith(".png"):
+            raise HTTPException(status_code=400, detail="File must be a PNG.")
+
+        with get_conn() as conn:
+            model = conn.execute(
+                "SELECT slug FROM knife_models_v2 WHERE id = ?", (model_id,)
+            ).fetchone()
+            if not model or not model["slug"]:
+                raise HTTPException(status_code=404, detail="Model not found or has no slug.")
+
+            slug = model["slug"]
+            slug_part = _slug_to_title(slug)
+            handle_part = _color_to_filename_part(handle_color)
+            blade_part = _color_to_filename_part(blade_color) if blade_color.strip() else ""
+
+            if blade_part:
+                filename = f"{slug_part}_{blade_part}_{handle_part}.png"
+                color_name = f"{blade_color.strip()} {handle_color.strip()}"
+            else:
+                filename = f"{slug_part}_{handle_part}.png"
+                color_name = handle_color.strip()
+
+            dest = images_colors_dir / filename
+            content = await file.read()
+            dest.write_bytes(content)
+
+            url_path = f"/images/colors/{filename}"
+            conn.execute(
+                """INSERT INTO knife_model_image_files (model_slug, color_name, filename, url_path)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(filename) DO UPDATE SET
+                     model_slug=excluded.model_slug,
+                     color_name=excluded.color_name,
+                     url_path=excluded.url_path""",
+                (slug, color_name, filename, url_path),
+            )
+
+        return {"filename": filename, "url_path": url_path, "color_name": color_name}
 
     @router.post("/api/v2/models/{model_id}/recompute-descriptors")
     def v2_recompute_model_descriptors(model_id: int, model: Optional[str] = None):

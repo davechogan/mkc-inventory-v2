@@ -1398,6 +1398,7 @@ v2_router, run_v2_identify = create_v2_router(
     get_conn=get_conn,
     ollama_vision_model=OLLAMA_VISION_MODEL,
     inventory_csv_columns=INVENTORY_CSV_COLUMNS,
+    images_colors_dir=IMAGES_COLORS_DIR,
     migrate_legacy_media_to_v2=migrate_legacy_media_to_v2,
     backfill_v2_model_identity=backfill_v2_model_identity,
     normalize_v2_additional_fields=normalize_v2_additional_fields,

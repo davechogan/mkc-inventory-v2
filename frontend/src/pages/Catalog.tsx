@@ -206,7 +206,42 @@ function ModelCard({
 
 function ModelDetail({ model, onClose }: { model: CatalogModel; onClose: () => void }) {
   const [imgLoaded, setImgLoaded] = useState(false);
-  const imgSrc = model.has_identifier_image ? `/api/v2/models/${model.id}/image` : null;
+  const imgSrc = model.colorway_image_url ?? (model.has_identifier_image ? `/api/v2/models/${model.id}/image` : null);
+
+  // Upload state
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [handleColor, setHandleColor] = useState('');
+  const [bladeColor, setBladeColor] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [uploadMsg, setUploadMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleUpload = async () => {
+    if (!uploadFile || !handleColor.trim()) return;
+    setUploading(true);
+    setUploadMsg(null);
+    const fd = new FormData();
+    fd.append('file', uploadFile);
+    fd.append('handle_color', handleColor.trim());
+    if (bladeColor.trim()) fd.append('blade_color', bladeColor.trim());
+    try {
+      const res = await fetch(`/api/v2/models/${model.id}/colorway-image`, { method: 'POST', body: fd });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { detail?: string };
+        throw new Error(err.detail ?? `Error ${res.status}`);
+      }
+      const data = await res.json() as { filename: string };
+      setUploadMsg({ ok: true, text: `Saved as ${data.filename}` });
+      setUploadFile(null);
+      setHandleColor('');
+      setBladeColor('');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    } catch (e) {
+      setUploadMsg({ ok: false, text: e instanceof Error ? e.message : 'Upload failed' });
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const specs: Array<[string, string | number | null]> = [
     ['Type', model.knife_type],
@@ -295,6 +330,46 @@ function ModelDetail({ model, onClose }: { model: CatalogModel; onClose: () => v
             View on MKC website
           </a>
         )}
+
+        {/* Colorway image upload */}
+        <div className="border-t border-border/40 pt-4">
+          <div className="text-muted text-xs uppercase tracking-widest mb-3">Add Colorway Image</div>
+          <div className="flex flex-col gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".png,image/png"
+              onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)}
+              className="text-xs text-muted file:mr-3 file:py-1 file:px-3 file:rounded-md file:border file:border-border file:bg-card file:text-ink file:text-xs file:cursor-pointer hover:file:border-gold/40 transition-colors"
+            />
+            <input
+              type="text"
+              placeholder="Handle color (e.g. Orange/Black)"
+              value={handleColor}
+              onChange={(e) => setHandleColor(e.target.value)}
+              className="w-full px-3 py-1.5 bg-card border border-border rounded-lg text-xs text-ink placeholder:text-muted focus:outline-none focus:border-gold/60 transition-colors"
+            />
+            <input
+              type="text"
+              placeholder="Blade color — optional (tactical knives)"
+              value={bladeColor}
+              onChange={(e) => setBladeColor(e.target.value)}
+              className="w-full px-3 py-1.5 bg-card border border-border rounded-lg text-xs text-ink placeholder:text-muted focus:outline-none focus:border-gold/60 transition-colors"
+            />
+            <button
+              onClick={handleUpload}
+              disabled={!uploadFile || !handleColor.trim() || uploading}
+              className="w-full py-1.5 rounded-lg bg-gold text-black text-xs font-semibold hover:bg-gold-bright disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              {uploading ? 'Uploading…' : 'Upload PNG'}
+            </button>
+            {uploadMsg && (
+              <p className={`text-xs ${uploadMsg.ok ? 'text-gold' : 'text-red-400'}`}>
+                {uploadMsg.text}
+              </p>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
