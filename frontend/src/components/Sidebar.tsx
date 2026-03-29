@@ -102,8 +102,8 @@ export function Sidebar() {
       {/* Header */}
       <div className="flex items-center gap-3 px-3 py-4 flex-shrink-0">
         {/* Logo medallion */}
-        <div className="w-10 h-10 rounded-full overflow-hidden ring-1 ring-gold/40 bg-white flex-shrink-0">
-          <img src="/static/logo.png" alt="MKC Logo" className="w-full h-full object-cover" />
+        <div className="w-12 h-12 rounded-full overflow-hidden ring-1 ring-gold/40 flex-shrink-0">
+          <img src="/static/logo.png" alt="MKC Logo" className="w-full h-full object-contain" />
         </div>
         {/* Wordmark */}
         {!collapsed && (

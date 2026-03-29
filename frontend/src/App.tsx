@@ -318,23 +318,6 @@ export default function App() {
             )}
           </button>
 
-          {/* Columns placeholder */}
-          <button
-            className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border text-muted hover:text-ink hover:border-border/80 text-sm transition-colors"
-            title="Column visibility (coming soon)"
-            disabled
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="8" y1="6" x2="21" y2="6" />
-              <line x1="8" y1="12" x2="21" y2="12" />
-              <line x1="8" y1="18" x2="21" y2="18" />
-              <line x1="3" y1="6" x2="3.01" y2="6" />
-              <line x1="3" y1="12" x2="3.01" y2="12" />
-              <line x1="3" y1="18" x2="3.01" y2="18" />
-            </svg>
-            <span>Columns</span>
-          </button>
-
           {/* Results count */}
           {!loading && (
             <span className="text-muted text-xs ml-auto">

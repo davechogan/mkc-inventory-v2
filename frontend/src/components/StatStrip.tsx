@@ -1,4 +1,3 @@
-import { type ReactNode } from 'react';
 import type { Summary } from '../types';
 
 interface StatStripProps {
@@ -15,61 +14,67 @@ function formatCurrency(value: number | undefined | null): string {
   }).format(value);
 }
 
-function StatItem({ label, value }: { label: string; value: ReactNode }) {
+function StatItem({
+  label,
+  value,
+  gold,
+}: {
+  label: string;
+  value: string;
+  gold?: boolean;
+}) {
   return (
-    <div className="flex flex-col gap-0.5">
-      <span className="text-muted text-xs uppercase tracking-widest font-semibold">{label}</span>
-      <span className="text-ink font-bold text-lg leading-tight">{value}</span>
+    <div className="flex flex-col gap-0.5 min-w-0">
+      <span className="text-muted text-xs uppercase tracking-widest font-medium">{label}</span>
+      <span className={`font-bold text-2xl leading-none tabular-nums ${gold ? 'text-gold' : 'text-ink'}`}>
+        {value}
+      </span>
     </div>
   );
 }
 
 function SkeletonStat() {
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-2">
       <div className="skeleton h-3 w-16 rounded" />
-      <div className="skeleton h-6 w-12 rounded" />
+      <div className="skeleton h-7 w-20 rounded" />
     </div>
   );
 }
 
 export function StatStrip({ summary, loading }: StatStripProps) {
+  const avgCost =
+    summary && summary.total_quantity > 0
+      ? summary.total_spend / summary.total_quantity
+      : null;
+
   return (
-    <div className="flex items-center gap-8 px-8 py-3 border-b border-border text-sm">
+    <div className="flex items-center gap-10 px-8 py-4 border-b border-border">
       {loading || !summary ? (
         <>
           <SkeletonStat />
-          <div className="w-px h-8 bg-border" />
+          <div className="w-px h-10 bg-border flex-shrink-0" />
           <SkeletonStat />
-          <div className="w-px h-8 bg-border" />
-          <SkeletonStat />
-          <div className="w-px h-8 bg-border" />
-          <SkeletonStat />
-          <div className="w-px h-8 bg-border" />
+          <div className="w-px h-10 bg-border flex-shrink-0" />
           <SkeletonStat />
         </>
       ) : (
         <>
-          <StatItem label="Rows" value={summary.inventory_rows.toLocaleString()} />
-          <div className="w-px h-8 bg-border flex-shrink-0" />
-          <StatItem label="Quantity" value={summary.total_quantity.toLocaleString()} />
-          <div className="w-px h-8 bg-border flex-shrink-0" />
-          <StatItem label="Spent" value={formatCurrency(summary.total_spend)} />
-          <div className="w-px h-8 bg-border flex-shrink-0" />
           <StatItem
-            label="Est. Value"
-            value={formatCurrency(summary.total_estimated_value ?? summary.estimated_value)}
+            label="Knives"
+            value={summary.total_quantity.toLocaleString()}
           />
-          <div className="w-px h-8 bg-border flex-shrink-0" />
+          <div className="w-px h-10 bg-border flex-shrink-0" />
           <StatItem
-            label="Models"
-            value={
-              summary.master_count != null
-                ? summary.master_count.toLocaleString()
-                : summary.master_models != null
-                ? summary.master_models.toLocaleString()
-                : '—'
-            }
+            label="Invested"
+            value={formatCurrency(summary.total_spend)}
+            gold
+          />
+          <div className="w-px h-10 bg-border flex-shrink-0" />
+          <StatItem
+            label="Avg. Cost"
+            value={formatCurrency(avgCost)}
+            gold
           />
         </>
       )}
