@@ -98,10 +98,12 @@ def create_v2_router(
                      AND LOWER(hc.name) = LOWER(COALESCE(i.handle_color, km.handle_color))
                      AND mc.image_blob IS NOT NULL
                    LIMIT 1),
-                  -- Level 2: any image for this model
+                  -- Level 2: prefer Orange/Black, then any image
                   (SELECT '/api/v2/colorway-images/' || mc.id FROM model_colorways mc
+                   JOIN handle_colors hc ON hc.id = mc.handle_color_id
                    WHERE mc.knife_model_id = km.id
                      AND mc.image_blob IS NOT NULL
+                   ORDER BY CASE WHEN LOWER(hc.name) = 'orange/black' THEN 0 ELSE 1 END
                    LIMIT 1)
                 ) AS colorway_image_url
             FROM inventory_items_v2 i
@@ -364,7 +366,10 @@ def create_v2_router(
                        (SELECT COUNT(*) FROM inventory_items_v2 WHERE knife_model_id = km.id) AS in_inventory_count,
                        (CASE WHEN kmi.image_blob IS NOT NULL AND length(kmi.image_blob) > 0 THEN 1 ELSE 0 END) AS has_identifier_image,
                        (SELECT '/api/v2/colorway-images/' || mc.id FROM model_colorways mc
-                        WHERE mc.knife_model_id = km.id AND mc.image_blob IS NOT NULL LIMIT 1) AS colorway_image_url
+                        JOIN handle_colors hc ON hc.id = mc.handle_color_id
+                        WHERE mc.knife_model_id = km.id AND mc.image_blob IS NOT NULL
+                        ORDER BY CASE WHEN LOWER(hc.name) = 'orange/black' THEN 0 ELSE 1 END
+                        LIMIT 1) AS colorway_image_url
                 FROM knife_models_v2 km
                 LEFT JOIN knife_model_images kmi ON kmi.knife_model_id = km.id
                 LEFT JOIN knife_types kt ON kt.id = km.type_id
@@ -658,7 +663,8 @@ def create_v2_router(
 
 
     @router.post("/api/v2/models")
-    def v2_create_model(payload: V2ModelIn):
+    def v2_create_model(payload: dict = Body(...)):
+        payload = V2ModelIn(**payload)
         _require_v2_identity(payload)
         with get_conn() as conn:
             _validate_v2_controlled_identity(payload, conn)
@@ -700,7 +706,8 @@ def create_v2_router(
 
 
     @router.put("/api/v2/models/{model_id}")
-    def v2_update_model(model_id: int, payload: V2ModelIn):
+    def v2_update_model(model_id: int, payload: dict = Body(...)):
+        payload = V2ModelIn(**payload)
         _require_v2_identity(payload)
         with get_conn() as conn:
             _validate_v2_controlled_identity(payload, conn)
@@ -753,6 +760,10 @@ def create_v2_router(
             used = conn.execute("SELECT COUNT(*) AS c FROM inventory_items_v2 WHERE knife_model_id = ?", (model_id,)).fetchone()["c"]
             if used > 0:
                 raise HTTPException(status_code=400, detail="Cannot delete model used by inventory.")
+            # Clean up dependent rows first
+            conn.execute("DELETE FROM model_colorways WHERE knife_model_id = ?", (model_id,))
+            conn.execute("DELETE FROM knife_model_images WHERE knife_model_id = ?", (model_id,))
+            conn.execute("DELETE FROM knife_model_descriptors WHERE knife_model_id = ?", (model_id,))
             cur = conn.execute("DELETE FROM knife_models_v2 WHERE id = ?", (model_id,))
             if cur.rowcount == 0:
                 raise HTTPException(status_code=404, detail="Model not found.")

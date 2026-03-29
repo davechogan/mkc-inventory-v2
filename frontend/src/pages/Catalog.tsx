@@ -106,7 +106,7 @@ function ModelCard({
   const [imgLoaded, setImgLoaded] = useState(false);
   const [imgError, setImgError] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
-  const imgSrc = model.colorway_image_url ?? (model.has_identifier_image ? `/api/v2/models/${model.id}/image` : null);
+  const imgSrc = model.colorway_image_url ?? null;
 
   useEffect(() => {
     if (!imgSrc) return;
@@ -202,6 +202,14 @@ function ModelCard({
   );
 }
 
+function parseApiError(err: unknown): string {
+  if (!err || typeof err !== 'object') return 'Unknown error';
+  const detail = (err as { detail?: unknown }).detail;
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) return detail.map((d: { msg?: string }) => d.msg ?? String(d)).join('; ');
+  return JSON.stringify(detail ?? err);
+}
+
 // ── Detail panel ──────────────────────────────────────────────────────────────
 
 interface Colorway {
@@ -219,9 +227,169 @@ interface ColorOption {
   name: string;
 }
 
-function ModelDetail({ model, onClose }: { model: CatalogModel; onClose: () => void }) {
+interface ModelFormData {
+  official_name: string;
+  knife_type: string;
+  family_name: string;
+  form_name: string;
+  series_name: string;
+  collaborator_name: string;
+  generation_label: string;
+  size_modifier: string;
+  platform_variant: string;
+  steel: string;
+  blade_finish: string;
+  blade_color: string;
+  handle_color: string;
+  handle_type: string;
+  blade_length: string;
+  is_current_catalog: boolean;
+  is_discontinued: boolean;
+  msrp: string;
+  official_product_url: string;
+}
+
+function modelToForm(m: CatalogModel | null): ModelFormData {
+  return {
+    official_name: m?.official_name ?? '',
+    knife_type: m?.knife_type ?? '',
+    family_name: m?.family_name ?? '',
+    form_name: m?.form_name ?? '',
+    series_name: m?.series_name ?? '',
+    collaborator_name: m?.collaborator_name ?? '',
+    generation_label: m?.generation_label ?? '',
+    size_modifier: m?.size_modifier ?? '',
+    platform_variant: m?.platform_variant ?? '',
+    steel: m?.steel ?? '',
+    blade_finish: m?.blade_finish ?? '',
+    blade_color: m?.blade_color ?? '',
+    handle_color: m?.handle_color ?? '',
+    handle_type: m?.handle_type ?? '',
+    blade_length: m?.blade_length != null ? String(m.blade_length) : '',
+    is_current_catalog: m?.is_current_catalog ?? true,
+    is_discontinued: m?.is_discontinued ?? false,
+    msrp: m?.msrp != null ? String(m.msrp) : '',
+    official_product_url: m?.official_product_url ?? '',
+  };
+}
+
+interface OptionSets {
+  types: string[];
+  families: string[];
+  forms: string[];
+  series: string[];
+  collaborations: string[];
+  steels: string[];
+  finishes: string[];
+  bladeColors: string[];
+  handleColors: string[];
+  handleTypes: string[];
+  generations: string[];
+}
+
+function ModelDetail({
+  model,
+  onClose,
+  onSaved,
+  onDeleted,
+  isNew,
+}: {
+  model: CatalogModel | null;
+  onClose: () => void;
+  onSaved: () => void;
+  onDeleted: () => void;
+  isNew: boolean;
+}) {
   const [imgLoaded, setImgLoaded] = useState(false);
-  const imgSrc = model.colorway_image_url ?? (model.has_identifier_image ? `/api/v2/models/${model.id}/image` : null);
+  const imgSrc = model?.colorway_image_url ?? null;
+
+  // Edit mode
+  const [editing, setEditing] = useState(isNew);
+  const [form, setForm] = useState<ModelFormData>(modelToForm(model));
+  const [saving, setSaving] = useState(false);
+  const [formMsg, setFormMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  // Option sets for dropdowns
+  const [opts, setOpts] = useState<OptionSets | null>(null);
+
+  useEffect(() => {
+    Promise.all([
+      fetch('/api/v2/catalog/filters').then(r => r.json()) as Promise<CatalogFilters>,
+      fetch('/api/v2/options').then(r => r.json()) as Promise<Record<string, { name: string }[]>>,
+    ]).then(([filters, options]) => {
+      setOpts({
+        types: filters.type,
+        families: filters.family,
+        forms: filters.form,
+        series: filters.series,
+        collaborations: filters.collaboration,
+        steels: (options['blade-steels'] ?? []).map(o => o.name),
+        finishes: (options['blade-finishes'] ?? []).map(o => o.name),
+        bladeColors: (options['blade-colors'] ?? []).map(o => o.name),
+        handleColors: (options['handle-colors'] ?? []).map(o => o.name),
+        handleTypes: (options['handle-types'] ?? []).map(o => o.name),
+        generations: (options['generations'] ?? []).map(o => o.name),
+      });
+    }).catch(() => {});
+  }, []);
+
+  // Reset form when model changes
+  useEffect(() => {
+    setForm(modelToForm(model));
+    setEditing(isNew);
+    setFormMsg(null);
+  }, [model?.id, isNew]);
+
+  const setField = (key: keyof ModelFormData, value: string | boolean) => {
+    setForm(prev => ({ ...prev, [key]: value }));
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setFormMsg(null);
+    const payload: Record<string, unknown> = { ...form };
+    payload.blade_length = form.blade_length ? Number(form.blade_length) : null;
+    payload.msrp = form.msrp ? Number(form.msrp) : null;
+    // Send empty strings as null
+    for (const k of Object.keys(payload)) {
+      if (payload[k] === '') payload[k] = null;
+    }
+    payload.official_name = form.official_name; // always send even if empty (will get 400)
+    try {
+      const url = isNew ? '/api/v2/models' : `/api/v2/models/${model!.id}`;
+      const method = isNew ? 'POST' : 'PUT';
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(parseApiError(err));
+      }
+      setFormMsg({ ok: true, text: isNew ? 'Model created' : 'Saved' });
+      setEditing(false);
+      onSaved();
+    } catch (e) {
+      setFormMsg({ ok: false, text: e instanceof Error ? e.message : 'Save failed' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteModel = async () => {
+    if (!model || !confirm(`Delete "${model.official_name}"? This cannot be undone.`)) return;
+    try {
+      const res = await fetch(`/api/v2/models/${model.id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(parseApiError(err));
+      }
+      onDeleted();
+    } catch (e) {
+      setFormMsg({ ok: false, text: e instanceof Error ? e.message : 'Delete failed' });
+    }
+  };
 
   // Colorway list
   const [colorways, setColorways] = useState<Colorway[]>([]);
@@ -229,14 +397,17 @@ function ModelDetail({ model, onClose }: { model: CatalogModel; onClose: () => v
   const [uploadingId, setUploadingId] = useState<number | null>(null);
 
   const fetchColorways = useCallback(async () => {
+    if (!model) return;
     const res = await fetch(`/api/v2/models/${model.id}/colorways`);
     if (res.ok) setColorways(await res.json() as Colorway[]);
-  }, [model.id]);
+  }, [model?.id]);
 
   // Add-colorway state
   const [handleColorId, setHandleColorId] = useState('');
   const [bladeColorId, setBladeColorId] = useState('');
-  const [adding, setAdding] = useState(false);
+  const [addCwFile, setAddCwFile] = useState<File | null>(null);
+  const addCwFileRef = useRef<HTMLInputElement>(null);
+  const [addingCw, setAddingCw] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [colorOptions, setColorOptions] = useState<{ handle_colors: ColorOption[]; blade_colors: ColorOption[] }>({ handle_colors: [], blade_colors: [] });
 
@@ -249,8 +420,8 @@ function ModelDetail({ model, onClose }: { model: CatalogModel; onClose: () => v
   }, [fetchColorways]);
 
   const handleAddColorway = async () => {
-    if (!handleColorId) return;
-    setAdding(true);
+    if (!handleColorId || !model) return;
+    setAddingCw(true);
     setMsg(null);
     try {
       const body: Record<string, number> = { handle_color_id: Number(handleColorId) };
@@ -261,29 +432,39 @@ function ModelDetail({ model, onClose }: { model: CatalogModel; onClose: () => v
         body: JSON.stringify(body),
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({})) as { detail?: string };
-        throw new Error(err.detail ?? `Error ${res.status}`);
+        const err = await res.json().catch(() => ({}));
+        throw new Error(parseApiError(err));
       }
-      setMsg({ ok: true, text: 'Colorway added' });
+      const created = await res.json() as { id: number };
+      // Upload image if file was attached
+      if (addCwFile && created.id) {
+        const fd = new FormData();
+        fd.append('file', addCwFile);
+        await fetch(`/api/v2/models/${model.id}/colorways/${created.id}/image`, { method: 'PUT', body: fd });
+      }
+      setMsg({ ok: true, text: addCwFile ? 'Colorway added with image' : 'Colorway added' });
       setHandleColorId('');
       setBladeColorId('');
+      setAddCwFile(null);
+      if (addCwFileRef.current) addCwFileRef.current.value = '';
       fetchColorways();
     } catch (e) {
       setMsg({ ok: false, text: e instanceof Error ? e.message : 'Failed' });
     } finally {
-      setAdding(false);
+      setAddingCw(false);
     }
   };
 
   const handleUploadImage = async (cwId: number, file: File) => {
+    if (!model) return;
     setUploadingId(cwId);
     const fd = new FormData();
     fd.append('file', file);
     try {
       const res = await fetch(`/api/v2/models/${model.id}/colorways/${cwId}/image`, { method: 'PUT', body: fd });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({})) as { detail?: string };
-        throw new Error(err.detail ?? `Error ${res.status}`);
+        const err = await res.json().catch(() => ({}));
+        throw new Error(parseApiError(err));
       }
       fetchColorways();
     } catch (e) {
@@ -293,13 +474,14 @@ function ModelDetail({ model, onClose }: { model: CatalogModel; onClose: () => v
     }
   };
 
-  const handleDelete = async (cwId: number) => {
+  const handleDeleteCw = async (cwId: number) => {
+    if (!model) return;
     setDeletingId(cwId);
     try {
       const res = await fetch(`/api/v2/models/${model.id}/colorways/${cwId}`, { method: 'DELETE' });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({})) as { detail?: string };
-        throw new Error(err.detail ?? 'Delete failed');
+        const err = await res.json().catch(() => ({}));
+        throw new Error(parseApiError(err));
       }
       setColorways((prev) => prev.filter((cw) => cw.id !== cwId));
     } finally {
@@ -307,96 +489,176 @@ function ModelDetail({ model, onClose }: { model: CatalogModel; onClose: () => v
     }
   };
 
+  const inputCls = "w-full px-3 py-1.5 bg-card border border-border rounded-lg text-xs text-ink focus:outline-none focus:border-gold/60 transition-colors";
+  const labelCls = "text-muted text-[10px] uppercase tracking-wider mb-0.5";
+
   const specs: Array<[string, string | number | null]> = [
-    ['Type', model.knife_type],
-    ['Family', model.family_name],
-    ['Series', model.series_name],
-    ['Form', model.form_name],
-    ['Steel', model.steel],
-    ['Finish', model.blade_finish],
-    ['Blade Color', model.blade_color],
-    ['Handle Color', model.handle_color],
-    ['Handle Type', model.handle_type],
-    ['Blade Length', model.blade_length ? `${model.blade_length}"` : null],
-    ['Generation', model.generation_label],
-    ['Status', model.record_status],
-    ['MSRP', model.msrp != null ? `$${model.msrp.toLocaleString('en-US', { minimumFractionDigits: 0 })}` : null],
+    ['Type', model?.knife_type ?? null],
+    ['Family', model?.family_name ?? null],
+    ['Series', model?.series_name ?? null],
+    ['Form', model?.form_name ?? null],
+    ['Steel', model?.steel ?? null],
+    ['Finish', model?.blade_finish ?? null],
+    ['Blade Color', model?.blade_color ?? null],
+    ['Handle Color', model?.handle_color ?? null],
+    ['Handle Type', model?.handle_type ?? null],
+    ['Blade Length', model?.blade_length ? `${model.blade_length}"` : null],
+    ['Generation', model?.generation_label ?? null],
+    ['Status', model?.record_status ?? null],
+    ['MSRP', model?.msrp != null ? `$${model.msrp.toLocaleString('en-US', { minimumFractionDigits: 0 })}` : null],
   ].filter(([, v]) => v != null) as Array<[string, string | number]>;
+
+  // Helper to render a select or text input for a form field
+  const renderField = (label: string, key: keyof ModelFormData, options?: string[]) => (
+    <div key={key}>
+      <div className={labelCls}>{label}</div>
+      {options ? (
+        <select value={form[key] as string} onChange={e => setField(key, e.target.value)} className={inputCls}>
+          <option value="">—</option>
+          {options.map(o => <option key={o} value={o}>{o}</option>)}
+        </select>
+      ) : (
+        <input type="text" value={form[key] as string} onChange={e => setField(key, e.target.value)} className={inputCls} />
+      )}
+    </div>
+  );
 
   return (
     <div className="h-full flex flex-col overflow-hidden" style={{ backgroundColor: '#060709', borderLeft: '1px solid #1d2329' }}>
       {/* Header */}
       <div className="flex items-center justify-between px-5 py-4 border-b border-border flex-shrink-0">
-        <span className="text-muted text-xs uppercase tracking-widest">Model Detail</span>
-        <button
-          onClick={onClose}
-          className="text-muted hover:text-ink transition-colors p-1 rounded-md hover:bg-border/30"
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
-        </button>
+        <span className="text-muted text-xs uppercase tracking-widest">
+          {isNew ? 'New Model' : editing ? 'Edit Model' : 'Model Detail'}
+        </span>
+        <div className="flex items-center gap-1">
+          {!isNew && !editing && (
+            <button onClick={() => setEditing(true)} title="Edit"
+              className="text-muted hover:text-gold transition-colors p-1 rounded-md hover:bg-border/30">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+              </svg>
+            </button>
+          )}
+          {!isNew && !editing && (
+            <button onClick={handleDeleteModel} title="Delete model"
+              className="text-muted hover:text-red-400 transition-colors p-1 rounded-md hover:bg-border/30">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14H6L5 6" /><path d="M10 11v6M14 11v6" /><path d="M9 6V4h6v2" />
+              </svg>
+            </button>
+          )}
+          <button onClick={onClose}
+            className="text-muted hover:text-ink transition-colors p-1 rounded-md hover:bg-border/30">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-5">
-        {/* Image */}
-        {imgSrc && (
-          <div className="rounded-xl overflow-hidden bg-border/10 aspect-[4/3]">
-            {!imgLoaded && <div className="skeleton w-full aspect-[4/3]" />}
-            <img
-              src={imgSrc}
-              alt={model.official_name}
-              onLoad={() => setImgLoaded(true)}
-              className={`w-full h-full object-contain transition-opacity duration-300 ${imgLoaded ? 'opacity-100' : 'opacity-0'}`}
-            />
-          </div>
+        {editing ? (
+          /* ── Edit / New form ── */
+          <>
+            <div className="flex flex-col gap-3">
+              {renderField('Name *', 'official_name')}
+              {renderField('Type *', 'knife_type', opts?.types)}
+              {renderField('Family *', 'family_name', opts?.families)}
+              {renderField('Form *', 'form_name', opts?.forms)}
+              {renderField('Series', 'series_name', opts?.series)}
+              {renderField('Collaborator', 'collaborator_name', opts?.collaborations)}
+              {renderField('Generation', 'generation_label', opts?.generations)}
+              {renderField('Steel', 'steel', opts?.steels)}
+              {renderField('Blade Finish', 'blade_finish', opts?.finishes)}
+              {renderField('Blade Color', 'blade_color', opts?.bladeColors)}
+              {renderField('Handle Color', 'handle_color', opts?.handleColors)}
+              {renderField('Handle Type', 'handle_type', opts?.handleTypes)}
+              <div>
+                <div className={labelCls}>Blade Length</div>
+                <input type="number" step="0.1" value={form.blade_length} onChange={e => setField('blade_length', e.target.value)} className={inputCls} placeholder='e.g. 3.5' />
+              </div>
+              <div>
+                <div className={labelCls}>MSRP</div>
+                <input type="number" step="1" value={form.msrp} onChange={e => setField('msrp', e.target.value)} className={inputCls} placeholder='e.g. 225' />
+              </div>
+              {renderField('Product URL', 'official_product_url')}
+              <div className="flex gap-4">
+                <label className="flex items-center gap-1.5 text-xs text-ink cursor-pointer">
+                  <input type="checkbox" checked={form.is_current_catalog as boolean} onChange={e => setField('is_current_catalog', e.target.checked)} className="accent-gold" />
+                  Current catalog
+                </label>
+                <label className="flex items-center gap-1.5 text-xs text-ink cursor-pointer">
+                  <input type="checkbox" checked={form.is_discontinued as boolean} onChange={e => setField('is_discontinued', e.target.checked)} className="accent-gold" />
+                  Discontinued
+                </label>
+              </div>
+            </div>
+
+            {formMsg && <p className={`text-xs ${formMsg.ok ? 'text-gold' : 'text-red-400'}`}>{formMsg.text}</p>}
+
+            <div className="flex gap-2">
+              <button onClick={handleSave} disabled={saving || !form.official_name.trim()}
+                className="flex-1 py-1.5 rounded-lg bg-gold text-black text-xs font-semibold hover:bg-gold-bright disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                {saving ? 'Saving...' : isNew ? 'Create Model' : 'Save Changes'}
+              </button>
+              <button onClick={() => { setEditing(false); setForm(modelToForm(model)); setFormMsg(null); if (isNew) onClose(); }}
+                className="px-4 py-1.5 rounded-lg border border-border text-xs text-muted hover:text-ink transition-colors">
+                Cancel
+              </button>
+            </div>
+          </>
+        ) : (
+          /* ── Read-only view ── */
+          <>
+            {/* Image */}
+            {imgSrc && (
+              <div className="rounded-xl overflow-hidden bg-border/10 aspect-[4/3]">
+                {!imgLoaded && <div className="skeleton w-full aspect-[4/3]" />}
+                <img src={imgSrc} alt={model?.official_name ?? ''} onLoad={() => setImgLoaded(true)}
+                  className={`w-full h-full object-contain transition-opacity duration-300 ${imgLoaded ? 'opacity-100' : 'opacity-0'}`} />
+              </div>
+            )}
+
+            {/* Name */}
+            <div>
+              <h2 className="text-ink text-base font-bold leading-snug">{model?.official_name}</h2>
+              {model?.collaborator_name && (
+                <div className="text-gold text-xs mt-0.5">Collaboration: {model.collaborator_name}</div>
+              )}
+              {model && model.in_inventory_count > 0 && (
+                <div className="inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 bg-gold/15 rounded-full text-gold text-xs font-medium">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>
+                  In your collection ({model.in_inventory_count})
+                </div>
+              )}
+            </div>
+
+            {/* Specs */}
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+              {specs.map(([label, value]) => (
+                <div key={label}>
+                  <div className="text-muted text-xs mb-0.5">{label}</div>
+                  <div className="text-ink text-sm">{value}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Links */}
+            {model?.official_product_url && (
+              <a href={model.official_product_url} target="_blank" rel="noopener noreferrer"
+                className="flex items-center gap-1.5 text-xs text-gold/80 hover:text-gold transition-colors">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
+                </svg>
+                View on MKC website
+              </a>
+            )}
+          </>
         )}
 
-        {/* Name */}
-        <div>
-          <h2 className="text-ink text-base font-bold leading-snug">{model.official_name}</h2>
-          {model.collaborator_name && (
-            <div className="text-gold text-xs mt-0.5">Collaboration: {model.collaborator_name}</div>
-          )}
-          {model.in_inventory_count > 0 && (
-            <div className="inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 bg-gold/15 rounded-full text-gold text-xs font-medium">
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>
-              In your collection ({model.in_inventory_count})
-            </div>
-          )}
-        </div>
-
-        {/* Specs */}
-        <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-          {specs.map(([label, value]) => (
-            <div key={label}>
-              <div className="text-muted text-xs mb-0.5">{label}</div>
-              <div className="text-ink text-sm">{value}</div>
-            </div>
-          ))}
-        </div>
-
-        {/* Links */}
-        {model.official_product_url && (
-          <a
-            href={model.official_product_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1.5 text-xs text-gold/80 hover:text-gold transition-colors"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-              <polyline points="15 3 21 3 21 9" />
-              <line x1="10" y1="14" x2="21" y2="3" />
-            </svg>
-            View on MKC website
-          </a>
-        )}
-
-        {/* Colorways */}
-        <div className="border-t border-border/40 pt-4">
+        {/* Colorways — only show for existing models */}
+        {!isNew && model && <><div className="border-t border-border/40 pt-4">
           <div className="text-muted text-xs uppercase tracking-widest mb-3">
             Colorways
             {colorways.length > 0 && <span className="ml-2 text-muted/60">({colorways.filter(c => !!c.has_image).length}/{colorways.length} with images)</span>}
@@ -444,7 +706,7 @@ function ModelDetail({ model, onClose }: { model: CatalogModel; onClose: () => v
                   </div>
                   {/* Upload button for existing images (replace) */}
                   {!!cw.has_image && (
-                    <label className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 text-muted hover:text-ink p-1 cursor-pointer" title="Replace image">
+                    <label className="flex-shrink-0 text-muted hover:text-gold p-1 cursor-pointer transition-colors" title="Replace image">
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" />
                       </svg>
@@ -462,7 +724,7 @@ function ModelDetail({ model, onClose }: { model: CatalogModel; onClose: () => v
                   )}
                   {/* Delete button */}
                   <button
-                    onClick={() => handleDelete(cw.id)}
+                    onClick={() => handleDeleteCw(cw.id)}
                     disabled={deletingId === cw.id}
                     title="Remove colorway"
                     className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 text-red-400 hover:text-red-300 disabled:opacity-30 p-1"
@@ -503,12 +765,19 @@ function ModelDetail({ model, onClose }: { model: CatalogModel; onClose: () => v
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
             </select>
+            <input
+              ref={addCwFileRef}
+              type="file"
+              accept=".png,image/png"
+              onChange={(e) => setAddCwFile(e.target.files?.[0] ?? null)}
+              className="text-xs text-muted file:mr-3 file:py-1 file:px-3 file:rounded-md file:border file:border-border file:bg-card file:text-ink file:text-xs file:cursor-pointer hover:file:border-gold/40 transition-colors"
+            />
             <button
               onClick={handleAddColorway}
-              disabled={!handleColorId || adding}
+              disabled={!handleColorId || addingCw}
               className="w-full py-1.5 rounded-lg bg-gold text-black text-xs font-semibold hover:bg-gold-bright disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
-              {adding ? 'Adding...' : 'Add Colorway'}
+              {addingCw ? 'Adding...' : addCwFile ? 'Add Colorway + Image' : 'Add Colorway'}
             </button>
             {msg && (
               <p className={`text-xs ${msg.ok ? 'text-gold' : 'text-red-400'}`}>
@@ -516,7 +785,7 @@ function ModelDetail({ model, onClose }: { model: CatalogModel; onClose: () => v
               </p>
             )}
           </div>
-        </div>
+        </div></>}
       </div>
     </div>
   );
@@ -535,6 +804,9 @@ export default function Catalog() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<CatalogModel | null>(null);
+  const [addingNew, setAddingNew] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const refreshCatalog = useCallback(() => setRefreshKey(k => k + 1), []);
 
   // Debounce search
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -579,7 +851,7 @@ export default function Catalog() {
         setError(err instanceof Error ? err.message : 'Failed to load catalog');
         setLoading(false);
       });
-  }, [activeServerFilters]);
+  }, [activeServerFilters, refreshKey]);
 
   const handleFilterChange = useCallback(<K extends keyof ActiveFilters>(key: K, value: string) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
@@ -595,7 +867,7 @@ export default function Catalog() {
   const activeCount = Object.entries(filters).filter(([k, v]) => k !== 'search' && v).length;
 
   const marginClass = sidebarCollapsed ? 'ml-16' : 'ml-56';
-  const hasDetail = selected !== null;
+  const hasDetail = selected !== null || addingNew;
 
   return (
     <div className="min-h-screen bg-surface">
@@ -604,7 +876,15 @@ export default function Catalog() {
       <main className={`${marginClass} transition-[margin] duration-200 flex flex-col h-screen overflow-hidden`}>
         {/* Top bar */}
         <div className="flex items-center justify-between px-8 py-4 border-b border-border flex-shrink-0 gap-4 flex-wrap">
-          <h1 className="text-ink text-xl font-bold flex-shrink-0">Catalog</h1>
+          <div className="flex items-center gap-3 flex-shrink-0">
+            <h1 className="text-ink text-xl font-bold">Catalog</h1>
+            <button
+              onClick={() => { setSelected(null); setAddingNew(true); }}
+              className="px-2.5 py-1 rounded-lg bg-gold text-black text-xs font-semibold hover:bg-gold-bright transition-colors"
+            >
+              + Add Model
+            </button>
+          </div>
 
           {/* Search */}
           <div className="relative flex-1 min-w-[180px] max-w-xs">
@@ -716,8 +996,14 @@ export default function Catalog() {
           <div
             className={`flex-shrink-0 overflow-hidden transition-[width] duration-200 ${hasDetail ? 'w-80' : 'w-0'}`}
           >
-            {selected && (
-              <ModelDetail model={selected} onClose={() => setSelected(null)} />
+            {(selected || addingNew) && (
+              <ModelDetail
+                model={selected}
+                isNew={addingNew}
+                onClose={() => { setSelected(null); setAddingNew(false); }}
+                onSaved={() => { refreshCatalog(); setAddingNew(false); }}
+                onDeleted={() => { setSelected(null); refreshCatalog(); }}
+              />
             )}
           </div>
         </div>

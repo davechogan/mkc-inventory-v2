@@ -386,6 +386,7 @@ export default function App() {
       <DetailSheet
         item={selectedItem}
         onClose={() => setSelectedItem(null)}
+        onChanged={() => { setSelectedItem(null); void reload(); }}
       />
 
       <AddInventoryDrawer
