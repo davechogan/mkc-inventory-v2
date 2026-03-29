@@ -440,33 +440,17 @@ def create_v2_router(
 
     @router.get("/api/v2/colors")
     def v2_colors() -> dict[str, list[str]]:
-        """Return distinct handle and blade colors for use in dropdowns."""
+        """Return handle and blade colors from the normalized lookup tables."""
         with get_conn() as conn:
             handle = conn.execute(
-                """SELECT DISTINCT handle_color FROM knife_models_v2
-                   WHERE handle_color IS NOT NULL AND handle_color != ''
-                   UNION
-                   SELECT DISTINCT handle_color FROM inventory_items_v2
-                   WHERE handle_color IS NOT NULL AND handle_color != ''
-                   UNION
-                   SELECT name FROM v2_option_values
-                   WHERE option_type = 'handle-colors' AND name IS NOT NULL AND name != ''
-                   ORDER BY handle_color COLLATE NOCASE"""
+                "SELECT name FROM handle_colors ORDER BY name COLLATE NOCASE"
             ).fetchall()
             blade = conn.execute(
-                """SELECT DISTINCT blade_color FROM knife_models_v2
-                   WHERE blade_color IS NOT NULL AND blade_color != ''
-                   UNION
-                   SELECT DISTINCT blade_color FROM inventory_items_v2
-                   WHERE blade_color IS NOT NULL AND blade_color != ''
-                   UNION
-                   SELECT name FROM v2_option_values
-                   WHERE option_type = 'blade-colors' AND name IS NOT NULL AND name != ''
-                   ORDER BY blade_color COLLATE NOCASE"""
+                "SELECT name FROM blade_colors ORDER BY name COLLATE NOCASE"
             ).fetchall()
             return {
-                "handle_colors": [r[0] for r in handle],
-                "blade_colors": [r[0] for r in blade],
+                "handle_colors": [r["name"] for r in handle],
+                "blade_colors": [r["name"] for r in blade],
             }
 
     @router.get("/api/v2/models/by-legacy-master/{legacy_id}")
@@ -1214,27 +1198,30 @@ def create_v2_router(
         }
 
 
+    # Option types backed by normalized lookup tables (single source of truth)
+    _NORMALIZED_OPTION_TABLES: dict[str, str] = {
+        "handle-colors":  "handle_colors",
+        "blade-colors":   "blade_colors",
+        "blade-steels":   "blade_steels",
+        "blade-finishes": "blade_finishes",
+        "conditions":     "conditions",
+    }
+    # Option types still backed by v2_option_values
+    _LEGACY_OPTION_TYPES = {
+        "blade-types", "categories", "blade-families", "primary-use-cases",
+        "handle-types", "collaborators", "generations", "size-modifiers", "platform-variants",
+    }
+
     @router.get("/api/v2/options")
     def v2_get_options():
-        option_types = (
-            "blade-steels",
-            "blade-finishes",
-            "blade-colors",
-            "handle-colors",
-            "conditions",
-            "blade-types",
-            "categories",
-            "blade-families",
-            "primary-use-cases",
-            "handle-types",
-            "collaborators",
-            "generations",
-            "size-modifiers",
-            "platform-variants",
-        )
         with get_conn() as conn:
             result: dict[str, list[dict[str, Any]]] = {}
-            for key in option_types:
+            for key, table in _NORMALIZED_OPTION_TABLES.items():
+                rows = conn.execute(
+                    f"SELECT id, name FROM {table} ORDER BY name COLLATE NOCASE"
+                ).fetchall()
+                result[key] = rows
+            for key in _LEGACY_OPTION_TYPES:
                 rows = conn.execute(
                     "SELECT id, name FROM v2_option_values WHERE option_type = ? ORDER BY name COLLATE NOCASE",
                     (key,),
@@ -1245,104 +1232,109 @@ def create_v2_router(
 
     @router.post("/api/v2/options/{option_type}")
     def v2_add_option(option_type: str, payload: dict = Body(...)):
-        allowed = {
-            "blade-steels",
-            "blade-finishes",
-            "blade-colors",
-            "handle-colors",
-            "conditions",
-            "blade-types",
-            "categories",
-            "blade-families",
-            "primary-use-cases",
-            "handle-types",
-            "collaborators",
-            "generations",
-            "size-modifiers",
-            "platform-variants",
-        }
-        if option_type not in allowed:
+        if option_type not in _NORMALIZED_OPTION_TABLES and option_type not in _LEGACY_OPTION_TYPES:
             raise HTTPException(status_code=404, detail="Unknown option type.")
         with get_conn() as conn:
             clean_name = (payload.get("name") or "").strip()
             if not clean_name:
                 raise HTTPException(status_code=400, detail="Option name is required.")
             try:
-                cur = conn.execute(
-                    "INSERT INTO v2_option_values (option_type, name) VALUES (?, ?)",
-                    (option_type, clean_name),
-                )
+                if option_type in _NORMALIZED_OPTION_TABLES:
+                    table = _NORMALIZED_OPTION_TABLES[option_type]
+                    cur = conn.execute(
+                        f"INSERT INTO {table} (name) VALUES (?)", (clean_name,)
+                    )
+                else:
+                    cur = conn.execute(
+                        "INSERT INTO v2_option_values (option_type, name) VALUES (?, ?)",
+                        (option_type, clean_name),
+                    )
+                    if option_type == "collaborators":
+                        _v2_dim_id(conn, "collaborators", clean_name)
             except sqlite3.IntegrityError:
                 raise HTTPException(status_code=400, detail="Option already exists.")
-            if option_type == "collaborators":
-                _v2_dim_id(conn, "collaborators", clean_name)
             return {"id": cur.lastrowid, "message": "Created"}
 
 
     @router.delete("/api/v2/options/{option_type}/{option_id}")
     def v2_delete_option(option_type: str, option_id: int):
-        allowed = {
-            "blade-steels",
-            "blade-finishes",
-            "blade-colors",
-            "handle-colors",
-            "conditions",
-            "blade-types",
-            "categories",
-            "blade-families",
-            "primary-use-cases",
-            "handle-types",
-            "collaborators",
-            "generations",
-            "size-modifiers",
-            "platform-variants",
-        }
-        if option_type not in allowed:
+        if option_type not in _NORMALIZED_OPTION_TABLES and option_type not in _LEGACY_OPTION_TYPES:
             raise HTTPException(status_code=404, detail="Unknown option type.")
         with get_conn() as conn:
-            row = conn.execute(
-                "SELECT name FROM v2_option_values WHERE id = ? AND option_type = ?",
-                (option_id, option_type),
-            ).fetchone()
-            if not row:
-                raise HTTPException(status_code=404, detail="Option not found.")
-            option_name = (row.get("name") or "").strip()
-            usage_sql = {
-                "collaborators": (
-                    "SELECT COUNT(*) AS c FROM knife_models_v2 km "
-                    "LEFT JOIN collaborators c ON c.id = km.collaborator_id "
-                    "WHERE lower(c.name) = lower(?)"
-                ),
-                "generations": "SELECT COUNT(*) AS c FROM knife_models_v2 WHERE lower(generation_label) = lower(?)",
-                "size-modifiers": "SELECT COUNT(*) AS c FROM knife_models_v2 WHERE lower(size_modifier) = lower(?)",
-                "platform-variants": "SELECT COUNT(*) AS c FROM knife_models_v2 WHERE lower(platform_variant) = lower(?)",
-                "handle-types": "SELECT COUNT(*) AS c FROM knife_models_v2 WHERE lower(handle_type) = lower(?)",
-            }
-            sql = usage_sql.get(option_type)
-            if sql and option_name:
-                in_use = conn.execute(sql, (option_name,)).fetchone()["c"]
-                if in_use:
+            if option_type in _NORMALIZED_OPTION_TABLES:
+                table = _NORMALIZED_OPTION_TABLES[option_type]
+                row = conn.execute(
+                    f"SELECT name FROM {table} WHERE id = ?", (option_id,)
+                ).fetchone()
+                if not row:
+                    raise HTTPException(status_code=404, detail="Option not found.")
+                # Check FK usage before deleting
+                id_col_map = {
+                    "handle-colors":  "handle_color_id",
+                    "blade-colors":   "blade_color_id",
+                    "blade-steels":   "steel_id",
+                    "blade-finishes": "blade_finish_id",
+                    "conditions":     "condition_id",
+                }
+                id_col = id_col_map[option_type]
+                usage = 0
+                for src in ("knife_models_v2", "inventory_items_v2"):
+                    if id_col in {r["name"] for r in conn.execute(f"PRAGMA table_info({src})")}:
+                        usage += conn.execute(
+                            f"SELECT COUNT(*) AS c FROM {src} WHERE {id_col} = ?", (option_id,)
+                        ).fetchone()["c"]
+                if usage:
                     raise HTTPException(
                         status_code=400,
-                        detail=f"Cannot delete option in use by {in_use} model(s).",
+                        detail=f"Cannot delete — in use by {usage} knife record(s).",
                     )
-            cur = conn.execute(
-                "DELETE FROM v2_option_values WHERE id = ? AND option_type = ?",
-                (option_id, option_type),
-            )
+                conn.execute(f"DELETE FROM {table} WHERE id = ?", (option_id,))
+            else:
+                row = conn.execute(
+                    "SELECT name FROM v2_option_values WHERE id = ? AND option_type = ?",
+                    (option_id, option_type),
+                ).fetchone()
+                if not row:
+                    raise HTTPException(status_code=404, detail="Option not found.")
+                option_name = (row.get("name") or "").strip()
+                usage_sql = {
+                    "collaborators": (
+                        "SELECT COUNT(*) AS c FROM knife_models_v2 km "
+                        "LEFT JOIN collaborators c ON c.id = km.collaborator_id "
+                        "WHERE lower(c.name) = lower(?)"
+                    ),
+                    "generations":       "SELECT COUNT(*) AS c FROM knife_models_v2 WHERE lower(generation_label) = lower(?)",
+                    "size-modifiers":    "SELECT COUNT(*) AS c FROM knife_models_v2 WHERE lower(size_modifier) = lower(?)",
+                    "platform-variants": "SELECT COUNT(*) AS c FROM knife_models_v2 WHERE lower(platform_variant) = lower(?)",
+                    "handle-types":      "SELECT COUNT(*) AS c FROM knife_models_v2 WHERE lower(handle_type) = lower(?)",
+                }
+                sql = usage_sql.get(option_type)
+                if sql and option_name:
+                    in_use = conn.execute(sql, (option_name,)).fetchone()["c"]
+                    if in_use:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Cannot delete option in use by {in_use} model(s).",
+                        )
+                conn.execute(
+                    "DELETE FROM v2_option_values WHERE id = ? AND option_type = ?",
+                    (option_id, option_type),
+                )
             return {"message": "Deleted"}
 
 
     @router.get("/api/inventory/options")
     def inventory_options(master_knife_id: Optional[int] = None):  # noqa: ARG001
         """Return option lists for the inventory form. master_knife_id accepted but unused (all options returned)."""
-        option_types = (
-            "blade-steels", "blade-finishes", "blade-colors",
-            "handle-colors", "blade-types", "categories", "primary-use-cases",
-        )
         with get_conn() as conn:
             result: dict[str, list[dict[str, Any]]] = {}
-            for key in option_types:
+            # Normalized types — read from lookup tables
+            for key, table in _NORMALIZED_OPTION_TABLES.items():
+                result[key] = conn.execute(
+                    f"SELECT id, name FROM {table} ORDER BY name COLLATE NOCASE"
+                ).fetchall()
+            # Legacy types still in v2_option_values
+            for key in ("blade-types", "categories", "primary-use-cases"):
                 result[key] = conn.execute(
                     "SELECT id, name FROM v2_option_values WHERE option_type = ? ORDER BY name COLLATE NOCASE",
                     (key,),
