@@ -104,11 +104,6 @@ function Card({ item, onClick }: CardProps) {
             </div>
           )}
         </div>
-        {item.quantity > 1 && (
-          <div className="absolute top-2 right-2 bg-gold/90 text-black text-xs font-bold rounded-full px-1.5 py-0.5 leading-tight z-10">
-            ×{item.quantity}
-          </div>
-        )}
       </div>
 
       {/* Body */}
@@ -135,10 +130,13 @@ function Card({ item, onClick }: CardProps) {
         )}
 
         {/* Footer */}
-        <div className="mt-1.5">
+        <div className="flex items-center justify-between mt-1.5">
           <span className="text-gold text-sm font-bold">
             {formatCurrency(item.purchase_price)}
           </span>
+          {item.quantity > 1 && (
+            <span className="text-muted text-xs">×{item.quantity}</span>
+          )}
         </div>
       </div>
     </div>

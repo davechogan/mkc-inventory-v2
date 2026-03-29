@@ -223,6 +223,7 @@ export default function App() {
               </svg>
               Add Knife
             </button>
+
             {/* View toggle */}
             <div className="flex items-center rounded-lg border border-border overflow-hidden">
               <button
@@ -392,6 +393,17 @@ export default function App() {
         onClose={() => setAddOpen(false)}
         onAdded={() => { void reload(); }}
       />
+
+      {/* Floating add button — always accessible while scrolling */}
+      <button
+        onClick={() => setAddOpen(true)}
+        title="Add Knife"
+        className="fixed bottom-6 right-6 z-30 flex items-center justify-center w-12 h-12 rounded-full bg-gold text-black shadow-lg shadow-gold/20 hover:bg-gold-bright transition-all duration-200 hover:scale-110"
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+        </svg>
+      </button>
     </div>
   );
 }
