@@ -1,19 +1,22 @@
 import type { InventoryItem, InventoryResponse } from './types';
 
+async function fetchJson<T>(url: string): Promise<T> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`API ${res.status}: ${res.statusText} (${url})`);
+  return res.json() as Promise<T>;
+}
+
 export async function getInventory(): Promise<InventoryResponse> {
-  const res = await fetch('/api/v2/inventory');
-  if (!res.ok) {
-    throw new Error(`Failed to fetch inventory: ${res.status} ${res.statusText}`);
-  }
-  return res.json() as Promise<InventoryResponse>;
+  // The backend has two separate endpoints — fetch them in parallel.
+  const [items, summary] = await Promise.all([
+    fetchJson<InventoryItem[]>('/api/v2/inventory'),
+    fetchJson<InventoryResponse['summary']>('/api/v2/inventory/summary'),
+  ]);
+  return { items, summary };
 }
 
 export function imageUrl(item: InventoryItem): string | null {
-  if (item.colorway_image_url) {
-    return item.colorway_image_url;
-  }
-  if (item.has_identifier_image) {
-    return `/api/v2/models/${item.knife_model_id}/image`;
-  }
+  if (item.colorway_image_url) return item.colorway_image_url;
+  if (item.has_identifier_image) return `/api/v2/models/${item.knife_model_id}/image`;
   return null;
 }

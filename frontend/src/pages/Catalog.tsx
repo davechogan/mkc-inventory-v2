@@ -204,9 +204,25 @@ function ModelCard({
 
 // ── Detail panel ──────────────────────────────────────────────────────────────
 
+interface ColorwayImage {
+  id: number;
+  color_name: string;
+  filename: string;
+  url_path: string;
+}
+
 function ModelDetail({ model, onClose }: { model: CatalogModel; onClose: () => void }) {
   const [imgLoaded, setImgLoaded] = useState(false);
   const imgSrc = model.colorway_image_url ?? (model.has_identifier_image ? `/api/v2/models/${model.id}/image` : null);
+
+  // Colorway image list
+  const [colorwayImages, setColorwayImages] = useState<ColorwayImage[]>([]);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+
+  const fetchColorwayImages = useCallback(async () => {
+    const res = await fetch(`/api/v2/models/${model.id}/colorway-images`);
+    if (res.ok) setColorwayImages(await res.json() as ColorwayImage[]);
+  }, [model.id]);
 
   // Upload state
   const [uploadFile, setUploadFile] = useState<File | null>(null);
@@ -218,11 +234,12 @@ function ModelDetail({ model, onClose }: { model: CatalogModel; onClose: () => v
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    fetchColorwayImages();
     fetch('/api/v2/colors')
       .then((r) => r.json())
       .then((d) => setColorOptions(d as { handle_colors: string[]; blade_colors: string[] }))
       .catch(() => {});
-  }, []);
+  }, [fetchColorwayImages]);
 
   const handleUpload = async () => {
     if (!uploadFile || !handleColor.trim()) return;
@@ -244,10 +261,25 @@ function ModelDetail({ model, onClose }: { model: CatalogModel; onClose: () => v
       setHandleColor('');
       setBladeColor('');
       if (fileInputRef.current) fileInputRef.current.value = '';
+      fetchColorwayImages();
     } catch (e) {
       setUploadMsg({ ok: false, text: e instanceof Error ? e.message : 'Upload failed' });
     } finally {
       setUploading(false);
+    }
+  };
+
+  const handleDelete = async (imgId: number) => {
+    setDeletingId(imgId);
+    try {
+      const res = await fetch(`/api/v2/models/${model.id}/colorway-images/${imgId}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { detail?: string };
+        throw new Error(err.detail ?? 'Delete failed');
+      }
+      setColorwayImages((prev) => prev.filter((img) => img.id !== imgId));
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -338,6 +370,39 @@ function ModelDetail({ model, onClose }: { model: CatalogModel; onClose: () => v
             View on MKC website
           </a>
         )}
+
+        {/* Existing colorway images */}
+        <div className="border-t border-border/40 pt-4">
+          <div className="text-muted text-xs uppercase tracking-widest mb-3">Colorway Images</div>
+          {colorwayImages.length === 0 ? (
+            <p className="text-muted text-xs italic">No images uploaded yet.</p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {colorwayImages.map((img) => (
+                <div key={img.id} className="flex items-center gap-3 group">
+                  <img
+                    src={img.url_path}
+                    alt={img.color_name}
+                    className="w-14 h-10 object-contain rounded bg-card flex-shrink-0 border border-border"
+                  />
+                  <span className="flex-1 text-xs text-ink truncate">{img.color_name}</span>
+                  <button
+                    onClick={() => handleDelete(img.id)}
+                    disabled={deletingId === img.id}
+                    title="Remove image"
+                    className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 text-red-400 hover:text-red-300 disabled:opacity-30 p-1"
+                  >
+                    {deletingId === img.id ? '…' : (
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14H6L5 6" /><path d="M10 11v6M14 11v6" /><path d="M9 6V4h6v2" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
 
         {/* Colorway image upload */}
         <div className="border-t border-border/40 pt-4">

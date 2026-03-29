@@ -6,6 +6,7 @@ import App from './App';
 const Identify = lazy(() => import('./pages/Identify'));
 const Catalog = lazy(() => import('./pages/Catalog'));
 const Reporting = lazy(() => import('./pages/Reporting'));
+const Admin = lazy(() => import('./pages/Admin'));
 
 const rootEl = document.getElementById('root');
 if (!rootEl) throw new Error('Root element not found');
@@ -19,6 +20,8 @@ if (path === '/identify') {
   Page = Catalog;
 } else if (path === '/reporting') {
   Page = Reporting;
+} else if (path === '/admin') {
+  Page = Admin;
 } else {
   Page = App;
 }

@@ -13,7 +13,7 @@ from typing import Any, Optional, Type
 
 import blade_ai
 import normalized_model
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field, field_validator
 
@@ -448,6 +448,9 @@ def create_v2_router(
                    UNION
                    SELECT DISTINCT handle_color FROM inventory_items_v2
                    WHERE handle_color IS NOT NULL AND handle_color != ''
+                   UNION
+                   SELECT name FROM v2_option_values
+                   WHERE option_type = 'handle-colors' AND name IS NOT NULL AND name != ''
                    ORDER BY handle_color COLLATE NOCASE"""
             ).fetchall()
             blade = conn.execute(
@@ -456,11 +459,14 @@ def create_v2_router(
                    UNION
                    SELECT DISTINCT blade_color FROM inventory_items_v2
                    WHERE blade_color IS NOT NULL AND blade_color != ''
+                   UNION
+                   SELECT name FROM v2_option_values
+                   WHERE option_type = 'blade-colors' AND name IS NOT NULL AND name != ''
                    ORDER BY blade_color COLLATE NOCASE"""
             ).fetchall()
             return {
-                "handle_colors": [r["handle_color"] for r in handle],
-                "blade_colors": [r["blade_color"] for r in blade],
+                "handle_colors": [r[0] for r in handle],
+                "blade_colors": [r[0] for r in blade],
             }
 
     @router.get("/api/v2/models/by-legacy-master/{legacy_id}")
@@ -948,6 +954,45 @@ def create_v2_router(
 
         return {"filename": filename, "url_path": url_path, "color_name": color_name}
 
+    @router.get("/api/v2/models/{model_id}/colorway-images")
+    def v2_list_colorway_images(model_id: int):
+        """Return all colorway images registered for a model."""
+        with get_conn() as conn:
+            model = conn.execute(
+                "SELECT slug FROM knife_models_v2 WHERE id = ?", (model_id,)
+            ).fetchone()
+            if not model:
+                raise HTTPException(status_code=404, detail="Model not found.")
+            rows = conn.execute(
+                """SELECT id, color_name, filename, url_path
+                   FROM knife_model_image_files
+                   WHERE model_slug = ?
+                   ORDER BY color_name COLLATE NOCASE""",
+                (model["slug"],),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    @router.delete("/api/v2/models/{model_id}/colorway-images/{image_id}")
+    def v2_delete_colorway_image(model_id: int, image_id: int):
+        """Remove a colorway image from the DB and delete the file from disk."""
+        with get_conn() as conn:
+            model = conn.execute(
+                "SELECT slug FROM knife_models_v2 WHERE id = ?", (model_id,)
+            ).fetchone()
+            if not model:
+                raise HTTPException(status_code=404, detail="Model not found.")
+            row = conn.execute(
+                "SELECT filename FROM knife_model_image_files WHERE id = ? AND model_slug = ?",
+                (image_id, model["slug"]),
+            ).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Image not found.")
+            conn.execute("DELETE FROM knife_model_image_files WHERE id = ?", (image_id,))
+        file_path = images_colors_dir / row["filename"]
+        if file_path.exists():
+            file_path.unlink()
+        return {"message": "Deleted"}
+
     @router.post("/api/v2/models/{model_id}/recompute-descriptors")
     def v2_recompute_model_descriptors(model_id: int, model: Optional[str] = None):
         vision_model = (model or "").strip() or ollama_vision_model
@@ -1199,7 +1244,7 @@ def create_v2_router(
 
 
     @router.post("/api/v2/options/{option_type}")
-    def v2_add_option(option_type: str, payload: option_in_model):
+    def v2_add_option(option_type: str, payload: dict = Body(...)):
         allowed = {
             "blade-steels",
             "blade-finishes",
@@ -1219,7 +1264,7 @@ def create_v2_router(
         if option_type not in allowed:
             raise HTTPException(status_code=404, detail="Unknown option type.")
         with get_conn() as conn:
-            clean_name = payload.name.strip()
+            clean_name = (payload.get("name") or "").strip()
             if not clean_name:
                 raise HTTPException(status_code=400, detail="Option name is required.")
             try:

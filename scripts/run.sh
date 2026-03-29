@@ -21,5 +21,17 @@ if ! "$PY" -c "import uvicorn, httpx" 2>/dev/null; then
   exit 1
 fi
 
+# Stop any existing instance on port 8008 before starting.
+EXISTING=$(lsof -ti tcp:8008 2>/dev/null || true)
+if [ -n "$EXISTING" ]; then
+  echo "Stopping existing process on port 8008 (PID $EXISTING)…"
+  kill "$EXISTING" 2>/dev/null || true
+  # Wait up to 3 seconds for the port to free.
+  for i in 1 2 3; do
+    sleep 1
+    lsof -ti tcp:8008 &>/dev/null || break
+  done
+fi
+
 # Use python -m uvicorn so we do not rely on .venv/bin/uvicorn's shebang (stale if .venv was moved/copied).
 exec "$PY" -m uvicorn app:app --reload --host 0.0.0.0 --port 8008
