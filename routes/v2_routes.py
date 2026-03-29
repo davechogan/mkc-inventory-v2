@@ -459,8 +459,8 @@ def create_v2_router(
                    ORDER BY blade_color COLLATE NOCASE"""
             ).fetchall()
             return {
-                "handle_colors": [r[0] for r in handle],
-                "blade_colors": [r[0] for r in blade],
+                "handle_colors": [r["handle_color"] for r in handle],
+                "blade_colors": [r["blade_color"] for r in blade],
             }
 
     @router.get("/api/v2/models/by-legacy-master/{legacy_id}")
