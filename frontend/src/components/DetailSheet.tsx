@@ -120,7 +120,7 @@ export function DetailSheet({ item, onClose }: DetailSheetProps) {
                 <FieldRow label="Type" value={item.knife_type} />
                 <FieldRow label="Family" value={item.knife_family} />
                 <FieldRow label="Form" value={item.form_name} />
-                {item.is_collab && (
+                {!!item.is_collab && (
                   <FieldRow label="Collab" value={item.collaboration_name} />
                 )}
               </Section>
@@ -134,6 +134,9 @@ export function DetailSheet({ item, onClose }: DetailSheetProps) {
               </Section>
 
               <Section title="Acquisition">
+                {item.quantity > 1 && (
+                  <FieldRow label="Quantity" value={`×${item.quantity}`} />
+                )}
                 <FieldRow label="Purchase Price" value={formatCurrency(item.purchase_price)} />
                 <FieldRow label="Est. Value" value={formatCurrency(item.estimated_value)} />
                 <FieldRow label="Acquired" value={formatDate(item.acquired_date)} />

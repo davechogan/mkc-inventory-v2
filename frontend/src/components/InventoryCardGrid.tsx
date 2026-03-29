@@ -1,6 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { InventoryItem } from '../types';
 import { imageUrl } from '../api';
+
+async function incrementQuantity(id: number): Promise<number> {
+  const res = await fetch(`/api/v2/inventory/${id}/quantity`, { method: 'PATCH' });
+  if (!res.ok) throw new Error('Failed to update quantity');
+  const data = await res.json() as { quantity: number };
+  return data.quantity;
+}
 
 interface InventoryCardGridProps {
   items: InventoryItem[];
@@ -64,6 +71,12 @@ function LazyImage({ src, alt }: LazyImageProps) {
             onLoad={() => setLoaded(true)}
             onError={() => setError(true)}
           />
+          {loaded && (
+            <div
+              className="absolute inset-0 pointer-events-none"
+              style={{ background: 'radial-gradient(ellipse at center, transparent 45%, rgba(9,9,12,0.92) 100%)' }}
+            />
+          )}
         </>
       ) : error ? (
         <div className="w-full h-full flex items-center justify-center">
@@ -83,6 +96,19 @@ interface CardProps {
 
 function Card({ item, onClick }: CardProps) {
   const url = imageUrl(item);
+  const [qty, setQty] = useState(item.quantity);
+
+  const handleIncrement = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const next = qty + 1;
+    setQty(next); // optimistic
+    try {
+      const confirmed = await incrementQuantity(item.id);
+      setQty(confirmed);
+    } catch {
+      setQty(qty); // revert on error
+    }
+  }, [item.id, qty]);
 
   const pills: string[] = [];
   if (item.handle_color) pills.push(item.handle_color);
@@ -129,14 +155,23 @@ function Card({ item, onClick }: CardProps) {
           </div>
         )}
 
-        {/* Footer */}
+        {/* Footer — price left, quantity right with hover + */}
         <div className="flex items-center justify-between mt-1.5">
           <span className="text-gold text-sm font-bold">
             {formatCurrency(item.purchase_price)}
           </span>
-          {item.quantity > 1 && (
-            <span className="text-muted text-xs">×{item.quantity}</span>
-          )}
+          <span className="flex items-center gap-1">
+            <span className="text-gold text-sm font-bold">×{qty}</span>
+            <button
+              onClick={handleIncrement}
+              title="Add another"
+              className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center w-4 h-4 rounded-full bg-gold/20 hover:bg-gold/40 text-gold"
+            >
+              <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+            </button>
+          </span>
         </div>
       </div>
     </div>

@@ -1304,6 +1304,22 @@ def create_v2_router(
             return {"message": "Updated"}
 
 
+    @router.patch("/api/v2/inventory/{item_id}/quantity")
+    def v2_patch_inventory_quantity(item_id: int, delta: int = 1):
+        """Increment (or decrement) quantity by delta. Quantity cannot go below 1."""
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT quantity FROM inventory_items_v2 WHERE id = ?", (item_id,)
+            ).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Inventory item not found.")
+            new_qty = max(1, row["quantity"] + delta)
+            conn.execute(
+                "UPDATE inventory_items_v2 SET quantity = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (new_qty, item_id),
+            )
+            return {"id": item_id, "quantity": new_qty}
+
     @router.delete("/api/v2/inventory/{item_id}")
     def v2_delete_inventory_item(item_id: int):
         with get_conn() as conn:
