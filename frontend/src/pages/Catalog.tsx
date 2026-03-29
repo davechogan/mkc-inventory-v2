@@ -128,7 +128,7 @@ function ModelCard({
   return (
     <button
       onClick={onClick}
-      className={`group text-left flex flex-col rounded-xl border overflow-hidden transition-all duration-200 hover:shadow-lg hover:shadow-gold/10 ${
+      className={`relative group text-left flex flex-col rounded-xl border overflow-hidden transition-all duration-200 hover:scale-[1.04] hover:z-10 hover:shadow-xl hover:shadow-gold/10 ${
         selected
           ? 'border-gold/50 ring-1 ring-gold/20'
           : 'border-border hover:border-gold/30'
@@ -150,7 +150,7 @@ function ModelCard({
               alt={model.official_name}
               onLoad={() => setImgLoaded(true)}
               onError={() => setImgError(true)}
-              className={`w-full h-full object-contain transition-all duration-300 group-hover:scale-110 ${imgLoaded ? 'opacity-100' : 'opacity-0'}`}
+              className={`w-full h-full object-contain transition-opacity duration-300 ${imgLoaded ? 'opacity-100' : 'opacity-0'}`}
             />
           </>
         ) : (
