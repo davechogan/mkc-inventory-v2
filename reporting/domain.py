@@ -338,7 +338,7 @@ def _reporting_get_last_query_state(conn: sqlite3.Connection, session_id: str) -
     ).fetchone()
     if not row:
         return None
-    raw = row.get("last_query_state_json")
+    raw = row["last_query_state_json"]
     if not raw:
         return None
     try:
@@ -480,8 +480,8 @@ def _reporting_get_semantic_hints(
             (ent, cue, float(min_confidence), session_id),
         ).fetchall()
         for r in rows:
-            dim = str(r.get("target_dimension") or "").strip()
-            val = str(r.get("target_value") or "").strip()
+            dim = str(r["target_dimension"] or "").strip()
+            val = str(r["target_value"] or "").strip()
             if not dim or not val:
                 continue
             if dim not in {"series_name", "family_name", "knife_type", "form_name", "collaborator_name", "steel", "condition", "location", "text_search"}:
@@ -489,15 +489,15 @@ def _reporting_get_semantic_hints(
             # Do not overwrite stronger hints in same pass.
             if dim not in filters:
                 filters[dim] = val
-                hid = int(r.get("id"))
+                hid = int(r["id"])
                 hint_ids.append(hid)
                 hints.append(
                     {
                         "id": hid,
                         "dimension": dim,
                         "value": val,
-                        "confidence": r.get("confidence"),
-                        "scope_type": r.get("scope_type"),
+                        "confidence": r["confidence"],
+                        "scope_type": r["scope_type"],
                     }
                 )
     return {"filters": filters, "hint_ids": hint_ids, "hints": hints}
@@ -629,10 +629,10 @@ def _reporting_promote_semantic_hints(
     skipped = 0
     reasons: dict[str, int] = {}
     for row in candidates:
-        ent = str(row.get("entity_norm") or "").strip()
-        cue = str(row.get("cue_word") or "").strip()
-        dim = str(row.get("target_dimension") or "").strip()
-        val = str(row.get("target_value") or "").strip()
+        ent = str(row["entity_norm"] or "").strip()
+        cue = str(row["cue_word"] or "").strip()
+        dim = str(row["target_dimension"] or "").strip()
+        val = str(row["target_value"] or "").strip()
         if not ent or not cue or not dim or not val:
             skipped += 1
             reasons["invalid_candidate"] = reasons.get("invalid_candidate", 0) + 1
@@ -655,16 +655,16 @@ def _reporting_promote_semantic_hints(
             skipped += 1
             reasons["conflict_global_value"] = reasons.get("conflict_global_value", 0) + 1
             continue
-        promoted_conf = min(0.90, max(0.60, float(row.get("confidence") or min_conf) - 0.03))
+        promoted_conf = min(0.90, max(0.60, float(row["confidence"] or min_conf) - 0.03))
         item = {
-            "source_hint_id": int(row.get("id")),
-            "source_session_id": row.get("scope_id"),
+            "source_hint_id": int(row["id"]),
+            "source_session_id": row["scope_id"],
             "entity_norm": ent,
             "cue_word": cue,
             "target_dimension": dim,
             "target_value": val,
             "promoted_confidence": promoted_conf,
-            "evidence_count": int(row.get("evidence_count") or 0),
+            "evidence_count": int(row["evidence_count"] or 0),
         }
         promoted.append(item)
         if dry_run:
@@ -694,9 +694,9 @@ def _reporting_promote_semantic_hints(
                 WHERE id = ?
                 """,
                 (
-                    min(0.95, max(float(existing.get("confidence") or 0.0), promoted_conf)),
-                    max(int(existing.get("evidence_count") or 0), int(row.get("evidence_count") or 1)),
-                    int(existing.get("id")),
+                    min(0.95, max(float(existing["confidence"] or 0.0), promoted_conf)),
+                    max(int(existing["evidence_count"] or 0), int(row["evidence_count"] or 1)),
+                    int(existing["id"]),
                 ),
             )
         else:
@@ -713,7 +713,7 @@ def _reporting_promote_semantic_hints(
                     dim,
                     val,
                     promoted_conf,
-                    int(row.get("evidence_count") or 1),
+                    int(row["evidence_count"] or 1),
                 ),
             )
     return {
@@ -853,7 +853,7 @@ def _reporting_get_or_create_session(conn: sqlite3.Connection, session_id: Optio
             (session_id,),
         ).fetchone()
         if row:
-            return row
+            return dict(row)
     return _reporting_create_session(conn, model_default)
 
 
@@ -894,11 +894,11 @@ def _reporting_context_block(conn: sqlite3.Connection, session_id: str, limit: i
         "SELECT memory_summary, last_query_state_json FROM reporting_sessions WHERE id = ?",
         (session_id,),
     ).fetchone()
-    summary = (session.get("memory_summary") or "").strip() if session else ""
+    summary = (session["memory_summary"] or "").strip() if session else ""
     last_state = ""
-    if session and session.get("last_query_state_json"):
+    if session and session["last_query_state_json"]:
         try:
-            parsed = json.loads(session.get("last_query_state_json"))
+            parsed = json.loads(session["last_query_state_json"])
             if isinstance(parsed, dict):
                 last_state = json.dumps(parsed, ensure_ascii=False)
         except Exception:
@@ -920,8 +920,8 @@ def _reporting_context_block(conn: sqlite3.Connection, session_id: str, limit: i
     if last_state:
         lines.append(f"LastQueryState: {last_state[:700]}")
     for r in rows:
-        role = "User" if r.get("role") == "user" else "Assistant"
-        content = " ".join(str(r.get("content") or "").split())
+        role = "User" if r["role"] == "user" else "Assistant"
+        content = " ".join(str(r["content"] or "").split())
         if content:
             lines.append(f"{role}: {content[:500]}")
     block = "\n".join(lines).strip()
@@ -944,9 +944,9 @@ def _reporting_update_summary(conn: sqlite3.Connection, session_id: str) -> None
     rows = list(reversed(rows))
     bullets = []
     for r in rows:
-        if r.get("role") != "user":
+        if r["role"] != "user":
             continue
-        q = " ".join(str(r.get("content") or "").split())
+        q = " ".join(str(r["content"] or "").split())
         if q:
             bullets.append(f"- {q[:120]}")
     if not bullets:
@@ -987,16 +987,17 @@ def _reporting_generate_answer(
     ):
         lines: list[str] = []
         for i, r in enumerate(rows[:40], start=1):
-            name = str(r.get("knife_name") or "").strip() or "(unnamed)"
-            lt_raw = r.get("line_purchase_total")
+            rd = dict(r) if not isinstance(r, dict) else r
+            name = str(rd.get("knife_name") or "").strip() or "(unnamed)"
+            lt_raw = rd.get("line_purchase_total")
             try:
                 lt_f = float(lt_raw) if lt_raw is not None else None
             except (TypeError, ValueError):
                 lt_f = None
             if lt_f is None:
                 try:
-                    pp = r.get("purchase_price")
-                    qty = float(r.get("quantity") or 1) or 1.0
+                    pp = rd.get("purchase_price")
+                    qty = float(rd.get("quantity") or 1) or 1.0
                     lt_f = float(pp) * qty if pp is not None else None
                 except (TypeError, ValueError):
                     lt_f = None
@@ -1004,7 +1005,7 @@ def _reporting_generate_answer(
                 price_str = f"${lt_f:,.2f}"
             else:
                 price_str = "—"
-            qty_v = r.get("quantity")
+            qty_v = rd.get("quantity")
             try:
                 qn = int(qty_v) if qty_v is not None else 1
             except (TypeError, ValueError):
@@ -1023,7 +1024,7 @@ def _reporting_generate_answer(
             dbg2,
         )
     if canonical_plan is not None and canonical_plan.intent.value == "missing_models":
-        names = [str(r.get("official_name") or "").strip() for r in rows if str(r.get("official_name") or "").strip()]
+        names = [str((dict(r) if not isinstance(r, dict) else r).get("official_name") or "").strip() for r in rows if str((dict(r) if not isinstance(r, dict) else r).get("official_name") or "").strip()]
         if names:
             max_list = 30
             listed = ", ".join(names[:max_list])

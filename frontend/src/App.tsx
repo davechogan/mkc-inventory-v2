@@ -1,8 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { StatStrip } from './components/StatStrip';
-import { FamilyChips } from './components/FamilyChips';
-import { FilterDrawer } from './components/FilterDrawer';
 import { InventoryTable } from './components/InventoryTable';
 import { InventoryCardGrid } from './components/InventoryCardGrid';
 import { DetailSheet } from './components/DetailSheet';
@@ -135,23 +133,6 @@ function IconGrid() {
   );
 }
 
-function IconRefresh() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="23 4 23 10 17 10" />
-      <polyline points="1 20 1 14 7 14" />
-      <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-    </svg>
-  );
-}
-
-function IconFilter() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
-    </svg>
-  );
-}
 
 function IconDownload() {
   return (
@@ -163,6 +144,24 @@ function IconDownload() {
   );
 }
 
+function InlineFilter({ value, onChange, options, placeholder }: {
+  value: string; onChange: (v: string) => void; options: string[]; placeholder: string;
+}) {
+  if (options.length === 0) return null;
+  return (
+    <select
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      className={`px-3 py-1.5 bg-card border rounded-lg text-sm focus:outline-none focus:border-gold/60 transition-colors ${
+        value ? 'border-gold/40 text-gold' : 'border-border text-muted hover:text-ink'
+      }`}
+    >
+      <option value="">{placeholder}</option>
+      {options.map(o => <option key={o} value={o}>{o}</option>)}
+    </select>
+  );
+}
+
 export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(
     () => localStorage.getItem(SIDEBAR_KEY) === 'true'
@@ -170,7 +169,6 @@ export default function App() {
   const [view, setView] = useState<ViewMode>(getInitialView);
   const [filters, setFilters] = useState<FilterState>(emptyFilters);
   const [sort, setSort] = useState<SortState>({ col: 'knife_family', dir: 'asc' });
-  const [filterOpen, setFilterOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
 
@@ -207,7 +205,26 @@ export default function App() {
     return applySort(filtered, sort);
   }, [items, filters, sort]);
 
-  const families = summary?.by_family ?? [];
+  // Compute unique filter options from loaded items
+  const filterOptions = useMemo(() => {
+    const fam = new Set<string>();
+    const typ = new Set<string>();
+    const ser = new Set<string>();
+    const hc = new Set<string>();
+    for (const item of items) {
+      if (item.knife_family) fam.add(item.knife_family);
+      if (item.knife_type) typ.add(item.knife_type);
+      if (item.series_name) ser.add(item.series_name);
+      if (item.handle_color) hc.add(item.handle_color);
+    }
+    return {
+      families: [...fam].sort(),
+      types: [...typ].sort(),
+      series: [...ser].sort(),
+      handleColors: [...hc].sort(),
+    };
+  }, [items]);
+
   const activeFilterCount = countActiveFilters(filters);
 
   const marginClass = sidebarCollapsed ? 'ml-16' : 'ml-56';
@@ -221,134 +238,76 @@ export default function App() {
         className={`${marginClass} transition-[margin] duration-200 flex flex-col h-screen overflow-hidden`}
       >
         {/* Top bar */}
-        <div className="flex items-center justify-between px-8 py-4 border-b border-border flex-shrink-0">
-          <h1 className="text-ink text-xl font-bold">Collection</h1>
-          <div className="flex items-center gap-2">
-            {/* Add knife */}
+        <div className="flex items-center justify-between px-8 py-4 border-b border-border flex-shrink-0 gap-4 flex-wrap">
+          <div className="flex items-center gap-3 flex-shrink-0">
+            <h1 className="text-ink text-xl font-bold">Collection</h1>
             <button
               onClick={() => setAddOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-gold text-black text-sm font-semibold hover:bg-gold-bright transition-colors"
+              className="px-2.5 py-1 rounded-lg bg-gold text-black text-xs font-semibold hover:bg-gold-bright transition-colors"
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
-              </svg>
-              Add Knife
-            </button>
-
-            {/* View toggle */}
-            <div className="flex items-center rounded-lg border border-border overflow-hidden">
-              <button
-                onClick={() => setView('table')}
-                title="Table view"
-                className={`px-3 py-2 transition-colors ${
-                  view === 'table'
-                    ? 'bg-border/60 text-ink'
-                    : 'text-muted hover:text-ink hover:bg-border/30'
-                }`}
-              >
-                <IconTable />
-              </button>
-              <button
-                onClick={() => setView('cards')}
-                title="Card view"
-                className={`px-3 py-2 transition-colors ${
-                  view === 'cards'
-                    ? 'bg-border/60 text-ink'
-                    : 'text-muted hover:text-ink hover:bg-border/30'
-                }`}
-              >
-                <IconGrid />
-              </button>
-            </div>
-
-            {/* Export CSV */}
-            <a
-              href="/api/v2/inventory/export"
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-muted hover:text-ink hover:border-border/80 transition-colors text-sm"
-              title="Export CSV"
-            >
-              <IconDownload />
-              <span>Export CSV</span>
-            </a>
-
-            {/* Refresh */}
-            <button
-              onClick={() => { void reload(); }}
-              title="Refresh"
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-muted hover:text-ink hover:border-border/80 transition-colors text-sm"
-            >
-              <IconRefresh />
-              <span>Refresh</span>
+              + Add Knife
             </button>
           </div>
-        </div>
 
-        {/* Stat strip */}
-        <StatStrip summary={summary} loading={loading} />
-
-        {/* Family chips */}
-        {!loading && families.length > 0 && (
-          <div className="px-8 py-3 border-b border-border overflow-x-auto">
-            <FamilyChips
-              families={families}
-              activeFamily={filters.family}
-              onSelect={(f) => handleFilterChange('family', f)}
-            />
-          </div>
-        )}
-
-        {/* Toolbar */}
-        <div className="flex items-center gap-3 px-8 py-3 border-b border-border flex-shrink-0">
           {/* Search */}
-          <div className="relative flex-1 max-w-sm">
-            <svg
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted pointer-events-none"
-              width="15"
-              height="15"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <circle cx="11" cy="11" r="8" />
-              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          <div className="relative flex-1 min-w-[180px] max-w-xs">
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-muted pointer-events-none" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
             </svg>
             <input
               type="search"
-              placeholder="Search knives…"
+              placeholder="Search knives..."
               value={filters.search}
               onChange={(e) => handleFilterChange('search', e.target.value)}
               className="w-full pl-9 pr-4 py-2 bg-card border border-border rounded-lg text-sm text-ink placeholder:text-muted focus:outline-none focus:border-gold/60 transition-colors"
             />
           </div>
 
-          {/* Filters button */}
-          <button
-            onClick={() => setFilterOpen(true)}
-            className={`relative flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-colors ${
-              activeFilterCount > 0
-                ? 'border-gold/50 text-gold bg-gold/5 hover:bg-gold/10'
-                : 'border-border text-muted hover:text-ink hover:border-border/80'
-            }`}
-          >
-            <IconFilter />
-            <span>Filters</span>
+          {/* Filter dropdowns */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <InlineFilter value={filters.family} onChange={v => handleFilterChange('family', v)} options={filterOptions.families} placeholder="Family" />
+            <InlineFilter value={filters.handleColor} onChange={v => handleFilterChange('handleColor', v)} options={filterOptions.handleColors} placeholder="Handle Color" />
+            <InlineFilter value={filters.condition} onChange={v => handleFilterChange('condition', v)} options={['Like New', 'Very Good', 'Good', 'User']} placeholder="Condition" />
+            <InlineFilter value={filters.series} onChange={v => handleFilterChange('series', v)} options={filterOptions.series} placeholder="Series" />
             {activeFilterCount > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 bg-gold text-black text-xs font-bold rounded-full w-4 h-4 flex items-center justify-center leading-none">
-                {activeFilterCount}
+              <button
+                onClick={() => setFilters(emptyFilters)}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs text-muted hover:text-ink border border-border hover:border-border/70 transition-colors"
+              >
+                Clear {activeFilterCount}
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            )}
+          </div>
+
+          {/* Right side: view toggle, export, count */}
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <div className="flex items-center rounded-lg border border-border overflow-hidden">
+              <button onClick={() => setView('table')} title="Table view"
+                className={`px-2 py-1.5 transition-colors ${view === 'table' ? 'bg-border/60 text-ink' : 'text-muted hover:text-ink hover:bg-border/30'}`}>
+                <IconTable />
+              </button>
+              <button onClick={() => setView('cards')} title="Card view"
+                className={`px-2 py-1.5 transition-colors ${view === 'cards' ? 'bg-border/60 text-ink' : 'text-muted hover:text-ink hover:bg-border/30'}`}>
+                <IconGrid />
+              </button>
+            </div>
+            <a href="/api/v2/inventory/export" title="Export CSV"
+              className="p-1.5 rounded-lg border border-border text-muted hover:text-ink hover:border-border/80 transition-colors">
+              <IconDownload />
+            </a>
+            {!loading && (
+              <span className="text-muted text-xs">
+                {filteredItems.length.toLocaleString()} item{filteredItems.length !== 1 ? 's' : ''}
               </span>
             )}
-          </button>
-
-          {/* Results count */}
-          {!loading && (
-            <span className="text-muted text-xs ml-auto">
-              {filteredItems.length.toLocaleString()} item{filteredItems.length !== 1 ? 's' : ''}
-            </span>
-          )}
+          </div>
         </div>
+
+        {/* Stat strip */}
+        <StatStrip summary={summary} loading={loading} />
 
         {/* Error banner */}
         {error && (
@@ -386,14 +345,6 @@ export default function App() {
         )}
       </main>
 
-      {/* Drawers */}
-      <FilterDrawer
-        open={filterOpen}
-        onClose={() => setFilterOpen(false)}
-        filters={filters}
-        onChange={handleFilterChange}
-      />
-
       <DetailSheet
         item={selectedItem}
         onClose={() => setSelectedItem(null)}
@@ -406,16 +357,6 @@ export default function App() {
         onAdded={() => { void reload(); }}
       />
 
-      {/* Floating add button — always accessible while scrolling */}
-      <button
-        onClick={() => setAddOpen(true)}
-        title="Add Knife"
-        className="fixed bottom-6 right-6 z-30 flex items-center justify-center w-12 h-12 rounded-full bg-gold text-black shadow-lg shadow-gold/20 hover:bg-gold-bright transition-all duration-200 hover:scale-110"
-      >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-          <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
-        </svg>
-      </button>
     </div>
   );
 }

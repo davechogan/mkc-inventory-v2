@@ -1,14 +1,33 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, Component, type ReactNode, type ErrorInfo } from 'react';
 import { Sidebar } from '../components/Sidebar';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
+
+// ── Error boundary to prevent chart crashes from killing the page ─────────
+class ChartErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
+  state = { error: null as string | null };
+  static getDerivedStateFromError(error: Error) { return { error: error.message }; }
+  componentDidCatch(error: Error, info: ErrorInfo) { console.error('Chart render error:', error, info); }
+  render() {
+    if (this.state.error) return <div className="text-red-400 text-xs p-2 border border-red-800/30 rounded-lg mt-2">Chart error: {this.state.error}</div>;
+    return this.props.children;
+  }
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
+
+interface ChartSpec {
+  type: 'bar' | 'pie' | 'line';
+  x: string;
+  y: string;
+  data: Record<string, unknown>[];
+}
 
 interface QueryResponse {
   session_id: string;
   answer_text: string;
   columns: string[];
-  rows: unknown[][];
-  chart_spec: unknown | null;
+  rows: unknown[];
+  chart_spec: ChartSpec | null;
   sql_executed: string | null;
   follow_ups: string[];
   confidence: number | null;
@@ -38,7 +57,7 @@ interface StoredMessage {
   id: number;
   role: 'user' | 'assistant';
   content: string;
-  result: { columns?: string[]; rows?: unknown[][] } | null;
+  result: { columns?: string[]; rows?: unknown[] } | null;
   meta: { feedback_helpful?: boolean } | null;
   created_at: string;
 }
@@ -146,8 +165,16 @@ function IconChevronUp() {
 
 // ── DataTable ─────────────────────────────────────────────────────────────────
 
-function DataTable({ columns, rows }: { columns: string[]; rows: unknown[][] }) {
+function DataTable({ columns, rows }: { columns: string[]; rows: unknown[] }) {
   if (columns.length === 0 || rows.length === 0) return null;
+
+  // Rows can be arrays (positional) or objects (keyed by column name)
+  const getCells = (row: unknown): unknown[] => {
+    if (Array.isArray(row)) return row;
+    if (row && typeof row === 'object') return columns.map(col => (row as Record<string, unknown>)[col]);
+    return [];
+  };
+
   return (
     <div className="mt-3 overflow-x-auto rounded-lg border border-border">
       <table className="w-full text-xs border-collapse">
@@ -163,7 +190,7 @@ function DataTable({ columns, rows }: { columns: string[]; rows: unknown[][] }) 
         <tbody>
           {rows.slice(0, 50).map((row, i) => (
             <tr key={i} className="border-t border-border/50 hover:bg-border/10 transition-colors">
-              {(row as unknown[]).map((cell, j) => (
+              {getCells(row).map((cell, j) => (
                 <td key={j} className="px-3 py-2 text-ink whitespace-nowrap">
                   {cell == null ? '—' : String(cell)}
                 </td>
@@ -177,6 +204,72 @@ function DataTable({ columns, rows }: { columns: string[]; rows: unknown[][] }) 
           Showing 50 of {rows.length} rows
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Chart ────────────────────────────────────────────────────────────────────
+
+const CHART_COLORS = ['#c8921a', '#e8a820', '#7a8899', '#4a90a0', '#a07a4a', '#6a9a5a', '#9a6a8a', '#5a7a9a'];
+
+function ReportChart({ spec }: { spec: ChartSpec }) {
+  const data = spec.data.slice(0, 30); // cap at 30 items for readability
+
+  if (spec.type === 'pie') {
+    return (
+      <div className="mt-3 h-64">
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie data={data} dataKey={spec.y} nameKey={spec.x} cx="50%" cy="50%"
+              outerRadius={80} label>
+              {data.map((_: unknown, i: number) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+            </Pie>
+            <Tooltip contentStyle={{ backgroundColor: '#0f1114', border: '1px solid #1d2329', borderRadius: 8, fontSize: 12 }} />
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
+    );
+  }
+
+  if (spec.type === 'line') {
+    return (
+      <div className="mt-3 h-64">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={data}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#1d2329" />
+            <XAxis dataKey={spec.x} tick={{ fill: '#7a8899', fontSize: 11 }} />
+            <YAxis tick={{ fill: '#7a8899', fontSize: 11 }} />
+            <Tooltip contentStyle={{ backgroundColor: '#0f1114', border: '1px solid #1d2329', borderRadius: 8, fontSize: 12 }} />
+            <Line type="monotone" dataKey={spec.y} stroke="#c8921a" strokeWidth={2} dot={{ fill: '#c8921a' }} />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    );
+  }
+
+  // Default: bar chart
+  const isHorizontal = data.length > 10;
+  return (
+    <div className={`mt-3 ${isHorizontal ? 'h-[400px]' : 'h-64'}`}>
+      <ResponsiveContainer width="100%" height="100%">
+        {isHorizontal ? (
+          <BarChart data={data} layout="vertical" margin={{ left: 80 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#1d2329" />
+            <XAxis type="number" tick={{ fill: '#7a8899', fontSize: 11 }} />
+            <YAxis type="category" dataKey={spec.x} tick={{ fill: '#7a8899', fontSize: 11 }} width={80} />
+            <Tooltip contentStyle={{ backgroundColor: '#0f1114', border: '1px solid #1d2329', borderRadius: 8, fontSize: 12 }} />
+            <Bar dataKey={spec.y} fill="#c8921a" radius={[0, 4, 4, 0]} />
+          </BarChart>
+        ) : (
+          <BarChart data={data}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#1d2329" />
+            <XAxis dataKey={spec.x} tick={{ fill: '#7a8899', fontSize: 11 }} angle={-30} textAnchor="end" height={60} />
+            <YAxis tick={{ fill: '#7a8899', fontSize: 11 }} />
+            <Tooltip contentStyle={{ backgroundColor: '#0f1114', border: '1px solid #1d2329', borderRadius: 8, fontSize: 12 }} />
+            <Bar dataKey={spec.y} fill="#c8921a" radius={[4, 4, 0, 0]} />
+          </BarChart>
+        )}
+      </ResponsiveContainer>
     </div>
   );
 }
@@ -195,8 +288,11 @@ function AssistantMessage({
   const [sqlOpen, setSqlOpen] = useState(false);
   const [feedback, setFeedback] = useState<boolean | null>(null);
   const [feedbackSent, setFeedbackSent] = useState(false);
+  const [viewMode, setViewMode] = useState<'chart' | 'table'>('chart');
 
   const data = msg.data;
+  const hasChart = !!(data?.chart_spec && data.chart_spec.data?.length > 0);
+  const hasTable = !!(data && data.columns.length > 0 && data.rows.length > 0);
 
   const handleFeedback = async (helpful: boolean) => {
     if (!sessionId || !data?.assistant_message_id || feedbackSent) return;
@@ -243,17 +339,39 @@ function AssistantMessage({
   return (
     <div className="flex gap-3 items-start">
       {/* Avatar */}
-      <div className="w-7 h-7 rounded-full overflow-hidden ring-1 ring-gold/30 flex-shrink-0 bg-white mt-0.5">
+      <div className="w-7 h-7 rounded-full overflow-hidden ring-1 ring-gold/30 flex-shrink-0 bg-surface mt-0.5">
         <img src="/static/logo.png" alt="MKC" className="w-full h-full object-cover" />
       </div>
 
       <div className="flex-1 min-w-0">
         {/* Answer text */}
-        <div className="text-ink text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</div>
+        <div className="text-ink text-sm leading-relaxed whitespace-pre-wrap">{`${msg.content}`}</div>
 
-        {/* Data table */}
-        {data && data.columns.length > 0 && data.rows.length > 0 && (
-          <DataTable columns={data.columns} rows={data.rows} />
+        {/* Chart / Table toggle */}
+        {(hasChart || hasTable) && (
+          <ChartErrorBoundary>
+            {hasChart && hasTable && (
+              <div className="flex items-center gap-1 mt-3 mb-1">
+                <button onClick={() => setViewMode('chart')}
+                  className={`px-2 py-0.5 rounded text-xs transition-colors ${viewMode === 'chart' ? 'bg-gold/15 text-gold' : 'text-muted hover:text-ink'}`}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="inline mr-1 -mt-0.5">
+                    <rect x="3" y="12" width="4" height="9" /><rect x="10" y="7" width="4" height="14" /><rect x="17" y="3" width="4" height="18" />
+                  </svg>Chart
+                </button>
+                <button onClick={() => setViewMode('table')}
+                  className={`px-2 py-0.5 rounded text-xs transition-colors ${viewMode === 'table' ? 'bg-gold/15 text-gold' : 'text-muted hover:text-ink'}`}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="inline mr-1 -mt-0.5">
+                    <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="3" y1="9" x2="21" y2="9" /><line x1="3" y1="15" x2="21" y2="15" /><line x1="9" y1="9" x2="9" y2="21" />
+                  </svg>Table
+                </button>
+              </div>
+            )}
+            {(viewMode === 'chart' && hasChart) ? (
+              <ReportChart spec={data!.chart_spec!} />
+            ) : hasTable ? (
+              <DataTable columns={data!.columns} rows={data!.rows} />
+            ) : null}
+          </ChartErrorBoundary>
         )}
 
         {/* SQL expandable */}
@@ -555,7 +673,7 @@ export default function Reporting() {
               {isEmpty ? (
                 // Welcome / suggestions
                 <div className="max-w-xl mx-auto flex flex-col items-center gap-6 pt-12">
-                  <div className="w-16 h-16 rounded-full overflow-hidden ring-2 ring-gold/30 bg-white">
+                  <div className="w-16 h-16 rounded-full overflow-hidden ring-2 ring-gold/30 bg-surface">
                     <img src="/static/logo.png" alt="MKC" className="w-full h-full object-cover" />
                   </div>
                   <div className="text-center">

@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MKC Inventory — Reporting</title>
+  <link rel="icon" type="image/png" href="/static/logo.png" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body data-page="reporting">
+  <nav class="app-nav">
+    <a href="/" class="nav-logo" aria-label="MKC Inventory home">
+      <img src="/static/logo.png" alt="MKC" class="nav-logo-img" />
+    </a>
+    <a href="/">Collection</a>
+    <a href="/identify">Identify</a>
+    <a href="/master">Catalog</a>
+    <a href="/reporting" class="active" aria-current="page">Reporting</a>
+  </nav>
+
+  <header class="app-header">
+    <div>
+      <h1>Collection Reporting</h1>
+      <p>Ask questions in plain English. View answers as text, grid, or chart using your collection database as the source.</p>
+    </div>
+    <div class="header-actions">
+      <button type="button" id="newReportSessionBtn" class="secondary">New chat</button>
+      <button type="button" id="saveReportQueryBtn" class="secondary">Save prompt</button>
+    </div>
+  </header>
+
+  <main class="layout reporting-layout">
+    <section class="card reporting-sidebar">
+      <div class="section-header">
+        <h2>Session</h2>
+      </div>
+      <label>Model
+        <div class="ollama-model-row">
+          <select id="reportingModelSelect"></select>
+          <button type="button" id="reportingModelDefaultBtn" class="ollama-default-btn" title="Set as default model" aria-label="Set as default model">★</button>
+        </div>
+      </label>
+      <p id="reportingModelStatus" class="muted small"></p>
+
+      <label>Conversation
+        <select id="reportingSessionSelect"></select>
+      </label>
+
+      <div class="reporting-block">
+        <h3>Suggested questions</h3>
+        <div id="reportingTemplates" class="actions"></div>
+      </div>
+
+      <div class="reporting-block">
+        <h3>Saved prompts</h3>
+        <ul id="reportingSavedQueries" class="pill-list"></ul>
+      </div>
+
+      <div class="reporting-block">
+        <h3>Compare mode</h3>
+        <label class="checkbox-label"><input type="checkbox" id="reportingCompareEnabled" /> Enable compare mode</label>
+        <label>Dimension
+          <select id="reportingCompareDimension">
+            <option value="family">Family</option>
+            <option value="series">Series</option>
+            <option value="type">Type</option>
+            <option value="steel">Steel</option>
+            <option value="condition">Condition</option>
+            <option value="location">Location</option>
+          </select>
+        </label>
+        <label>Value A<input id="reportingCompareA" placeholder="Traditions" /></label>
+        <label>Value B<input id="reportingCompareB" placeholder="VIP" /></label>
+      </div>
+      <div class="reporting-block">
+        <h3>Mode (debug)</h3>
+        <button type="button" id="reportingDirectLlmSqlToggleBtn" class="secondary">Mode: A (Semantic)</button>
+        <p id="reportingDirectLlmSqlStatus" class="muted small"></p>
+      </div>
+      <div class="reporting-block">
+        <h3>Hint promotion (admin)</h3>
+        <div class="actions">
+          <button type="button" id="reportingHintPromotePreviewBtn" class="secondary">Preview promotion</button>
+          <button type="button" id="reportingHintPromoteApplyBtn" class="secondary">Apply promotion</button>
+        </div>
+        <p id="reportingHintPromoteStatus" class="muted small">Run preview to inspect session hint candidates before apply.</p>
+      </div>
+      <div class="reporting-block">
+        <h3>Retrieval runtime (admin)</h3>
+        <label class="full">Retrieval backend
+          <select id="reportingRetrievalBackendSelect" title="Persisted in app database; used on the next question unless env overrides.">
+            <option value="lexical">Lexical — token overlap only (baseline)</option>
+            <option value="chroma">Sentence-transformers + Chroma (target architecture)</option>
+            <option value="embedding">In-process embeddings only (sentence-transformers; no Chroma)</option>
+            <option value="vector">Local vector index file (sentence-transformers + on-disk index)</option>
+          </select>
+        </label>
+        <div class="actions">
+          <button type="button" id="reportingRetrievalBackendSaveBtn" class="secondary">Save backend</button>
+          <button type="button" id="reportingRetrievalStatusBtn" class="secondary">Refresh status</button>
+          <button type="button" id="reportingRetrievalReloadBtn" class="secondary">Reload catalog/index</button>
+        </div>
+        <p id="reportingRetrievalBackendHint" class="muted small"></p>
+        <p id="reportingRetrievalRuntimeStatus" class="muted small">No retrieval status loaded yet.</p>
+      </div>
+    </section>
+
+    <section class="card reporting-main">
+      <div id="reportingMessages" class="reporting-messages"></div>
+
+      <form id="reportingForm" class="grid-form">
+        <label class="full">Question
+          <textarea id="reportingQuestion" rows="3" placeholder="Example: What did I spend by month in the last 12 months?"></textarea>
+        </label>
+        <label>Chart preference
+          <select id="reportingChartPreference">
+            <option value="">Auto</option>
+            <option value="bar">Bar</option>
+            <option value="line">Line</option>
+            <option value="pie">Pie</option>
+          </select>
+        </label>
+        <label>Max rows
+          <input id="reportingMaxRows" type="number" min="10" max="1000" step="10" value="200" />
+        </label>
+        <div class="form-actions">
+          <button type="submit">Ask</button>
+          <button type="button" id="reportingClearBtn" class="secondary">Clear input</button>
+          <button type="button" id="reportingExportCsvBtn" class="secondary">Export grid CSV</button>
+        </div>
+        <label class="full muted small">
+          <input type="checkbox" id="reportingPipelineDebug" />
+          Pipeline debug: include retrieval query text, planner/responder LLM prompts and raw responses (verbose; dev only)
+        </label>
+      </form>
+
+      <div class="reporting-followups">
+        <strong class="muted small">Follow-up ideas:</strong>
+        <div id="reportingFollowups" class="actions"></div>
+      </div>
+
+      <div class="identify-tabs reporting-tabs">
+        <button type="button" class="tab-btn active" data-report-tab="text">Text</button>
+        <button type="button" class="tab-btn" data-report-tab="grid">Grid</button>
+        <button type="button" class="tab-btn" data-report-tab="graph">Graph</button>
+      </div>
+
+      <section id="reportTextPanel" class="report-panel">
+        <div id="reportingTextResult" class="ai-output">Ask a question to start.</div>
+        <details id="reportingSemanticRetrievalPanel" class="reporting-semantic-retrieval hidden">
+          <summary>Semantic retrieval (planner grounding)</summary>
+          <p id="reportingSemanticRetrievalSummary" class="muted small"></p>
+          <pre id="reportingSemanticRetrievalJson" class="reporting-sql reporting-json-scroll"></pre>
+        </details>
+        <details id="reportingPipelineDebugPanel" class="reporting-semantic-retrieval hidden">
+          <summary>Pipeline debug (planner + responder LLM)</summary>
+          <p class="muted small">Enable the checkbox above or set server env <code>REPORTING_DEBUG_PIPELINE=1</code>.</p>
+          <pre id="reportingPipelineDebugJson" class="reporting-sql reporting-json-scroll"></pre>
+        </details>
+      </section>
+      <section id="reportGridPanel" class="report-panel hidden">
+        <div class="reporting-grid-toolbar">
+          <label class="reporting-grid-filter-label">
+            Filter rows
+            <input type="search" id="reportingGridFilter" placeholder="Match any column…" autocomplete="off" />
+          </label>
+        </div>
+        <div class="table-wrap">
+          <table id="reportingGrid">
+            <thead><tr id="reportingGridHead"></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+      <section id="reportGraphPanel" class="report-panel hidden">
+        <div id="reportingGraphWrap" class="reporting-graph-wrap muted">No graph available for this result.</div>
+      </section>
+    </section>
+  </main>
+
+  <div id="app-version-footer"></div>
+  <script src="/static/reporting.js?v=12"></script>
+</body>
+</html>
