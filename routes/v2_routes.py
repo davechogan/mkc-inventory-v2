@@ -22,23 +22,12 @@ class InventoryItemV2In(BaseModel):
     """Request body for POST/PUT /api/v2/inventory (module-level so FastAPI/Pydantic resolve the model reliably)."""
 
     knife_model_id: int
-    nickname: Optional[str] = None
+    colorway_id: Optional[int] = None
     quantity: int = 1
+    purchase_price: Optional[float] = None
     acquired_date: Optional[str] = None
     mkc_order_number: Optional[str] = None
-    purchase_price: Optional[float] = None
-    estimated_value: Optional[float] = None
-    condition: str = "Like New"
-    handle_color: Optional[str] = None
-    steel: Optional[str] = None
-    blade_finish: Optional[str] = None
-    blade_color: Optional[str] = None
-    blade_length: Optional[float] = None
-    collaboration_name: Optional[str] = None
-    serial_number: Optional[str] = None
-    location: Optional[str] = None
-    purchase_source: Optional[str] = None
-    last_sharpened: Optional[str] = None
+    location_id: Optional[int] = None
     notes: Optional[str] = None
 
 
@@ -62,48 +51,35 @@ def create_v2_router(
             SELECT
                 i.id,
                 i.knife_model_id,
-                i.nickname,
+                i.colorway_id,
                 i.quantity,
                 i.acquired_date,
                 i.mkc_order_number,
                 i.purchase_price,
-                i.estimated_value,
-                i.condition,
-                i.location,
-                i.serial_number,
-                i.purchase_source,
-                i.last_sharpened,
                 i.notes,
-                COALESCE(NULLIF(i.collaboration_name, ''), c.name) AS collaboration_name,
                 c.name AS collaborator_name,
-                COALESCE(i.steel, km.steel) AS blade_steel,
-                COALESCE(i.blade_finish, km.blade_finish) AS blade_finish,
-                COALESCE(i.blade_color, km.blade_color) AS blade_color,
-                COALESCE(i.handle_color, km.handle_color) AS handle_color,
-                COALESCE(i.blade_length, km.blade_length) AS blade_length,
+                bs.name AS blade_steel,
+                bf.name AS blade_finish,
+                ht.name AS handle_type,
+                hc.name AS handle_color,
+                bc.name AS blade_color,
+                km.blade_length,
+                loc.name AS location,
                 km.official_name AS knife_name,
                 fam.name AS knife_family,
-                COALESCE(ks.name, NULLIF(i.collaboration_name, ''), c.name) AS catalog_line,
+                COALESCE(ks.name, c.name) AS catalog_line,
                 kt.name AS knife_type,
                 frm.name AS form_name,
                 ks.name AS series_name,
-                (COALESCE(NULLIF(i.collaboration_name, ''), c.name) IS NOT NULL) AS is_collab,
+                (c.name IS NOT NULL) AS is_collab,
                 (CASE WHEN kmi.image_blob IS NOT NULL AND length(kmi.image_blob) > 0
                   THEN 1 ELSE 0 END) AS has_identifier_image,
-                COALESCE(
-                  -- Level 1: exact handle color match for this model
-                  (SELECT '/api/v2/colorway-images/' || mc.id FROM model_colorways mc
-                   JOIN handle_colors hc ON hc.id = mc.handle_color_id
-                   WHERE mc.knife_model_id = km.id
-                     AND LOWER(hc.name) = LOWER(COALESCE(i.handle_color, km.handle_color))
-                     AND mc.image_blob IS NOT NULL
-                   LIMIT 1),
-                  -- Level 2: any image for this model
-                  (SELECT '/api/v2/colorway-images/' || mc.id FROM model_colorways mc
-                   WHERE mc.knife_model_id = km.id
-                     AND mc.image_blob IS NOT NULL
-                   LIMIT 1)
-                ) AS colorway_image_url
+                CASE WHEN mc.id IS NOT NULL AND mc.image_blob IS NOT NULL
+                  THEN '/api/v2/colorway-images/' || mc.id
+                  ELSE (SELECT '/api/v2/colorway-images/' || mc2.id FROM model_colorways mc2
+                        WHERE mc2.knife_model_id = km.id AND mc2.image_blob IS NOT NULL
+                        LIMIT 1)
+                END AS colorway_image_url
             FROM inventory_items_v2 i
             LEFT JOIN knife_models_v2 km ON km.id = i.knife_model_id
             LEFT JOIN knife_types kt ON kt.id = km.type_id
@@ -112,6 +88,13 @@ def create_v2_router(
             LEFT JOIN knife_series ks ON ks.id = km.series_id
             LEFT JOIN collaborators c ON c.id = km.collaborator_id
             LEFT JOIN knife_model_images kmi ON kmi.knife_model_id = i.knife_model_id
+            LEFT JOIN blade_steels bs ON bs.id = km.steel_id
+            LEFT JOIN blade_finishes bf ON bf.id = km.blade_finish_id
+            LEFT JOIN handle_types ht ON ht.id = km.handle_type_id
+            LEFT JOIN model_colorways mc ON mc.id = i.colorway_id
+            LEFT JOIN handle_colors hc ON hc.id = mc.handle_color_id
+            LEFT JOIN blade_colors bc ON bc.id = mc.blade_color_id
+            LEFT JOIN locations loc ON loc.id = i.location_id
         """
 
 
@@ -125,7 +108,6 @@ def create_v2_router(
         steel: Optional[str] = None,
         finish: Optional[str] = None,
         handle_color: Optional[str] = None,
-        condition: Optional[str] = None,
         location: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         """Return flattened inventory rows from v2 tables. Supports server-side filters."""
@@ -137,10 +119,9 @@ def create_v2_router(
             if search and search.strip():
                 q = f"%{search.strip()}%"
                 conditions.append(
-                    "(km.official_name LIKE ? OR km.normalized_name LIKE ? OR fam.name LIKE ? "
-                    "OR i.nickname LIKE ? OR i.serial_number LIKE ? OR i.notes LIKE ?)"
+                    "(km.official_name LIKE ? OR fam.name LIKE ? OR i.notes LIKE ?)"
                 )
-                params.extend([q, q, q, q, q, q])
+                params.extend([q, q, q])
 
             if type and type.strip():
                 conditions.append("kt.name = ?")
@@ -159,23 +140,19 @@ def create_v2_router(
                 params.append(series.strip())
 
             if steel and steel.strip():
-                conditions.append("(COALESCE(i.steel, km.steel) = ? OR i.steel = ? OR km.steel = ?)")
-                params.extend([steel.strip(), steel.strip(), steel.strip()])
+                conditions.append("bs.name = ?")
+                params.append(steel.strip())
 
             if finish and finish.strip():
-                conditions.append("(COALESCE(i.blade_finish, km.blade_finish) = ?)")
+                conditions.append("bf.name = ?")
                 params.append(finish.strip())
 
             if handle_color and handle_color.strip():
-                conditions.append("(COALESCE(i.handle_color, km.handle_color) = ?)")
+                conditions.append("hc.name = ?")
                 params.append(handle_color.strip())
 
-            if condition and condition.strip():
-                conditions.append("(i.condition = ? OR (i.condition IS NULL AND ? = 'Like New'))")
-                params.extend([condition.strip(), condition.strip()])
-
             if location and location.strip():
-                conditions.append("i.location LIKE ?")
+                conditions.append("loc.name LIKE ?")
                 params.append(f"%{location.strip()}%")
 
             where_sql = " AND ".join(conditions) if conditions else "1=1"
@@ -186,15 +163,14 @@ def create_v2_router(
 
     @router.get("/api/v2/inventory/summary")
     def v2_inventory_summary() -> dict[str, Any]:
-        """Return inventory summary: rows, total quantity, spend, value, master count, by_family."""
+        """Return inventory summary: rows, total quantity, spend, master count, by_family."""
         with get_conn() as conn:
             summary = conn.execute(
                 """
                 SELECT
                     COUNT(*) AS inventory_rows,
                     COALESCE(SUM(i.quantity), 0) AS total_quantity,
-                    COALESCE(SUM(COALESCE(i.purchase_price, 0) * i.quantity), 0) AS total_spend,
-                    COALESCE(SUM(COALESCE(i.estimated_value, 0) * i.quantity), 0) AS estimated_value
+                    COALESCE(SUM(COALESCE(i.purchase_price, 0) * i.quantity), 0) AS total_spend
                 FROM inventory_items_v2 i
                 """
             ).fetchone()
@@ -221,7 +197,6 @@ def create_v2_router(
                 "inventory_rows": summary["inventory_rows"],
                 "total_quantity": summary["total_quantity"],
                 "total_spend": summary["total_spend"],
-                "estimated_value": summary["estimated_value"],
                 "master_models": master_models,
                 "master_count": master_models,
                 "catalog_total": catalog_total,
@@ -258,34 +233,38 @@ def create_v2_router(
                    WHERE ks.name IS NOT NULL AND ks.name != '' ORDER BY ks.name"""
             ).fetchall()
             steel_vals = conn.execute(
-                """SELECT DISTINCT COALESCE(i.steel, km.steel) AS v FROM inventory_items_v2 i
+                """SELECT DISTINCT bs.name AS v FROM inventory_items_v2 i
                    LEFT JOIN knife_models_v2 km ON km.id = i.knife_model_id
-                   WHERE COALESCE(i.steel, km.steel) IS NOT NULL AND COALESCE(i.steel, km.steel) != ''
+                   LEFT JOIN blade_steels bs ON bs.id = km.steel_id
+                   WHERE bs.name IS NOT NULL AND bs.name != ''
                    ORDER BY v"""
             ).fetchall()
             finish_vals = conn.execute(
-                """SELECT DISTINCT COALESCE(i.blade_finish, km.blade_finish) AS v FROM inventory_items_v2 i
+                """SELECT DISTINCT bf.name AS v FROM inventory_items_v2 i
                    LEFT JOIN knife_models_v2 km ON km.id = i.knife_model_id
-                   WHERE COALESCE(i.blade_finish, km.blade_finish) IS NOT NULL
+                   LEFT JOIN blade_finishes bf ON bf.id = km.blade_finish_id
+                   WHERE bf.name IS NOT NULL
                    ORDER BY v"""
             ).fetchall()
             handle_vals = conn.execute(
-                """SELECT DISTINCT COALESCE(i.handle_color, km.handle_color) AS v FROM inventory_items_v2 i
-                   LEFT JOIN knife_models_v2 km ON km.id = i.knife_model_id
-                   WHERE COALESCE(i.handle_color, km.handle_color) IS NOT NULL
+                """SELECT DISTINCT hc.name AS v FROM inventory_items_v2 i
+                   LEFT JOIN model_colorways mc ON mc.id = i.colorway_id
+                   LEFT JOIN handle_colors hc ON hc.id = mc.handle_color_id
+                   WHERE hc.name IS NOT NULL
                    ORDER BY v"""
             ).fetchall()
             blade_color_vals = conn.execute(
-                """SELECT DISTINCT COALESCE(i.blade_color, km.blade_color) AS v FROM inventory_items_v2 i
-                   LEFT JOIN knife_models_v2 km ON km.id = i.knife_model_id
-                   WHERE COALESCE(i.blade_color, km.blade_color) IS NOT NULL
+                """SELECT DISTINCT bc.name AS v FROM inventory_items_v2 i
+                   LEFT JOIN model_colorways mc ON mc.id = i.colorway_id
+                   LEFT JOIN blade_colors bc ON bc.id = mc.blade_color_id
+                   WHERE bc.name IS NOT NULL
                    ORDER BY v"""
             ).fetchall()
-            cond_vals = conn.execute(
-                "SELECT DISTINCT COALESCE(condition, 'Like New') AS v FROM inventory_items_v2 ORDER BY v"
-            ).fetchall()
             loc_vals = conn.execute(
-                "SELECT DISTINCT location FROM inventory_items_v2 WHERE location IS NOT NULL AND location != '' ORDER BY location"
+                """SELECT DISTINCT loc.name AS v FROM inventory_items_v2 i
+                   LEFT JOIN locations loc ON loc.id = i.location_id
+                   WHERE loc.name IS NOT NULL AND loc.name != ''
+                   ORDER BY v"""
             ).fetchall()
 
             def pluck(rows: list, key: str = "name") -> list[str]:
@@ -305,8 +284,7 @@ def create_v2_router(
                 "finish": pluck(finish_vals, "v"),
                 "handle_color": pluck(handle_vals, "v"),
                 "blade_color": pluck(blade_color_vals, "v"),
-                "condition": pluck(cond_vals, "v"),
-                "location": pluck(loc_vals, "location"),
+                "location": pluck(loc_vals, "v"),
             }
 
 
@@ -327,9 +305,9 @@ def create_v2_router(
             if search and search.strip():
                 q = f"%{search.strip()}%"
                 conditions.append(
-                    "(km.official_name LIKE ? OR km.normalized_name LIKE ? OR fam.name LIKE ? OR km.slug LIKE ?)"
+                    "(km.official_name LIKE ? OR fam.name LIKE ? OR km.slug LIKE ?)"
                 )
-                params.extend([q, q, q, q])
+                params.extend([q, q, q])
 
             if type and type.strip():
                 conditions.append("kt.name = ?")
@@ -354,13 +332,12 @@ def create_v2_router(
             where_sql = " AND ".join(conditions) if conditions else "1=1"
             rows = conn.execute(
                 f"""
-                SELECT km.id, km.parent_model_id, km.official_name, km.normalized_name, km.sortable_name, km.slug,
+                SELECT km.id, km.parent_model_id, km.official_name, km.sortable_name, km.slug,
                        kt.name AS knife_type, fam.name AS family_name, frm.name AS form_name,
                        ks.name AS series_name, c.name AS collaborator_name,
-                       km.generation_label, km.size_modifier, km.platform_variant,
-                       km.steel, km.blade_finish, km.blade_color, km.handle_color, km.handle_type, km.blade_length,
-                       km.record_status, km.is_current_catalog, km.is_discontinued, km.msrp,
-                       km.official_product_url, km.official_image_url,
+                       bs.name AS blade_steel, bf.name AS blade_finish, ht.name AS handle_type,
+                       km.blade_length, km.msrp,
+                       km.official_product_url, km.model_notes,
                        (SELECT COUNT(*) FROM inventory_items_v2 WHERE knife_model_id = km.id) AS in_inventory_count,
                        (CASE WHEN kmi.image_blob IS NOT NULL AND length(kmi.image_blob) > 0 THEN 1 ELSE 0 END) AS has_identifier_image,
                        (SELECT '/api/v2/colorway-images/' || mc.id FROM model_colorways mc
@@ -375,6 +352,9 @@ def create_v2_router(
                 LEFT JOIN knife_families fam ON fam.id = km.family_id
                 LEFT JOIN knife_series ks ON ks.id = km.series_id
                 LEFT JOIN collaborators c ON c.id = km.collaborator_id
+                LEFT JOIN blade_steels bs ON bs.id = km.steel_id
+                LEFT JOIN blade_finishes bf ON bf.id = km.blade_finish_id
+                LEFT JOIN handle_types ht ON ht.id = km.handle_type_id
                 WHERE {where_sql}
                 ORDER BY fam.name COLLATE NOCASE, km.sortable_name COLLATE NOCASE
                 """,
@@ -435,30 +415,6 @@ def create_v2_router(
                 "blade_colors": [{"id": r["id"], "name": r["name"]} for r in blade],
             }
 
-    @router.get("/api/v2/models/by-legacy-master/{legacy_id}")
-    def v2_model_by_legacy_master(legacy_id: int) -> dict[str, Any]:
-        """Resolve legacy master_knives.id to v2 model for ?add= flow from Identify page."""
-        with get_conn() as conn:
-            row = conn.execute(
-                """
-                SELECT km.id, km.official_name, km.normalized_name, km.slug,
-                       kt.name AS knife_type, fam.name AS family_name, frm.name AS form_name,
-                       ks.name AS series_name, c.name AS collaborator_name,
-                       km.steel, km.blade_finish, km.blade_color, km.handle_color, km.handle_type, km.blade_length, km.msrp
-                FROM knife_models_v2 km
-                LEFT JOIN knife_types kt ON kt.id = km.type_id
-                LEFT JOIN knife_forms frm ON frm.id = km.form_id
-                LEFT JOIN knife_families fam ON fam.id = km.family_id
-                LEFT JOIN knife_series ks ON ks.id = km.series_id
-                LEFT JOIN collaborators c ON c.id = km.collaborator_id
-                WHERE km.legacy_master_id = ?
-                """,
-                (legacy_id,),
-            ).fetchone()
-            if not row:
-                raise HTTPException(status_code=404, detail="No v2 model for legacy master id.")
-            return row
-
 
     @router.get("/api/v2/models/search")
     def v2_models_search(q: Optional[str] = None, limit: int = 50) -> list[dict[str, Any]]:
@@ -468,21 +424,25 @@ def create_v2_router(
             where = "1=1"
             if q and q.strip():
                 search_term = f"%{q.strip()}%"
-                where = "(km.official_name LIKE ? OR km.normalized_name LIKE ? OR fam.name LIKE ? OR km.slug LIKE ?)"
-                params = [search_term, search_term, search_term, search_term]
+                where = "(km.official_name LIKE ? OR fam.name LIKE ? OR km.slug LIKE ?)"
+                params = [search_term, search_term, search_term]
             params.append(limit)
             rows = conn.execute(
                 f"""
-                SELECT km.id, km.official_name, km.normalized_name, km.slug,
+                SELECT km.id, km.official_name, km.slug,
                        kt.name AS knife_type, fam.name AS family_name, frm.name AS form_name,
                        ks.name AS series_name, c.name AS collaborator_name,
-                       km.steel, km.blade_finish, km.blade_color, km.handle_color, km.handle_type, km.blade_length
+                       bs.name AS blade_steel, bf.name AS blade_finish, ht.name AS handle_type,
+                       km.blade_length
                 FROM knife_models_v2 km
                 LEFT JOIN knife_types kt ON kt.id = km.type_id
                 LEFT JOIN knife_forms frm ON frm.id = km.form_id
                 LEFT JOIN knife_families fam ON fam.id = km.family_id
                 LEFT JOIN knife_series ks ON ks.id = km.series_id
                 LEFT JOIN collaborators c ON c.id = km.collaborator_id
+                LEFT JOIN blade_steels bs ON bs.id = km.steel_id
+                LEFT JOIN blade_finishes bf ON bf.id = km.blade_finish_id
+                LEFT JOIN handle_types ht ON ht.id = km.handle_type_id
                 WHERE {where}
                 ORDER BY fam.name COLLATE NOCASE, km.sortable_name COLLATE NOCASE
                 LIMIT ?
@@ -496,31 +456,19 @@ def create_v2_router(
         model_config = {"extra": "ignore"}
 
         official_name: str = Field(min_length=1, max_length=200)
-        canonical_slug: Optional[str] = None
-        normalized_name: Optional[str] = None
         knife_type: Optional[str] = None
         form_name: Optional[str] = None
         family_name: Optional[str] = None
         series_name: Optional[str] = None
         collaborator_name: Optional[str] = None
-        generation_label: Optional[str] = None
-        size_modifier: Optional[str] = None
-        platform_variant: Optional[str] = None
         steel: Optional[str] = None
         blade_finish: Optional[str] = None
-        blade_color: Optional[str] = None
-        handle_color: Optional[str] = None
         handle_type: Optional[str] = None
         blade_length: Optional[float] = None
-        record_status: Optional[str] = "active"
-        is_current_catalog: Optional[bool] = True
-        is_discontinued: Optional[bool] = False
         msrp: Optional[float] = None
         official_product_url: Optional[str] = None
-        official_image_url: Optional[str] = None
-        notes: Optional[str] = None
+        model_notes: Optional[str] = None
         parent_model_id: Optional[int] = None
-        distinguishing_features: Optional[str] = None
 
         @field_validator("knife_type", mode="before")
         @classmethod
@@ -558,10 +506,6 @@ def create_v2_router(
     def _validate_v2_controlled_identity(payload: V2ModelIn, conn: sqlite3.Connection) -> None:
         controlled = [
             ("collaborator_name", "collaborators", payload.collaborator_name),
-            ("generation_label", "generations", payload.generation_label),
-            ("size_modifier", "size-modifiers", payload.size_modifier),
-            ("platform_variant", "platform-variants", payload.platform_variant),
-            ("handle_type", "handle-types", payload.handle_type),
         ]
         invalid = [field for field, option_type, value in controlled if not _v2_option_exists(conn, option_type, value)]
         if invalid:
@@ -615,6 +559,18 @@ def create_v2_router(
         return None
 
 
+    def _v2_attr_id(conn: sqlite3.Connection, table: str, name: Optional[str]) -> Optional[int]:
+        """Resolve a text attribute name to its FK id in a lookup table, auto-inserting if needed."""
+        if not name or not str(name).strip():
+            return None
+        n = str(name).strip()
+        row = conn.execute(f"SELECT id FROM {table} WHERE name = ?", (n,)).fetchone()
+        if row:
+            return row["id"]
+        cur = conn.execute(f"INSERT INTO {table} (name) VALUES (?)", (n,))
+        return cur.lastrowid
+
+
     def _v2_model_slug(conn: sqlite3.Connection, base_name: str, existing_id: Optional[int] = None) -> str:
         base = normalized_model.slugify(base_name) or "model"
         slug = base
@@ -635,12 +591,11 @@ def create_v2_router(
         with get_conn() as conn:
             row = conn.execute(
                 """
-                SELECT km.id, km.parent_model_id, km.official_name, km.normalized_name, km.sortable_name, km.slug,
+                SELECT km.id, km.parent_model_id, km.official_name, km.sortable_name, km.slug,
                        kt.name AS knife_type, fam.name AS family_name, frm.name AS form_name,
                        ks.name AS series_name, c.name AS collaborator_name,
-                       km.generation_label, km.size_modifier, km.platform_variant, km.steel, km.blade_finish,
-                       km.blade_color, km.handle_color, km.handle_type, km.blade_length, km.record_status, km.is_current_catalog,
-                       km.is_discontinued, km.msrp, km.official_product_url, km.official_image_url, km.notes,
+                       bs.name AS blade_steel, bf.name AS blade_finish, ht.name AS handle_type,
+                       km.blade_length, km.msrp, km.official_product_url, km.model_notes,
                        d.distinguishing_features,
                        (CASE WHEN kmi.image_blob IS NOT NULL AND length(kmi.image_blob) > 0 THEN 1 ELSE 0 END) AS has_identifier_image
                 FROM knife_models_v2 km
@@ -649,6 +604,9 @@ def create_v2_router(
                 LEFT JOIN knife_families fam ON fam.id = km.family_id
                 LEFT JOIN knife_series ks ON ks.id = km.series_id
                 LEFT JOIN collaborators c ON c.id = km.collaborator_id
+                LEFT JOIN blade_steels bs ON bs.id = km.steel_id
+                LEFT JOIN blade_finishes bf ON bf.id = km.blade_finish_id
+                LEFT JOIN handle_types ht ON ht.id = km.handle_type_id
                 LEFT JOIN knife_model_images kmi ON kmi.knife_model_id = km.id
                 LEFT JOIN knife_model_descriptors d ON d.knife_model_id = km.id
                 WHERE km.id = ?
@@ -671,35 +629,25 @@ def create_v2_router(
             family_id = _v2_dim_id(conn, "knife_families", payload.family_name)
             series_id = _v2_dim_id(conn, "knife_series", payload.series_name)
             collaborator_id = _v2_dim_id(conn, "collaborators", payload.collaborator_name)
-            normalized_name = (payload.normalized_name or payload.official_name).strip()
-            sortable_name = normalized_name
-            slug = _v2_model_slug(conn, payload.canonical_slug or normalized_name)
+            steel_id = _v2_attr_id(conn, "blade_steels", payload.steel)
+            blade_finish_id = _v2_attr_id(conn, "blade_finishes", payload.blade_finish)
+            handle_type_id = _v2_attr_id(conn, "handle_types", payload.handle_type)
+            sortable_name = payload.official_name.strip()
+            slug = _v2_model_slug(conn, payload.official_name.strip())
             cur = conn.execute(
                 """
                 INSERT INTO knife_models_v2 (
-                    official_name, normalized_name, sortable_name, slug, type_id, form_id, family_id, series_id, collaborator_id,
-                    parent_model_id, generation_label, size_modifier, platform_variant, steel, blade_finish, blade_color, handle_color, handle_type,
-                    blade_length, record_status, is_current_catalog, is_discontinued, msrp, official_product_url, official_image_url, notes
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    official_name, sortable_name, slug, type_id, form_id, family_id, series_id, collaborator_id,
+                    parent_model_id, steel_id, blade_finish_id, handle_type_id,
+                    blade_length, msrp, official_product_url, model_notes
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    payload.official_name.strip(), normalized_name, sortable_name, slug, type_id, form_id, family_id, series_id, collaborator_id,
-                    payload.parent_model_id, payload.generation_label, payload.size_modifier, payload.platform_variant,
-                    payload.steel, payload.blade_finish, payload.blade_color, payload.handle_color, payload.handle_type, payload.blade_length,
-                    payload.record_status or "active", 0 if payload.is_current_catalog is False else 1,
-                    1 if payload.is_discontinued else 0, payload.msrp, payload.official_product_url, payload.official_image_url, payload.notes,
+                    payload.official_name.strip(), sortable_name, slug, type_id, form_id, family_id, series_id, collaborator_id,
+                    payload.parent_model_id, steel_id, blade_finish_id, handle_type_id,
+                    payload.blade_length, payload.msrp, payload.official_product_url, payload.model_notes,
                 ),
             )
-            if payload.distinguishing_features is not None:
-                conn.execute(
-                    """
-                    INSERT INTO knife_model_descriptors (knife_model_id, distinguishing_features, updated_at)
-                    VALUES (?, ?, CURRENT_TIMESTAMP)
-                    ON CONFLICT(knife_model_id) DO UPDATE SET
-                        distinguishing_features=excluded.distinguishing_features, updated_at=CURRENT_TIMESTAMP
-                    """,
-                    (cur.lastrowid, payload.distinguishing_features),
-                )
             return {"id": cur.lastrowid, "message": "Created"}
 
 
@@ -717,38 +665,27 @@ def create_v2_router(
             family_id = _v2_dim_id(conn, "knife_families", payload.family_name)
             series_id = _v2_dim_id(conn, "knife_series", payload.series_name)
             collaborator_id = _v2_dim_id(conn, "collaborators", payload.collaborator_name)
-            normalized_name = (payload.normalized_name or payload.official_name).strip()
-            slug = _v2_model_slug(conn, payload.canonical_slug or normalized_name, existing_id=model_id)
+            steel_id = _v2_attr_id(conn, "blade_steels", payload.steel)
+            blade_finish_id = _v2_attr_id(conn, "blade_finishes", payload.blade_finish)
+            handle_type_id = _v2_attr_id(conn, "handle_types", payload.handle_type)
+            slug = _v2_model_slug(conn, payload.official_name.strip(), existing_id=model_id)
             conn.execute(
                 """
                 UPDATE knife_models_v2
-                SET official_name = ?, normalized_name = ?, sortable_name = ?, slug = ?,
+                SET official_name = ?, sortable_name = ?, slug = ?,
                     type_id = ?, form_id = ?, family_id = ?, series_id = ?, collaborator_id = ?, parent_model_id = ?,
-                    generation_label = ?, size_modifier = ?, platform_variant = ?, steel = ?, blade_finish = ?,
-                    blade_color = ?, handle_color = ?, handle_type = ?, blade_length = ?, record_status = ?, is_current_catalog = ?,
-                    is_discontinued = ?, msrp = ?, official_product_url = ?, official_image_url = ?, notes = ?,
+                    steel_id = ?, blade_finish_id = ?, handle_type_id = ?,
+                    blade_length = ?, msrp = ?, official_product_url = ?, model_notes = ?,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                 """,
                 (
-                    payload.official_name.strip(), normalized_name, normalized_name, slug,
+                    payload.official_name.strip(), payload.official_name.strip(), slug,
                     type_id, form_id, family_id, series_id, collaborator_id, payload.parent_model_id,
-                    payload.generation_label, payload.size_modifier, payload.platform_variant, payload.steel, payload.blade_finish,
-                    payload.blade_color, payload.handle_color, payload.handle_type, payload.blade_length, payload.record_status or "active",
-                    0 if payload.is_current_catalog is False else 1, 1 if payload.is_discontinued else 0,
-                    payload.msrp, payload.official_product_url, payload.official_image_url, payload.notes, model_id,
+                    steel_id, blade_finish_id, handle_type_id,
+                    payload.blade_length, payload.msrp, payload.official_product_url, payload.model_notes, model_id,
                 ),
             )
-            if payload.distinguishing_features is not None:
-                conn.execute(
-                    """
-                    INSERT INTO knife_model_descriptors (knife_model_id, distinguishing_features, updated_at)
-                    VALUES (?, ?, CURRENT_TIMESTAMP)
-                    ON CONFLICT(knife_model_id) DO UPDATE SET
-                        distinguishing_features=excluded.distinguishing_features, updated_at=CURRENT_TIMESTAMP
-                    """,
-                    (model_id, payload.distinguishing_features),
-                )
             return {"message": "Updated"}
 
 
@@ -780,20 +717,18 @@ def create_v2_router(
             cur = conn.execute(
                 """
                 INSERT INTO knife_models_v2 (
-                    legacy_master_id, official_name, normalized_name, sortable_name, slug, type_id, form_id, family_id, series_id,
-                    collaborator_id, parent_model_id, generation_label, size_modifier, platform_variant, steel, blade_finish,
-                    blade_color, handle_color, handle_type, blade_length, record_status, is_current_catalog, is_discontinued, msrp,
-                    official_product_url, official_image_url, notes
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    official_name, sortable_name, slug, type_id, form_id, family_id, series_id,
+                    collaborator_id, parent_model_id, steel_id, blade_finish_id, handle_type_id,
+                    blade_length, msrp, official_product_url, model_notes
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    # v2 schema marks `legacy_master_id` as UNIQUE; duplicates should not point at the same legacy master.
-                    None, new_name, row.get("normalized_name") or new_name, row.get("sortable_name") or new_name, slug,
-                    row.get("type_id"), row.get("form_id"), row.get("family_id"), row.get("series_id"), row.get("collaborator_id"),
-                    row.get("parent_model_id"), row.get("generation_label"), row.get("size_modifier"), row.get("platform_variant"),
-                    row.get("steel"), row.get("blade_finish"), row.get("blade_color"), row.get("handle_color"), row.get("handle_type"), row.get("blade_length"),
-                    row.get("record_status"), row.get("is_current_catalog"), row.get("is_discontinued"), row.get("msrp"),
-                    row.get("official_product_url"), row.get("official_image_url"), row.get("notes"),
+                    new_name, row.get("sortable_name") or new_name, slug,
+                    row.get("type_id"), row.get("form_id"), row.get("family_id"), row.get("series_id"),
+                    row.get("collaborator_id"), row.get("parent_model_id"),
+                    row.get("steel_id"), row.get("blade_finish_id"), row.get("handle_type_id"),
+                    row.get("blade_length"), row.get("msrp"),
+                    row.get("official_product_url"), row.get("model_notes"),
                 ),
             )
             return {"id": cur.lastrowid, "message": "Duplicated"}
@@ -1222,12 +1157,13 @@ def create_v2_router(
         "blade-colors":   "blade_colors",
         "blade-steels":   "blade_steels",
         "blade-finishes": "blade_finishes",
-        "conditions":     "conditions",
+        "handle-types":   "handle_types",
+        "locations":      "locations",
     }
     # Option types still backed by v2_option_values
     _LEGACY_OPTION_TYPES = {
         "blade-types", "categories", "blade-families", "primary-use-cases",
-        "handle-types", "collaborators", "generations", "size-modifiers", "platform-variants",
+        "collaborators", "generations", "size-modifiers", "platform-variants",
     }
 
     @router.get("/api/v2/options")
@@ -1292,20 +1228,34 @@ def create_v2_router(
                     "blade-colors":   "blade_color_id",
                     "blade-steels":   "steel_id",
                     "blade-finishes": "blade_finish_id",
-                    "conditions":     "condition_id",
+                    "handle-types":   "handle_type_id",
+                    "locations":      "location_id",
                 }
-                id_col = id_col_map[option_type]
-                usage = 0
-                for src in ("knife_models_v2", "inventory_items_v2"):
-                    if id_col in {r["name"] for r in conn.execute(f"PRAGMA table_info({src})")}:
+                id_col = id_col_map.get(option_type)
+                if id_col:
+                    usage = 0
+                    # Check model_colorways for color FKs
+                    if option_type in ("handle-colors", "blade-colors"):
+                        colorway_col = "handle_color_id" if option_type == "handle-colors" else "blade_color_id"
                         usage += conn.execute(
-                            f"SELECT COUNT(*) AS c FROM {src} WHERE {id_col} = ?", (option_id,)
+                            f"SELECT COUNT(*) AS c FROM model_colorways WHERE {colorway_col} = ?", (option_id,)
                         ).fetchone()["c"]
-                if usage:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Cannot delete — in use by {usage} knife record(s).",
-                    )
+                    # Check knife_models_v2 for steel/finish/handle_type FKs
+                    if option_type in ("blade-steels", "blade-finishes", "handle-types"):
+                        if id_col in {r["name"] for r in conn.execute("PRAGMA table_info(knife_models_v2)")}:
+                            usage += conn.execute(
+                                f"SELECT COUNT(*) AS c FROM knife_models_v2 WHERE {id_col} = ?", (option_id,)
+                            ).fetchone()["c"]
+                    # Check inventory_items_v2 for location FK
+                    if option_type == "locations":
+                        usage += conn.execute(
+                            f"SELECT COUNT(*) AS c FROM inventory_items_v2 WHERE location_id = ?", (option_id,)
+                        ).fetchone()["c"]
+                    if usage:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Cannot delete — in use by {usage} record(s).",
+                        )
                 conn.execute(f"DELETE FROM {table} WHERE id = ?", (option_id,))
             else:
                 row = conn.execute(
@@ -1321,10 +1271,6 @@ def create_v2_router(
                         "LEFT JOIN collaborators c ON c.id = km.collaborator_id "
                         "WHERE lower(c.name) = lower(?)"
                     ),
-                    "generations":       "SELECT COUNT(*) AS c FROM knife_models_v2 WHERE lower(generation_label) = lower(?)",
-                    "size-modifiers":    "SELECT COUNT(*) AS c FROM knife_models_v2 WHERE lower(size_modifier) = lower(?)",
-                    "platform-variants": "SELECT COUNT(*) AS c FROM knife_models_v2 WHERE lower(platform_variant) = lower(?)",
-                    "handle-types":      "SELECT COUNT(*) AS c FROM knife_models_v2 WHERE lower(handle_type) = lower(?)",
                 }
                 sql = usage_sql.get(option_type)
                 if sql and option_name:
@@ -1366,7 +1312,7 @@ def create_v2_router(
         """Create inventory item in v2 only (canonical write path)."""
         with get_conn() as conn:
             model_exists = conn.execute(
-                "SELECT id, legacy_master_id FROM knife_models_v2 WHERE id = ?",
+                "SELECT id FROM knife_models_v2 WHERE id = ?",
                 (payload.knife_model_id,),
             ).fetchone()
             if not model_exists:
@@ -1374,31 +1320,18 @@ def create_v2_router(
             cur = conn.execute(
                 """
                 INSERT INTO inventory_items_v2
-                (legacy_master_id, knife_model_id, nickname, quantity, acquired_date, mkc_order_number, purchase_price, estimated_value,
-                 condition, steel, blade_finish, blade_color, handle_color, blade_length, collaboration_name, serial_number,
-                 location, purchase_source, last_sharpened, notes, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                (knife_model_id, colorway_id, quantity, purchase_price, acquired_date,
+                 mkc_order_number, location_id, notes, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 """,
                 (
-                    model_exists.get("legacy_master_id"),
                     payload.knife_model_id,
-                    payload.nickname,
+                    payload.colorway_id,
                     payload.quantity,
+                    payload.purchase_price,
                     payload.acquired_date,
                     payload.mkc_order_number,
-                    payload.purchase_price,
-                    payload.estimated_value,
-                    payload.condition,
-                    payload.steel,
-                    payload.blade_finish,
-                    payload.blade_color,
-                    payload.handle_color,
-                    payload.blade_length,
-                    payload.collaboration_name,
-                    payload.serial_number,
-                    payload.location,
-                    payload.purchase_source,
-                    payload.last_sharpened,
+                    payload.location_id,
                     payload.notes,
                 ),
             )
@@ -1410,7 +1343,7 @@ def create_v2_router(
         """Update inventory item in v2 only (canonical write path)."""
         with get_conn() as conn:
             model_exists = conn.execute(
-                "SELECT id, legacy_master_id FROM knife_models_v2 WHERE id = ?",
+                "SELECT id FROM knife_models_v2 WHERE id = ?",
                 (payload.knife_model_id,),
             ).fetchone()
             if not model_exists:
@@ -1418,32 +1351,19 @@ def create_v2_router(
             cur = conn.execute(
                 """
                 UPDATE inventory_items_v2
-                SET knife_model_id = ?, legacy_master_id = ?, nickname = ?, quantity = ?, acquired_date = ?,
-                    mkc_order_number = ?, purchase_price = ?, estimated_value = ?, condition = ?, steel = ?, blade_finish = ?, blade_color = ?,
-                    handle_color = ?, blade_length = ?, collaboration_name = ?, serial_number = ?, location = ?,
-                    purchase_source = ?, last_sharpened = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
+                SET knife_model_id = ?, colorway_id = ?, quantity = ?, purchase_price = ?,
+                    acquired_date = ?, mkc_order_number = ?, location_id = ?, notes = ?,
+                    updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                 """,
                 (
                     payload.knife_model_id,
-                    model_exists.get("legacy_master_id"),
-                    payload.nickname,
+                    payload.colorway_id,
                     payload.quantity,
+                    payload.purchase_price,
                     payload.acquired_date,
                     payload.mkc_order_number,
-                    payload.purchase_price,
-                    payload.estimated_value,
-                    payload.condition,
-                    payload.steel,
-                    payload.blade_finish,
-                    payload.blade_color,
-                    payload.handle_color,
-                    payload.blade_length,
-                    payload.collaboration_name,
-                    payload.serial_number,
-                    payload.location,
-                    payload.purchase_source,
-                    payload.last_sharpened,
+                    payload.location_id,
                     payload.notes,
                     item_id,
                 ),
@@ -1484,22 +1404,17 @@ def create_v2_router(
             row = conn.execute("SELECT * FROM inventory_items_v2 WHERE id = ?", (item_id,)).fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="Inventory item not found.")
-            nick = (row.get("nickname") or "").strip()
-            new_nick = f"{nick} (copy)" if nick else "Copy"
             cur = conn.execute(
                 """
                 INSERT INTO inventory_items_v2
-                (legacy_master_id, knife_model_id, nickname, quantity, acquired_date, mkc_order_number, purchase_price, estimated_value,
-                 condition, steel, blade_finish, blade_color, handle_color, blade_length, collaboration_name, serial_number,
-                 location, purchase_source, last_sharpened, notes, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                (knife_model_id, colorway_id, quantity, purchase_price, acquired_date,
+                 mkc_order_number, location_id, notes, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 """,
                 (
-                    row.get("legacy_master_id"), row["knife_model_id"], new_nick, row["quantity"], row["acquired_date"],
-                    row.get("mkc_order_number"),
-                    row["purchase_price"], row["estimated_value"], row.get("condition") or "Like New", row["steel"],
-                    row["blade_finish"], row["blade_color"], row["handle_color"], row.get("blade_length"),
-                    row["collaboration_name"], None, row["location"], row["purchase_source"], row["last_sharpened"], row["notes"],
+                    row["knife_model_id"], row.get("colorway_id"), row["quantity"],
+                    row["purchase_price"], row["acquired_date"],
+                    row.get("mkc_order_number"), row.get("location_id"), row["notes"],
                 ),
             )
             return {"id": cur.lastrowid, "message": "Duplicated"}
@@ -1515,30 +1430,33 @@ def create_v2_router(
                     km.official_name AS knife_name,
                     fam.name AS knife_family,
                     i.knife_model_id,
-                    i.nickname,
                     i.quantity,
                     i.acquired_date,
                     i.mkc_order_number,
                     i.purchase_price,
-                    i.estimated_value,
-                    i.condition,
-                    i.handle_color,
-                    i.steel AS blade_steel,
-                    i.blade_finish,
-                    i.blade_color,
-                    i.blade_length,
-                    (CASE WHEN i.collaboration_name IS NOT NULL AND i.collaboration_name != '' THEN 1 ELSE 0 END) AS is_collab,
-                    i.collaboration_name,
-                    i.serial_number,
-                    i.location,
-                    i.purchase_source,
-                    i.last_sharpened,
+                    hc.name AS handle_color,
+                    bs.name AS blade_steel,
+                    bf.name AS blade_finish,
+                    bc.name AS blade_color,
+                    ht.name AS handle_type,
+                    km.blade_length,
+                    (CASE WHEN c.name IS NOT NULL THEN 1 ELSE 0 END) AS is_collab,
+                    c.name AS collaboration_name,
+                    loc.name AS location,
                     i.notes,
                     i.created_at,
                     i.updated_at
                 FROM inventory_items_v2 i
                 LEFT JOIN knife_models_v2 km ON km.id = i.knife_model_id
                 LEFT JOIN knife_families fam ON fam.id = km.family_id
+                LEFT JOIN blade_steels bs ON bs.id = km.steel_id
+                LEFT JOIN blade_finishes bf ON bf.id = km.blade_finish_id
+                LEFT JOIN handle_types ht ON ht.id = km.handle_type_id
+                LEFT JOIN collaborators c ON c.id = km.collaborator_id
+                LEFT JOIN model_colorways mc ON mc.id = i.colorway_id
+                LEFT JOIN handle_colors hc ON hc.id = mc.handle_color_id
+                LEFT JOIN blade_colors bc ON bc.id = mc.blade_color_id
+                LEFT JOIN locations loc ON loc.id = i.location_id
                 ORDER BY fam.name COLLATE NOCASE, km.sortable_name COLLATE NOCASE, i.id DESC
                 """
             ).fetchall()
@@ -1594,26 +1512,18 @@ def create_v2_router(
                     continue
                 payload = V2ModelIn(
                     official_name=official_name,
-                    normalized_name=row.get("normalized_name") or official_name,
                     knife_type=row.get("knife_type") or None,
                     family_name=row.get("family_name") or row.get("family") or None,
                     form_name=row.get("form_name") or None,
                     series_name=row.get("series_name") or row.get("catalog_line") or None,
                     collaborator_name=row.get("collaborator_name") or row.get("collaboration_name") or None,
-                    generation_label=row.get("generation_label") or row.get("version") or None,
                     steel=row.get("steel") or row.get("default_steel") or None,
                     blade_finish=row.get("blade_finish") or row.get("default_blade_finish") or None,
-                    blade_color=row.get("blade_color") or row.get("default_blade_color") or None,
-                    handle_color=row.get("handle_color") or row.get("default_handle_color") or None,
+                    handle_type=row.get("handle_type") or None,
                     blade_length=(float(row["blade_length"]) if row.get("blade_length") else None),
-                    record_status=row.get("record_status") or row.get("status") or "active",
-                    is_current_catalog=(row.get("is_current_catalog", "1").lower() in {"1", "true", "yes", "y"}),
-                    is_discontinued=(row.get("is_discontinued", "0").lower() in {"1", "true", "yes", "y"}),
                     msrp=(float(row["msrp"]) if row.get("msrp") else None),
                     official_product_url=row.get("official_product_url") or row.get("default_product_url") or None,
-                    official_image_url=row.get("official_image_url") or row.get("primary_image_url") or None,
-                    notes=row.get("notes") or None,
-                    distinguishing_features=row.get("distinguishing_features") or row.get("identifier_distinguishing_features") or None,
+                    model_notes=row.get("model_notes") or row.get("notes") or None,
                 )
                 existing = conn.execute(
                     "SELECT id FROM knife_models_v2 WHERE official_name = ?",
@@ -1624,69 +1534,48 @@ def create_v2_router(
                 family_id = _v2_dim_id(conn, "knife_families", payload.family_name)
                 series_id = _v2_dim_id(conn, "knife_series", payload.series_name)
                 collaborator_id = _v2_dim_id(conn, "collaborators", payload.collaborator_name)
-                normalized_name = (payload.normalized_name or payload.official_name).strip()
+                steel_id = _v2_attr_id(conn, "blade_steels", payload.steel)
+                blade_finish_id = _v2_attr_id(conn, "blade_finishes", payload.blade_finish)
+                handle_type_id = _v2_attr_id(conn, "handle_types", payload.handle_type)
+                sortable_name = payload.official_name.strip()
                 if existing:
-                    slug = _v2_model_slug(conn, normalized_name, existing_id=existing["id"])
+                    slug = _v2_model_slug(conn, sortable_name, existing_id=existing["id"])
                     conn.execute(
                         """
                         UPDATE knife_models_v2
-                        SET official_name = ?, normalized_name = ?, sortable_name = ?, slug = ?,
+                        SET official_name = ?, sortable_name = ?, slug = ?,
                             type_id = ?, form_id = ?, family_id = ?, series_id = ?, collaborator_id = ?,
-                            generation_label = ?, steel = ?, blade_finish = ?, blade_color = ?, handle_color = ?,
-                            blade_length = ?, record_status = ?, is_current_catalog = ?, is_discontinued = ?,
-                            msrp = ?, official_product_url = ?, official_image_url = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
+                            steel_id = ?, blade_finish_id = ?, handle_type_id = ?,
+                            blade_length = ?, msrp = ?, official_product_url = ?, model_notes = ?,
+                            updated_at = CURRENT_TIMESTAMP
                         WHERE id = ?
                         """,
                         (
-                            payload.official_name.strip(), normalized_name, normalized_name, slug,
+                            payload.official_name.strip(), sortable_name, slug,
                             type_id, form_id, family_id, series_id, collaborator_id,
-                            payload.generation_label, payload.steel, payload.blade_finish, payload.blade_color, payload.handle_color,
-                            payload.blade_length, payload.record_status or "active",
-                            0 if payload.is_current_catalog is False else 1, 1 if payload.is_discontinued else 0,
-                            payload.msrp, payload.official_product_url, payload.official_image_url, payload.notes, existing["id"],
+                            steel_id, blade_finish_id, handle_type_id,
+                            payload.blade_length, payload.msrp, payload.official_product_url, payload.model_notes,
+                            existing["id"],
                         ),
                     )
-                    if payload.distinguishing_features is not None:
-                        conn.execute(
-                            """
-                            INSERT INTO knife_model_descriptors (knife_model_id, distinguishing_features, updated_at)
-                            VALUES (?, ?, CURRENT_TIMESTAMP)
-                            ON CONFLICT(knife_model_id) DO UPDATE SET
-                                distinguishing_features=excluded.distinguishing_features, updated_at=CURRENT_TIMESTAMP
-                            """,
-                            (existing["id"], payload.distinguishing_features),
-                        )
                     updated += 1
                 else:
-                    slug = _v2_model_slug(conn, normalized_name)
+                    slug = _v2_model_slug(conn, sortable_name)
                     conn.execute(
                         """
                         INSERT INTO knife_models_v2 (
-                            official_name, normalized_name, sortable_name, slug, type_id, form_id, family_id, series_id, collaborator_id,
-                            generation_label, steel, blade_finish, blade_color, handle_color, blade_length, record_status,
-                            is_current_catalog, is_discontinued, msrp, official_product_url, official_image_url, notes
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            official_name, sortable_name, slug, type_id, form_id, family_id, series_id, collaborator_id,
+                            steel_id, blade_finish_id, handle_type_id,
+                            blade_length, msrp, official_product_url, model_notes
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
-                            payload.official_name.strip(), normalized_name, normalized_name, slug,
+                            payload.official_name.strip(), sortable_name, slug,
                             type_id, form_id, family_id, series_id, collaborator_id,
-                            payload.generation_label, payload.steel, payload.blade_finish, payload.blade_color, payload.handle_color,
-                            payload.blade_length, payload.record_status or "active",
-                            0 if payload.is_current_catalog is False else 1, 1 if payload.is_discontinued else 0,
-                            payload.msrp, payload.official_product_url, payload.official_image_url, payload.notes,
+                            steel_id, blade_finish_id, handle_type_id,
+                            payload.blade_length, payload.msrp, payload.official_product_url, payload.model_notes,
                         ),
                     )
-                    new_id = conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
-                    if payload.distinguishing_features is not None:
-                        conn.execute(
-                            """
-                            INSERT INTO knife_model_descriptors (knife_model_id, distinguishing_features, updated_at)
-                            VALUES (?, ?, CURRENT_TIMESTAMP)
-                            ON CONFLICT(knife_model_id) DO UPDATE SET
-                                distinguishing_features=excluded.distinguishing_features, updated_at=CURRENT_TIMESTAMP
-                            """,
-                            (new_id, payload.distinguishing_features),
-                        )
                     inserted += 1
         return {"inserted": inserted, "updated": updated, "message": "Import complete."}
 
@@ -1712,7 +1601,7 @@ def create_v2_router(
         with get_conn() as conn:
             rows = conn.execute(
                 """
-                SELECT km.id, km.official_name, km.generation_label, km.size_modifier, km.platform_variant,
+                SELECT km.id, km.official_name,
                        kt.name AS knife_type, frm.name AS form_name, fam.name AS family_name,
                        ks.name AS series_name, c.name AS collaborator_name
                 FROM knife_models_v2 km
@@ -1784,8 +1673,8 @@ def create_v2_router(
         with get_conn() as conn:
             rows = conn.execute(
                 """
-                SELECT km.id, km.official_name, km.normalized_name, km.record_status, km.blade_length, km.steel,
-                       km.blade_finish, km.blade_color, km.generation_label, km.notes,
+                SELECT km.id, km.official_name, km.blade_length, km.model_notes,
+                       bs.name AS blade_steel, bf.name AS blade_finish, ht.name AS handle_type,
                        kt.name AS knife_type, fam.name AS family_name, frm.name AS form_name, ks.name AS series_name,
                        c.name AS collaborator_name,
                        d.distinguishing_features,
@@ -1796,9 +1685,11 @@ def create_v2_router(
                 LEFT JOIN knife_families fam ON fam.id = km.family_id
                 LEFT JOIN knife_series ks ON ks.id = km.series_id
                 LEFT JOIN collaborators c ON c.id = km.collaborator_id
+                LEFT JOIN blade_steels bs ON bs.id = km.steel_id
+                LEFT JOIN blade_finishes bf ON bf.id = km.blade_finish_id
+                LEFT JOIN handle_types ht ON ht.id = km.handle_type_id
                 LEFT JOIN knife_model_descriptors d ON d.knife_model_id = km.id
                 LEFT JOIN knife_model_images kmi ON kmi.knife_model_id = km.id
-                LEFT JOIN knife_families fam ON fam.id = km.family_id
                 ORDER BY fam.name COLLATE NOCASE, km.sortable_name COLLATE NOCASE
                 """
             ).fetchall()
@@ -1810,20 +1701,17 @@ def create_v2_router(
             if payload.family:
                 fam_hay = " ".join(
                     str(row.get(k) or "")
-                    for k in ("family_name", "knife_type", "official_name", "normalized_name", "form_name")
+                    for k in ("family_name", "knife_type", "official_name", "form_name")
                 ).lower()
                 if payload.family.lower() in fam_hay:
                     score += 22
                     reasons.append(f"use / category matches {payload.family}")
-            if payload.steel and row.get("steel") and payload.steel.lower() == str(row["steel"]).lower():
+            if payload.steel and row.get("blade_steel") and payload.steel.lower() == str(row["blade_steel"]).lower():
                 score += 12
-                reasons.append(f"steel matches {row['steel']}")
+                reasons.append(f"steel matches {row['blade_steel']}")
             if payload.finish and row.get("blade_finish") and payload.finish.lower() == str(row["blade_finish"]).lower():
                 score += 12
                 reasons.append(f"finish matches {row['blade_finish']}")
-            if payload.blade_color and row.get("blade_color") and payload.blade_color.lower() == str(row["blade_color"]).lower():
-                score += 10
-                reasons.append(f"blade color matches {row['blade_color']}")
             if payload.blade_length is not None and row.get("blade_length") is not None:
                 diff = abs(float(row["blade_length"]) - payload.blade_length)
                 if diff <= 0.2:
@@ -1845,19 +1733,14 @@ def create_v2_router(
                         "family": row.get("family_name"),
                         "category": row.get("knife_type"),
                         "catalog_line": row.get("series_name"),
-                        "record_type": row.get("generation_label"),
-                        "catalog_status": row.get("record_status"),
-                        "identifier_product_url": None,
                         "has_identifier_image": bool(row.get("has_identifier_image")),
                         "has_silhouette_hint": False,
-                        "catalog_blurb": row.get("notes"),
+                        "catalog_blurb": row.get("model_notes"),
                         "default_blade_length": row.get("blade_length"),
-                        "default_steel": row.get("steel"),
+                        "default_steel": row.get("blade_steel"),
                         "default_blade_finish": row.get("blade_finish"),
-                        "default_blade_color": row.get("blade_color"),
                         "is_collab": bool(row.get("collaborator_name")),
                         "collaboration_name": row.get("collaborator_name"),
-                        "list_status": row.get("record_status") or "active",
                         "score": round(score, 1),
                         "reasons": reasons[:5],
                     }

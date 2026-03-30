@@ -78,7 +78,6 @@ REPORTING_GROUPABLE_DIMENSIONS = {
     "steel": "steel",
     "blade_finish": "blade_finish",
     "handle_color": "handle_color",
-    "condition": "condition",
     "location": "location",
 }
 

@@ -19,17 +19,12 @@ from reporting.plan_models import (
 
 
 INVENTORY_ONLY_FIELDS = {
-    PlanField.CONDITION,
     PlanField.LOCATION,
-    PlanField.ACQUIRED_DATE,
-    PlanField.PURCHASE_PRICE,
-    PlanField.ESTIMATED_VALUE,
     PlanField.KNIFE_NAME,
 }
 
 CATALOG_ONLY_FIELDS = {
     PlanField.MSRP,
-    PlanField.RECORD_STATUS,
     PlanField.OFFICIAL_NAME,
 }
 
@@ -102,7 +97,7 @@ def validate_canonical_semantics(plan: CanonicalReportingPlan) -> PlanValidation
             if clause.field in INVENTORY_ONLY_FIELDS:
                 errors.append(f"Catalog scope does not support field '{clause.field.value}'.")
         for dim in plan.group_by:
-            if dim in {PlanDimension.CONDITION, PlanDimension.LOCATION}:
+            if dim in {PlanDimension.LOCATION}:
                 errors.append(f"Catalog scope does not support group_by '{dim.value}'.")
 
     if plan.scope == PlanScope.INVENTORY:

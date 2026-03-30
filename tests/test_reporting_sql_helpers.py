@@ -57,7 +57,7 @@ def test_plan_to_sql_catalog_falls_back_for_inventory_only_group_by(invapp):
         intent=PlanIntent.LIST,
         scope=PlanScope.CATALOG,
         metric=PlanMetric.COUNT,
-        group_by=[PlanDimension.CONDITION],
+        group_by=[PlanDimension.LOCATION],
     )
     sql, meta = invapp._reporting_plan_to_sql(plan, date_start=None, date_end=None, max_rows=50)
     assert "FROM reporting_inventory" in sql

@@ -23,10 +23,10 @@ def any_knife_model_id(invapp) -> int:
         cur = conn.execute(
             """
             INSERT INTO knife_models_v2
-                (official_name, normalized_name, sortable_name, slug, record_status)
-            VALUES (?, ?, ?, ?, 'active')
+                (official_name, sortable_name, slug)
+            VALUES (?, ?, ?)
             """,
-            ("Pytest CRUD Model", "pytest crud model", "pytest crud model", slug),
+            ("Pytest CRUD Model", "pytest crud model", slug),
         )
         return int(cur.lastrowid)
 
@@ -35,23 +35,12 @@ def _row_to_put_payload(row: dict[str, Any]) -> dict[str, Any]:
     """Map GET /api/v2/inventory row shape to InventoryItemV2In (PUT body)."""
     return {
         "knife_model_id": row["knife_model_id"],
-        "nickname": row.get("nickname"),
+        "colorway_id": row.get("colorway_id"),
         "quantity": row["quantity"],
         "acquired_date": row.get("acquired_date"),
         "mkc_order_number": row.get("mkc_order_number"),
         "purchase_price": row.get("purchase_price"),
-        "estimated_value": row.get("estimated_value"),
-        "condition": row.get("condition") or "Like New",
-        "handle_color": row.get("handle_color"),
-        "steel": row.get("blade_steel"),
-        "blade_finish": row.get("blade_finish"),
-        "blade_color": row.get("blade_color"),
-        "blade_length": row.get("blade_length"),
-        "collaboration_name": row.get("collaboration_name"),
-        "serial_number": row.get("serial_number"),
-        "location": row.get("location"),
-        "purchase_source": row.get("purchase_source"),
-        "last_sharpened": row.get("last_sharpened"),
+        "location_id": row.get("location_id"),
         "notes": row.get("notes"),
     }
 
@@ -66,10 +55,8 @@ def test_v2_inventory_crud_roundtrip(client: TestClient, any_knife_model_id: int
     tag = uuid.uuid4().hex[:10]
     create_body = {
         "knife_model_id": knife_model_id,
-        "nickname": f"pytest-inventory-{tag}",
         "quantity": 1,
-        "notes": "crud-create",
-        "condition": "Like New",
+        "notes": f"crud-create-{tag}",
     }
 
     item_id: int | None = None
@@ -85,8 +72,7 @@ def test_v2_inventory_crud_roundtrip(client: TestClient, any_knife_model_id: int
         rows = r_list.json()
         row = next((x for x in rows if x["id"] == item_id), None)
         assert row is not None
-        assert row["nickname"] == create_body["nickname"]
-        assert row["notes"] == "crud-create"
+        assert row["notes"] == create_body["notes"]
 
         put_payload = _row_to_put_payload(row)
         put_payload["notes"] = "crud-updated"
@@ -114,7 +100,7 @@ def test_v2_inventory_crud_roundtrip(client: TestClient, any_knife_model_id: int
 def test_v2_inventory_create_rejects_unknown_model(client: TestClient) -> None:
     r = client.post(
         "/api/v2/inventory",
-        json={"knife_model_id": 999999999, "nickname": "nope", "quantity": 1},
+        json={"knife_model_id": 999999999, "quantity": 1},
     )
     assert r.status_code == 400, r.text
     assert "knife model" in (r.json().get("detail") or "").lower()

@@ -173,15 +173,13 @@ def ensure_reporting_schema(conn: sqlite3.Connection) -> None:
             i.quantity,
             i.acquired_date,
             i.purchase_price,
-            i.estimated_value,
-            i.condition,
-            COALESCE(i.steel, km.steel) AS steel,
-            COALESCE(i.blade_finish, km.blade_finish) AS blade_finish,
-            COALESCE(i.blade_color, km.blade_color) AS blade_color,
-            COALESCE(i.handle_color, km.handle_color) AS handle_color,
-            COALESCE(i.blade_length, km.blade_length) AS blade_length,
-            i.location,
-            i.purchase_source,
+            bs.name AS steel,
+            bf.name AS blade_finish,
+            blc.name AS blade_color,
+            hc.name AS handle_color,
+            ht.name AS handle_type,
+            km.blade_length,
+            loc.name AS location,
             i.notes,
             km.msrp
         FROM inventory_items_v2 i
@@ -190,7 +188,14 @@ def ensure_reporting_schema(conn: sqlite3.Connection) -> None:
         LEFT JOIN knife_forms frm ON frm.id = km.form_id
         LEFT JOIN knife_families fam ON fam.id = km.family_id
         LEFT JOIN knife_series ks ON ks.id = km.series_id
-        LEFT JOIN collaborators c ON c.id = km.collaborator_id;
+        LEFT JOIN collaborators c ON c.id = km.collaborator_id
+        LEFT JOIN blade_steels bs ON bs.id = km.steel_id
+        LEFT JOIN blade_finishes bf ON bf.id = km.blade_finish_id
+        LEFT JOIN handle_types ht ON ht.id = km.handle_type_id
+        LEFT JOIN model_colorways mc ON mc.id = i.colorway_id
+        LEFT JOIN handle_colors hc ON hc.id = mc.handle_color_id
+        LEFT JOIN blade_colors blc ON blc.id = mc.blade_color_id
+        LEFT JOIN locations loc ON loc.id = i.location_id;
 
         DROP VIEW IF EXISTS reporting_models;
         CREATE VIEW reporting_models AS
@@ -202,22 +207,20 @@ def ensure_reporting_schema(conn: sqlite3.Connection) -> None:
             frm.name AS form_name,
             ks.name AS series_name,
             c.name AS collaborator_name,
-            km.generation_label,
-            km.size_modifier,
-            km.steel,
-            km.blade_finish,
-            km.blade_color,
-            km.handle_color,
-            km.handle_type,
+            bs.name AS steel,
+            bf.name AS blade_finish,
+            ht.name AS handle_type,
             km.blade_length,
-            km.msrp,
-            km.record_status
+            km.msrp
         FROM knife_models_v2 km
         LEFT JOIN knife_types kt ON kt.id = km.type_id
         LEFT JOIN knife_forms frm ON frm.id = km.form_id
         LEFT JOIN knife_families fam ON fam.id = km.family_id
         LEFT JOIN knife_series ks ON ks.id = km.series_id
-        LEFT JOIN collaborators c ON c.id = km.collaborator_id;
+        LEFT JOIN collaborators c ON c.id = km.collaborator_id
+        LEFT JOIN blade_steels bs ON bs.id = km.steel_id
+        LEFT JOIN blade_finishes bf ON bf.id = km.blade_finish_id
+        LEFT JOIN handle_types ht ON ht.id = km.handle_type_id;
         """
     )
     if not column_exists(conn, "reporting_sessions", "last_query_state_json"):

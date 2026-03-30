@@ -25,7 +25,6 @@ class PlanScope(str, Enum):
 class PlanMetric(str, Enum):
     COUNT = "count"
     TOTAL_SPEND = "total_spend"
-    ESTIMATED_VALUE = "estimated_value"
     MSRP = "msrp"
 
 
@@ -38,7 +37,6 @@ class PlanDimension(str, Enum):
     STEEL = "steel"
     BLADE_FINISH = "blade_finish"
     HANDLE_COLOR = "handle_color"
-    CONDITION = "condition"
     LOCATION = "location"
     KNIFE_NAME = "knife_name"
 
@@ -55,14 +53,11 @@ class PlanField(str, Enum):
     HANDLE_COLOR = "handle_color"
     HANDLE_TYPE = "handle_type"
     BLADE_LENGTH = "blade_length"
-    CONDITION = "condition"
     LOCATION = "location"
     KNIFE_NAME = "knife_name"
     OFFICIAL_NAME = "official_name"
-    RECORD_STATUS = "record_status"
     ACQUIRED_DATE = "acquired_date"
     PURCHASE_PRICE = "purchase_price"
-    ESTIMATED_VALUE = "estimated_value"
     MSRP = "msrp"
     QUANTITY = "quantity"
     PURCHASE_SOURCE = "purchase_source"
@@ -234,9 +229,9 @@ class CanonicalReportingPlan(BaseModel):
         correct rather than rejecting the whole plan.
         """
         _INVENTORY_ONLY = {
-            "condition", "location", "acquired_date",
-            "purchase_price", "estimated_value", "knife_name",
-            "quantity", "purchase_source",
+            "location", "acquired_date",
+            "purchase_price", "knife_name",
+            "quantity",
         }
         if self.scope == PlanScope.CATALOG:
             all_field_vals = {c.field.value for c in [*self.filters, *self.exclusions]}

@@ -1,7 +1,7 @@
 {
-  "fingerprint": "466e7a21a0b9f4b59bf016c9e097dc469fa300828d37d0d7e7a0794c26ac1bcb",
+  "fingerprint": "89f9d17e7814428b949a7dc207b8d1204521bd1d06f89c665eeb58d27aafe9bf",
   "embed_model": "all-MiniLM-L6-v2",
   "collection": "reporting_retrieval_artifacts",
-  "artifact_count": 70,
+  "artifact_count": 79,
   "corpus_fingerprint_algo": "sha256_v1"
 }

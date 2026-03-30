@@ -51,7 +51,7 @@ def test_plan_auto_corrects_catalog_scope_with_inventory_only_field() -> None:
         scope=PlanScope.CATALOG,
         metric=PlanMetric.COUNT,
         group_by=[],
-        filters=[{"field": "condition", "op": "=", "value": "Like New"}],
+        filters=[{"field": "location", "op": "=", "value": "Safe"}],
         exclusions=[],
         time_range=None,
         year_compare=[],

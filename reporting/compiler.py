@@ -181,12 +181,11 @@ def _clause_expr(
 
     # Skip fields that don't exist in the source view.
     _inv_only = {
-        "condition", "location", "knife_name", "acquired_date",
-        "purchase_price", "estimated_value", "quantity", "purchase_source",
+        "location", "knife_name", "acquired_date",
+        "purchase_price", "quantity",
     }
     _cat_only = {
-        "msrp", "official_name", "record_status",
-        "handle_type", "generation_label", "size_modifier",
+        "msrp", "official_name", "handle_type",
     }
     if catalog_style and field in _inv_only:
         return None
@@ -307,7 +306,7 @@ def _compile_canonical(
 
         sql = (
             "SELECT m.model_id, m.official_name, m.knife_type, m.family_name, m.form_name, "
-            "m.series_name, m.collaborator_name, m.record_status, "
+            "m.series_name, m.collaborator_name, "
             "COALESCE(inv.total_qty, 0) AS inventory_quantity "
             f"FROM reporting_models m {inv_join} {where_sql} "
             "ORDER BY m.official_name "
@@ -340,15 +339,12 @@ def _compile_canonical(
 
     # Aggregate expressions — guard against inventory-only columns in catalog view.
     _inv_only_metric = (
-        plan.metric in (PlanMetric.TOTAL_SPEND, PlanMetric.ESTIMATED_VALUE)
+        plan.metric in (PlanMetric.TOTAL_SPEND,)
         and source_view == "reporting_models"
     )
     if plan.metric == PlanMetric.TOTAL_SPEND and not _inv_only_metric:
         agg_expr = "ROUND(SUM(COALESCE(purchase_price, 0) * COALESCE(quantity, 1)), 2) AS total_spend"
         agg_sort_col = "total_spend"
-    elif plan.metric == PlanMetric.ESTIMATED_VALUE and not _inv_only_metric:
-        agg_expr = "ROUND(SUM(COALESCE(estimated_value, 0) * COALESCE(quantity, 1)), 2) AS total_estimated_value"
-        agg_sort_col = "total_estimated_value"
     else:
         agg_expr = "COUNT(*) AS rows_count"
         agg_sort_col = "rows_count"
@@ -393,7 +389,7 @@ def _compile_canonical(
         return sql, {"mode": "semantic_compiled_aggregate"}
 
     # Scalar aggregate (no group_by, but metric is a sum/count over the whole set).
-    if plan.metric in (PlanMetric.TOTAL_SPEND, PlanMetric.ESTIMATED_VALUE) and not _inv_only_metric:
+    if plan.metric in (PlanMetric.TOTAL_SPEND,) and not _inv_only_metric:
         sql = f"SELECT {agg_expr} FROM {source_view} {where_sql}"
         return sql, {"mode": "semantic_compiled_aggregate"}
 
@@ -420,7 +416,7 @@ def _compile_canonical(
         sql = (
             "SELECT model_id, official_name AS knife_name, knife_type, family_name, form_name, "
             "series_name, collaborator_name, "
-            f"steel, blade_finish, handle_color, handle_type, blade_length, msrp, record_status{extra_select} "
+            f"steel, blade_finish, handle_type, blade_length, msrp{extra_select} "
             "FROM reporting_models "
             f"{where_sql} "
             f"ORDER BY {order_by} "
@@ -429,16 +425,12 @@ def _compile_canonical(
     else:
         base_select = (
             "SELECT inventory_id, knife_name, knife_type, family_name, form_name, series_name, "
-            "collaborator_name, steel, blade_finish, handle_color, condition, quantity, location"
+            "collaborator_name, steel, blade_finish, handle_color, handle_type, quantity, location"
         )
         inv_sort_map = {
             "purchase_price": (
                 f"{line_total_sql} {ord_kw}, knife_name",
                 f", purchase_price, {line_total_sql} AS line_purchase_total",
-            ),
-            "estimated_value": (
-                f"COALESCE(estimated_value, 0) {ord_kw}, knife_name",
-                ", estimated_value",
             ),
             "acquired_date": (f"acquired_date {ord_kw}, knife_name", ", acquired_date"),
             "knife_name": ("knife_name", ""),

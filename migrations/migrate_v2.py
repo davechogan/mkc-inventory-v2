@@ -97,41 +97,68 @@ def ensure_v2_exclusive_schema(conn: sqlite3.Connection) -> None:
         """
     )
 
+    # Ensure v3 schema columns exist (added by migrate_schema_v3.py on production,
+    # but need to be added here for test/seed DBs that haven't been rebuilt)
     if not column_exists(conn, "inventory_items_v2", "blade_length"):
         conn.execute("ALTER TABLE inventory_items_v2 ADD COLUMN blade_length REAL")
     if not column_exists(conn, "inventory_items_v2", "mkc_order_number"):
         conn.execute("ALTER TABLE inventory_items_v2 ADD COLUMN mkc_order_number TEXT")
+    if not column_exists(conn, "inventory_items_v2", "colorway_id"):
+        conn.execute("ALTER TABLE inventory_items_v2 ADD COLUMN colorway_id INTEGER REFERENCES model_colorways(id)")
+    if not column_exists(conn, "inventory_items_v2", "location_id"):
+        conn.execute("ALTER TABLE inventory_items_v2 ADD COLUMN location_id INTEGER REFERENCES locations(id)")
+    # Normalized FK columns (added by schema normalization, needed for v3 queries)
+    for col, ref in [
+        ("steel_id", "blade_steels(id)"),
+        ("blade_finish_id", "blade_finishes(id)"),
+        ("handle_color_id", "handle_colors(id)"),
+        ("blade_color_id", "blade_colors(id)"),
+        ("handle_type_id", "handle_types(id)"),
+    ]:
+        if not column_exists(conn, "knife_models_v2", col):
+            conn.execute(f"ALTER TABLE knife_models_v2 ADD COLUMN {col} INTEGER REFERENCES {ref}")
+    for col, ref in [
+        ("handle_color_id", "handle_colors(id)"),
+        ("blade_color_id", "blade_colors(id)"),
+        ("steel_id", "blade_steels(id)"),
+        ("blade_finish_id", "blade_finishes(id)"),
+        ("condition_id", "conditions(id)"),
+    ]:
+        if not column_exists(conn, "inventory_items_v2", col):
+            conn.execute(f"ALTER TABLE inventory_items_v2 ADD COLUMN {col} INTEGER REFERENCES {ref}")
+    if not column_exists(conn, "knife_models_v2", "model_notes"):
+        conn.execute("ALTER TABLE knife_models_v2 ADD COLUMN model_notes TEXT")
+
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS locations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE
+        );
+        CREATE TABLE IF NOT EXISTS handle_types (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE
+        );
+    """)
     if not column_exists(conn, "knife_models_v2", "handle_type"):
         conn.execute("ALTER TABLE knife_models_v2 ADD COLUMN handle_type TEXT")
 
+    # Seed v2_option_values from lookup tables and remaining legacy option tables.
+    # Normalized types (blade-steels, blade-finishes, etc.) now live in dedicated
+    # lookup tables — only seed the non-normalized types that still use v2_option_values.
     seed_sql = {
-        "blade-steels": "SELECT DISTINCT steel AS v FROM knife_models_v2 WHERE steel IS NOT NULL AND trim(steel) != ''",
-        "blade-finishes": "SELECT DISTINCT blade_finish AS v FROM knife_models_v2 WHERE blade_finish IS NOT NULL AND trim(blade_finish) != ''",
-        "blade-colors": "SELECT DISTINCT blade_color AS v FROM knife_models_v2 WHERE blade_color IS NOT NULL AND trim(blade_color) != ''",
-        "handle-colors": (
-            "SELECT DISTINCT v FROM ("
-            "  SELECT trim(handle_color) AS v FROM knife_models_v2 "
-            "  WHERE handle_color IS NOT NULL AND trim(handle_color) != '' "
-            "  UNION "
-            "  SELECT trim(handle_color) AS v FROM inventory_items_v2 "
-            "  WHERE handle_color IS NOT NULL AND trim(handle_color) != ''"
-            ")"
-        ),
-        "conditions": "SELECT DISTINCT condition AS v FROM inventory_items_v2 WHERE condition IS NOT NULL AND trim(condition) != ''",
-        "handle-types": "SELECT DISTINCT handle_type AS v FROM knife_models_v2 WHERE handle_type IS NOT NULL AND trim(handle_type) != ''",
         "blade-types": "SELECT DISTINCT name AS v FROM option_blade_types WHERE name IS NOT NULL AND trim(name) != ''",
         "categories": "SELECT DISTINCT name AS v FROM option_categories WHERE name IS NOT NULL AND trim(name) != ''",
         "blade-families": "SELECT DISTINCT name AS v FROM option_blade_families WHERE name IS NOT NULL AND trim(name) != ''",
         "primary-use-cases": "SELECT DISTINCT name AS v FROM option_primary_use_cases WHERE name IS NOT NULL AND trim(name) != ''",
         "collaborators": "SELECT DISTINCT name AS v FROM collaborators WHERE name IS NOT NULL AND trim(name) != ''",
-        "generations": "SELECT DISTINCT generation_label AS v FROM knife_models_v2 WHERE generation_label IS NOT NULL AND trim(generation_label) != ''",
-        "size-modifiers": "SELECT DISTINCT size_modifier AS v FROM knife_models_v2 WHERE size_modifier IS NOT NULL AND trim(size_modifier) != ''",
-        "platform-variants": "SELECT DISTINCT platform_variant AS v FROM knife_models_v2 WHERE platform_variant IS NOT NULL AND trim(platform_variant) != ''",
     }
     for option_type, sql in seed_sql.items():
-        rows = conn.execute(sql).fetchall()
+        try:
+            rows = conn.execute(sql).fetchall()
+        except Exception:
+            continue
         for row in rows:
-            v = (row.get("v") or "").strip()
+            v = (row["v"] or "").strip()
             if not v:
                 continue
             conn.execute(
@@ -141,6 +168,11 @@ def ensure_v2_exclusive_schema(conn: sqlite3.Connection) -> None:
 
 
 def migrate_legacy_media_to_v2(conn: sqlite3.Connection) -> dict[str, int]:
+    # legacy_master_id was dropped in the v3 schema rebuild.
+    # This migration is a no-op now — kept for interface compatibility.
+    return {"images_copied": 0, "descriptors_copied": 0}
+
+def _migrate_legacy_media_to_v2_DISABLED(conn: sqlite3.Connection) -> dict[str, int]:
     models = conn.execute(
         """
         SELECT id, legacy_master_id
@@ -373,6 +405,10 @@ def ensure_master_catalog_columns(conn: sqlite3.Connection) -> None:
 
 
 def backfill_v2_model_identity(conn: sqlite3.Connection) -> dict[str, int]:
+    """No-op — legacy columns (generation_label, size_modifier, etc.) were dropped in v3 schema rebuild."""
+    return {"updated": 0}
+
+def _backfill_v2_model_identity_DISABLED(conn: sqlite3.Connection) -> dict[str, int]:
     """
     Normalize and backfill v2 identity dimensions using normalized-model heuristics.
 
@@ -574,6 +610,10 @@ def backfill_v2_model_identity(conn: sqlite3.Connection) -> dict[str, int]:
 
 
 def normalize_v2_additional_fields(conn: sqlite3.Connection) -> dict[str, int]:
+    """No-op — text attribute columns were dropped in v3 schema rebuild."""
+    return {"updated": 0}
+
+def _normalize_v2_additional_fields_DISABLED(conn: sqlite3.Connection) -> dict[str, int]:
     """
     Normalize additional non-category fields: collaborator/series alias cleanup,
     model + inventory attribute text normalization (steel, finish, colors, condition).
