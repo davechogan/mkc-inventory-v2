@@ -112,7 +112,7 @@ export function InventoryTable({ items, sort, onSort, onRowClick }: InventoryTab
             <Th col="blade_length" label="Length" sort={sort} onSort={onSort} align="right" />
             <Th col="blade_steel" label="Steel" sort={sort} onSort={onSort} />
             <Th col="blade_finish" label="Finish" sort={sort} onSort={onSort} />
-            <Th col="condition" label="Cond." sort={sort} onSort={onSort} />
+            <Th col="handle_type" label="Handle Type" sort={sort} onSort={onSort} />
             <Th col="purchase_price" label="Price" sort={sort} onSort={onSort} align="right" />
           </tr>
         </thead>
@@ -128,9 +128,6 @@ export function InventoryTable({ items, sort, onSort, onRowClick }: InventoryTab
               </td>
               <td className="px-3 py-2.5 max-w-[200px]">
                 <div className="text-ink font-medium truncate">{item.knife_name}</div>
-                {item.nickname && (
-                  <div className="text-muted text-xs truncate">{item.nickname}</div>
-                )}
               </td>
               <td className="px-3 py-2.5 text-muted">
                 {item.series_name || item.catalog_line || '—'}
@@ -142,7 +139,7 @@ export function InventoryTable({ items, sort, onSort, onRowClick }: InventoryTab
               </td>
               <td className="px-3 py-2.5 text-muted">{item.blade_steel || '—'}</td>
               <td className="px-3 py-2.5 text-muted">{item.blade_finish || '—'}</td>
-              <td className="px-3 py-2.5 text-muted">{item.condition || '—'}</td>
+              <td className="px-3 py-2.5 text-muted">{item.handle_type || '—'}</td>
               <td className="px-3 py-2.5 text-ink text-right font-medium">
                 {formatCurrency(item.purchase_price)}
               </td>

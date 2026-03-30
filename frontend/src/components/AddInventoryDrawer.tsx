@@ -9,7 +9,17 @@ interface ModelResult {
   series_name: string | null;
   steel: string | null;
   blade_length: number | null;
-  handle_color: string | null;
+}
+
+interface ColorwayOption {
+  id: number;
+  handle_color: string;
+  blade_color: string | null;
+}
+
+interface LocationOption {
+  id: number;
+  name: string;
 }
 
 interface AddInventoryDrawerProps {
@@ -46,6 +56,8 @@ const emptyForm = {
   acquired_date: '',
   mkc_order_number: '',
   quantity: '1',
+  colorway_id: '',
+  location_id: '',
   notes: '',
 };
 
@@ -58,8 +70,25 @@ export function AddInventoryDrawer({ open, onClose, onAdded }: AddInventoryDrawe
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Colorway options for the selected model
+  const [colorways, setColorways] = useState<ColorwayOption[]>([]);
+
+  // Location options
+  const [locations, setLocations] = useState<LocationOption[]>([]);
+
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Load locations once
+  useEffect(() => {
+    fetch('/api/v2/options')
+      .then(r => r.json())
+      .then(d => {
+        const data = d as Record<string, { id: number; name: string }[]>;
+        setLocations(data['locations'] ?? []);
+      })
+      .catch(() => {});
+  }, []);
 
   // Focus search input when opened
   useEffect(() => {
@@ -72,6 +101,7 @@ export function AddInventoryDrawer({ open, onClose, onAdded }: AddInventoryDrawe
       setSelectedModel(null);
       setForm(emptyForm);
       setError(null);
+      setColorways([]);
     }
   }, [open]);
 
@@ -93,11 +123,26 @@ export function AddInventoryDrawer({ open, onClose, onAdded }: AddInventoryDrawe
     };
   }, [query]);
 
+  // Fetch colorways when model is selected
+  const fetchColorways = useCallback(async (modelId: number) => {
+    try {
+      const res = await fetch(`/api/v2/models/${modelId}/colorways`);
+      if (res.ok) {
+        const data = await res.json() as ColorwayOption[];
+        setColorways(data);
+      }
+    } catch {
+      setColorways([]);
+    }
+  }, []);
+
   const handleSelect = useCallback((model: ModelResult) => {
     setSelectedModel(model);
     setQuery('');
     setResults([]);
-  }, []);
+    setForm(prev => ({ ...prev, colorway_id: '' }));
+    fetchColorways(model.id);
+  }, [fetchColorways]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -110,9 +155,11 @@ export function AddInventoryDrawer({ open, onClose, onAdded }: AddInventoryDrawe
       knife_model_id: selectedModel.id,
       quantity: Math.max(1, parseInt(form.quantity, 10) || 1),
     };
+    if (form.colorway_id) body.colorway_id = parseInt(form.colorway_id, 10);
     if (form.purchase_price) body.purchase_price = parseFloat(form.purchase_price);
     if (form.acquired_date) body.acquired_date = form.acquired_date;
     if (form.mkc_order_number.trim()) body.mkc_order_number = form.mkc_order_number.trim();
+    if (form.location_id) body.location_id = parseInt(form.location_id, 10);
     if (form.notes.trim()) body.notes = form.notes.trim();
 
     try {
@@ -175,7 +222,7 @@ export function AddInventoryDrawer({ open, onClose, onAdded }: AddInventoryDrawe
                   </div>
                   <button
                     type="button"
-                    onClick={() => setSelectedModel(null)}
+                    onClick={() => { setSelectedModel(null); setColorways([]); }}
                     className="text-muted hover:text-ink transition-colors flex-shrink-0 text-xs px-2 py-1 rounded border border-border hover:border-border/70"
                   >
                     Change
@@ -226,6 +273,25 @@ export function AddInventoryDrawer({ open, onClose, onAdded }: AddInventoryDrawe
             {selectedModel && (
               <>
                 <div className="h-px bg-border/40" />
+
+                {/* Colorway dropdown */}
+                {colorways.length > 0 && (
+                  <div>
+                    <label className="block text-muted text-xs uppercase tracking-wider mb-2">Colorway</label>
+                    <select
+                      value={form.colorway_id}
+                      onChange={(e) => setForm((f) => ({ ...f, colorway_id: e.target.value }))}
+                      className="w-full px-3 py-2 bg-card border border-border rounded-lg text-sm text-ink focus:outline-none focus:border-gold/60 transition-colors"
+                    >
+                      <option value="">— Select colorway —</option>
+                      {colorways.map(cw => (
+                        <option key={cw.id} value={cw.id}>
+                          {cw.handle_color}{cw.blade_color ? ` / ${cw.blade_color}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
                 {/* Purchase price */}
                 <div>
@@ -278,6 +344,23 @@ export function AddInventoryDrawer({ open, onClose, onAdded }: AddInventoryDrawe
                     className="w-full px-3 py-2 bg-card border border-border rounded-lg text-sm text-ink placeholder:text-muted focus:outline-none focus:border-gold/60 transition-colors"
                   />
                 </div>
+
+                {/* Location */}
+                {locations.length > 0 && (
+                  <div>
+                    <label className="block text-muted text-xs uppercase tracking-wider mb-2">Location</label>
+                    <select
+                      value={form.location_id}
+                      onChange={(e) => setForm((f) => ({ ...f, location_id: e.target.value }))}
+                      className="w-full px-3 py-2 bg-card border border-border rounded-lg text-sm text-ink focus:outline-none focus:border-gold/60 transition-colors"
+                    >
+                      <option value="">— None —</option>
+                      {locations.map(loc => (
+                        <option key={loc.id} value={loc.id}>{loc.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
                 {/* Notes */}
                 <div>

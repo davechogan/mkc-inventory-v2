@@ -67,44 +67,41 @@ interface ModelSearchResult {
   official_name: string;
 }
 
+interface ColorwayOption {
+  id: number;
+  handle_color: string;
+  blade_color: string | null;
+}
+
+interface LocationOption {
+  id: number;
+  name: string;
+}
+
 interface EditForm {
   knife_model_id: number;
   knife_name: string; // display only, from search
-  handle_color: string;
-  blade_color: string;
-  steel: string;
-  blade_finish: string;
-  blade_length: string;
-  condition: string;
-  location: string;
+  colorway_id: string;
   quantity: string;
   purchase_price: string;
-  estimated_value: string;
   acquired_date: string;
   mkc_order_number: string;
-  purchase_source: string;
-  nickname: string;
+  location_id: string;
   notes: string;
 }
 
-function itemToForm(item: InventoryItem): EditForm {
+function itemToForm(item: InventoryItem, locations: LocationOption[]): EditForm {
+  // Try to find location_id from the location name
+  const loc = locations.find(l => l.name === item.location);
   return {
     knife_model_id: item.knife_model_id,
     knife_name: item.knife_name,
-    handle_color: item.handle_color ?? '',
-    blade_color: item.blade_color ?? '',
-    steel: item.blade_steel ?? '',
-    blade_finish: item.blade_finish ?? '',
-    blade_length: item.blade_length != null ? String(item.blade_length) : '',
-    condition: item.condition ?? 'Like New',
-    location: item.location ?? '',
+    colorway_id: item.colorway_id != null ? String(item.colorway_id) : '',
     quantity: String(item.quantity),
     purchase_price: item.purchase_price != null ? String(item.purchase_price) : '',
-    estimated_value: item.estimated_value != null ? String(item.estimated_value) : '',
     acquired_date: item.acquired_date ?? '',
     mkc_order_number: item.mkc_order_number ?? '',
-    purchase_source: item.purchase_source ?? '',
-    nickname: item.nickname ?? '',
+    location_id: loc ? String(loc.id) : '',
     notes: item.notes ?? '',
   };
 }
@@ -133,28 +130,50 @@ export function DetailSheet({ item, onClose, onChanged }: DetailSheetProps) {
   const [modelResults, setModelResults] = useState<ModelSearchResult[]>([]);
   const [searchingModels, setSearchingModels] = useState(false);
 
-  // Options for dropdowns
-  const [opts, setOpts] = useState<Record<string, { name: string }[]> | null>(null);
+  // Colorway options for the selected model
+  const [colorways, setColorways] = useState<ColorwayOption[]>([]);
+
+  // Location options
+  const [locations, setLocations] = useState<LocationOption[]>([]);
 
   useEffect(() => {
     fetch('/api/v2/options')
       .then(r => r.json())
-      .then(d => setOpts(d as Record<string, { name: string }[]>))
+      .then(d => {
+        const data = d as Record<string, { id: number; name: string }[]>;
+        setLocations(data['locations'] ?? []);
+      })
       .catch(() => {});
+  }, []);
+
+  // Fetch colorways for the current model
+  const fetchColorways = useCallback(async (modelId: number) => {
+    try {
+      const res = await fetch(`/api/v2/models/${modelId}/colorways`);
+      if (res.ok) {
+        const data = await res.json() as ColorwayOption[];
+        setColorways(data);
+      }
+    } catch {
+      setColorways([]);
+    }
   }, []);
 
   // Reset when item changes
   useEffect(() => {
     setEditing(false);
-    setForm(item ? itemToForm(item) : null);
+    setForm(item ? itemToForm(item, locations) : null);
     setMsg(null);
     setModelQuery('');
     setModelResults([]);
-  }, [item?.id]);
+    if (item) {
+      fetchColorways(item.knife_model_id);
+    }
+  }, [item?.id, locations, fetchColorways]);
 
   const startEditing = () => {
     if (item) {
-      setForm(itemToForm(item));
+      setForm(itemToForm(item, locations));
       setEditing(true);
       setMsg(null);
     }
@@ -185,9 +204,10 @@ export function DetailSheet({ item, onClose, onChanged }: DetailSheetProps) {
   }, [modelQuery, searchModels]);
 
   const selectModel = (m: ModelSearchResult) => {
-    setForm(prev => prev ? { ...prev, knife_model_id: m.id, knife_name: m.official_name } : prev);
+    setForm(prev => prev ? { ...prev, knife_model_id: m.id, knife_name: m.official_name, colorway_id: '' } : prev);
     setModelQuery('');
     setModelResults([]);
+    fetchColorways(m.id);
   };
 
   // Save
@@ -197,20 +217,12 @@ export function DetailSheet({ item, onClose, onChanged }: DetailSheetProps) {
     setMsg(null);
     const payload: Record<string, unknown> = {
       knife_model_id: form.knife_model_id,
-      handle_color: form.handle_color || null,
-      blade_color: form.blade_color || null,
-      steel: form.steel || null,
-      blade_finish: form.blade_finish || null,
-      blade_length: form.blade_length ? Number(form.blade_length) : null,
-      condition: form.condition || 'Like New',
-      location: form.location || null,
+      colorway_id: form.colorway_id ? Number(form.colorway_id) : null,
       quantity: Number(form.quantity) || 1,
       purchase_price: form.purchase_price ? Number(form.purchase_price) : null,
-      estimated_value: form.estimated_value ? Number(form.estimated_value) : null,
       acquired_date: form.acquired_date || null,
       mkc_order_number: form.mkc_order_number || null,
-      purchase_source: form.purchase_source || null,
-      nickname: form.nickname || null,
+      location_id: form.location_id ? Number(form.location_id) : null,
       notes: form.notes || null,
     };
     try {
@@ -252,18 +264,6 @@ export function DetailSheet({ item, onClose, onChanged }: DetailSheetProps) {
   const inputCls = "w-full px-3 py-1.5 bg-card border border-border rounded-lg text-xs text-ink focus:outline-none focus:border-gold/60 transition-colors";
   const labelCls = "text-muted text-[10px] uppercase tracking-wider mb-0.5";
 
-  const optNames = (key: string) => (opts?.[key] ?? []).map(o => o.name);
-
-  const renderSelect = (label: string, key: keyof EditForm, options: string[]) => (
-    <div key={key}>
-      <div className={labelCls}>{label}</div>
-      <select value={form?.[key] as string ?? ''} onChange={e => setField(key, e.target.value)} className={inputCls}>
-        <option value="">—</option>
-        {options.map(o => <option key={o} value={o}>{o}</option>)}
-      </select>
-    </div>
-  );
-
   const renderInput = (label: string, key: keyof EditForm, type = 'text', placeholder = '') => (
     <div key={key}>
       <div className={labelCls}>{label}</div>
@@ -293,9 +293,6 @@ export function DetailSheet({ item, onClose, onChanged }: DetailSheetProps) {
                 <h2 className="text-ink font-bold text-base leading-tight">
                   {editing ? form?.knife_name : item.knife_name}
                 </h2>
-                {!editing && item.nickname && (
-                  <p className="text-muted text-sm mt-0.5">"{item.nickname}"</p>
-                )}
               </div>
               <div className="flex items-center gap-1 flex-shrink-0">
                 {!editing && (
@@ -365,20 +362,35 @@ export function DetailSheet({ item, onClose, onChanged }: DetailSheetProps) {
                     )}
                   </div>
 
-                  {renderInput('Nickname', 'nickname')}
-                  {renderSelect('Handle Color', 'handle_color', optNames('handle-colors'))}
-                  {renderSelect('Blade Color', 'blade_color', optNames('blade-colors'))}
-                  {renderSelect('Steel', 'steel', optNames('blade-steels'))}
-                  {renderSelect('Blade Finish', 'blade_finish', optNames('blade-finishes'))}
-                  {renderInput('Blade Length', 'blade_length', 'number', '3.5')}
-                  {renderSelect('Condition', 'condition', optNames('conditions'))}
-                  {renderInput('Location', 'location')}
+                  {/* Colorway dropdown */}
+                  <div>
+                    <div className={labelCls}>Colorway</div>
+                    <select value={form.colorway_id} onChange={e => setField('colorway_id', e.target.value)} className={inputCls}>
+                      <option value="">— None —</option>
+                      {colorways.map(cw => (
+                        <option key={cw.id} value={cw.id}>
+                          {cw.handle_color}{cw.blade_color ? ` / ${cw.blade_color}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
                   {renderInput('Quantity', 'quantity', 'number')}
                   {renderInput('Purchase Price', 'purchase_price', 'number')}
-                  {renderInput('Estimated Value', 'estimated_value', 'number')}
                   {renderInput('Date Acquired', 'acquired_date', 'date')}
                   {renderInput('Order #', 'mkc_order_number')}
-                  {renderInput('Purchase Source', 'purchase_source')}
+
+                  {/* Location dropdown */}
+                  <div>
+                    <div className={labelCls}>Location</div>
+                    <select value={form.location_id} onChange={e => setField('location_id', e.target.value)} className={inputCls}>
+                      <option value="">—</option>
+                      {locations.map(loc => (
+                        <option key={loc.id} value={loc.id}>{loc.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
                   <div>
                     <div className={labelCls}>Notes</div>
                     <textarea value={form.notes} onChange={e => setField('notes', e.target.value)}
@@ -392,7 +404,7 @@ export function DetailSheet({ item, onClose, onChanged }: DetailSheetProps) {
                       className="flex-1 py-1.5 rounded-lg bg-gold text-black text-xs font-semibold hover:bg-gold-bright disabled:opacity-40 transition-colors">
                       {saving ? 'Saving...' : 'Save Changes'}
                     </button>
-                    <button onClick={() => { setEditing(false); setForm(itemToForm(item)); setMsg(null); }}
+                    <button onClick={() => { setEditing(false); setForm(itemToForm(item, locations)); setMsg(null); }}
                       className="px-4 py-1.5 rounded-lg border border-border text-xs text-muted hover:text-ink transition-colors">
                       Cancel
                     </button>
@@ -407,7 +419,7 @@ export function DetailSheet({ item, onClose, onChanged }: DetailSheetProps) {
                     <FieldRow label="Family" value={item.knife_family} />
                     <FieldRow label="Form" value={item.form_name} />
                     {!!item.is_collab && (
-                      <FieldRow label="Collab" value={item.collaboration_name} />
+                      <FieldRow label="Collab" value={item.collaborator_name} />
                     )}
                   </Section>
 
@@ -416,18 +428,18 @@ export function DetailSheet({ item, onClose, onChanged }: DetailSheetProps) {
                     <FieldRow label="Blade Steel" value={item.blade_steel} />
                     <FieldRow label="Blade Finish" value={item.blade_finish} />
                     <FieldRow label="Blade Color" value={item.blade_color} />
+                    <FieldRow label="Handle Type" value={item.handle_type} />
                     <FieldRow label="Blade Length" value={item.blade_length != null ? `${item.blade_length}"` : null} />
                   </Section>
 
                   <Section title="Acquisition">
                     {item.quantity > 1 && (
-                      <FieldRow label="Quantity" value={`×${item.quantity}`} />
+                      <FieldRow label="Quantity" value={`x${item.quantity}`} />
                     )}
                     <FieldRow label="Purchase Price" value={formatCurrency(item.purchase_price)} />
-                    <FieldRow label="Est. Value" value={formatCurrency(item.estimated_value)} />
                     <FieldRow label="Acquired" value={formatDate(item.acquired_date)} />
                     <FieldRow label="Order #" value={item.mkc_order_number} />
-                    <FieldRow label="Source" value={item.purchase_source} />
+                    <FieldRow label="Location" value={item.location} />
                   </Section>
 
                   {item.notes && (

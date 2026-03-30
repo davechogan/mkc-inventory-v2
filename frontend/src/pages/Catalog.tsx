@@ -7,31 +7,22 @@ interface CatalogModel {
   id: number;
   parent_model_id: number | null;
   official_name: string;
-  normalized_name: string | null;
   slug: string | null;
   knife_type: string | null;
   family_name: string | null;
   form_name: string | null;
   series_name: string | null;
   collaborator_name: string | null;
-  generation_label: string | null;
-  size_modifier: string | null;
-  platform_variant: string | null;
-  steel: string | null;
+  blade_steel: string | null;
   blade_finish: string | null;
-  blade_color: string | null;
-  handle_color: string | null;
   handle_type: string | null;
   blade_length: number | null;
-  record_status: string | null;
-  is_current_catalog: boolean;
-  is_discontinued: boolean;
   msrp: number | null;
   official_product_url: string | null;
-  official_image_url: string | null;
-  in_inventory_count: number;
-  has_identifier_image: boolean;
+  model_notes: string | null;
   colorway_image_url: string | null;
+  has_identifier_image: boolean;
+  in_inventory_count: number;
 }
 
 interface CatalogFilters {
@@ -84,10 +75,10 @@ async function fetchCatalogFilters(): Promise<CatalogFilters> {
 
 function specsLine(model: CatalogModel): string {
   const parts: string[] = [];
-  if (model.steel) parts.push(model.steel);
+  if (model.blade_steel) parts.push(model.blade_steel);
   if (model.blade_finish) parts.push(model.blade_finish);
+  if (model.handle_type) parts.push(model.handle_type);
   if (model.blade_length) parts.push(`${model.blade_length}"`);
-  if (model.handle_color) parts.push(model.handle_color);
   return parts.join(' · ');
 }
 
@@ -169,13 +160,6 @@ function ModelCard({
             Owned
           </div>
         )}
-
-        {/* Discontinued badge */}
-        {!!model.is_discontinued && (
-          <div className="absolute top-2 left-2 bg-surface/80 text-muted text-xs px-1.5 py-0.5 rounded-md leading-none border border-border">
-            Discontinued
-          </div>
-        )}
       </div>
 
       {/* Body */}
@@ -234,19 +218,14 @@ interface ModelFormData {
   form_name: string;
   series_name: string;
   collaborator_name: string;
-  generation_label: string;
-  size_modifier: string;
-  platform_variant: string;
   steel: string;
   blade_finish: string;
-  blade_color: string;
-  handle_color: string;
   handle_type: string;
   blade_length: string;
-  is_current_catalog: boolean;
-  is_discontinued: boolean;
   msrp: string;
   official_product_url: string;
+  model_notes: string;
+  parent_model_id: string;
 }
 
 function modelToForm(m: CatalogModel | null): ModelFormData {
@@ -257,19 +236,14 @@ function modelToForm(m: CatalogModel | null): ModelFormData {
     form_name: m?.form_name ?? '',
     series_name: m?.series_name ?? '',
     collaborator_name: m?.collaborator_name ?? '',
-    generation_label: m?.generation_label ?? '',
-    size_modifier: m?.size_modifier ?? '',
-    platform_variant: m?.platform_variant ?? '',
-    steel: m?.steel ?? '',
+    steel: m?.blade_steel ?? '',
     blade_finish: m?.blade_finish ?? '',
-    blade_color: m?.blade_color ?? '',
-    handle_color: m?.handle_color ?? '',
     handle_type: m?.handle_type ?? '',
     blade_length: m?.blade_length != null ? String(m.blade_length) : '',
-    is_current_catalog: m?.is_current_catalog ?? true,
-    is_discontinued: m?.is_discontinued ?? false,
     msrp: m?.msrp != null ? String(m.msrp) : '',
     official_product_url: m?.official_product_url ?? '',
+    model_notes: m?.model_notes ?? '',
+    parent_model_id: m?.parent_model_id != null ? String(m.parent_model_id) : '',
   };
 }
 
@@ -281,10 +255,7 @@ interface OptionSets {
   collaborations: string[];
   steels: string[];
   finishes: string[];
-  bladeColors: string[];
-  handleColors: string[];
   handleTypes: string[];
-  generations: string[];
 }
 
 function ModelDetail({
@@ -325,10 +296,7 @@ function ModelDetail({
         collaborations: filters.collaboration,
         steels: (options['blade-steels'] ?? []).map(o => o.name),
         finishes: (options['blade-finishes'] ?? []).map(o => o.name),
-        bladeColors: (options['blade-colors'] ?? []).map(o => o.name),
-        handleColors: (options['handle-colors'] ?? []).map(o => o.name),
         handleTypes: (options['handle-types'] ?? []).map(o => o.name),
-        generations: (options['generations'] ?? []).map(o => o.name),
       });
     }).catch(() => {});
   }, []);
@@ -340,21 +308,29 @@ function ModelDetail({
     setFormMsg(null);
   }, [model?.id, isNew]);
 
-  const setField = (key: keyof ModelFormData, value: string | boolean) => {
+  const setField = (key: keyof ModelFormData, value: string) => {
     setForm(prev => ({ ...prev, [key]: value }));
   };
 
   const handleSave = async () => {
     setSaving(true);
     setFormMsg(null);
-    const payload: Record<string, unknown> = { ...form };
-    payload.blade_length = form.blade_length ? Number(form.blade_length) : null;
-    payload.msrp = form.msrp ? Number(form.msrp) : null;
-    // Send empty strings as null
-    for (const k of Object.keys(payload)) {
-      if (payload[k] === '') payload[k] = null;
-    }
-    payload.official_name = form.official_name; // always send even if empty (will get 400)
+    const payload: Record<string, unknown> = {
+      official_name: form.official_name,
+      knife_type: form.knife_type || null,
+      form_name: form.form_name || null,
+      family_name: form.family_name || null,
+      series_name: form.series_name || null,
+      collaborator_name: form.collaborator_name || null,
+      steel: form.steel || null,
+      blade_finish: form.blade_finish || null,
+      handle_type: form.handle_type || null,
+      blade_length: form.blade_length ? Number(form.blade_length) : null,
+      msrp: form.msrp ? Number(form.msrp) : null,
+      official_product_url: form.official_product_url || null,
+      model_notes: form.model_notes || null,
+      parent_model_id: form.parent_model_id ? Number(form.parent_model_id) : null,
+    };
     try {
       const url = isNew ? '/api/v2/models' : `/api/v2/models/${model!.id}`;
       const method = isNew ? 'POST' : 'PUT';
@@ -497,14 +473,10 @@ function ModelDetail({
     ['Family', model?.family_name ?? null],
     ['Series', model?.series_name ?? null],
     ['Form', model?.form_name ?? null],
-    ['Steel', model?.steel ?? null],
+    ['Steel', model?.blade_steel ?? null],
     ['Finish', model?.blade_finish ?? null],
-    ['Blade Color', model?.blade_color ?? null],
-    ['Handle Color', model?.handle_color ?? null],
     ['Handle Type', model?.handle_type ?? null],
     ['Blade Length', model?.blade_length ? `${model.blade_length}"` : null],
-    ['Generation', model?.generation_label ?? null],
-    ['Status', model?.record_status ?? null],
     ['MSRP', model?.msrp != null ? `$${model.msrp.toLocaleString('en-US', { minimumFractionDigits: 0 })}` : null],
   ].filter(([, v]) => v != null) as Array<[string, string | number]>;
 
@@ -568,11 +540,8 @@ function ModelDetail({
               {renderField('Form *', 'form_name', opts?.forms)}
               {renderField('Series', 'series_name', opts?.series)}
               {renderField('Collaborator', 'collaborator_name', opts?.collaborations)}
-              {renderField('Generation', 'generation_label', opts?.generations)}
               {renderField('Steel', 'steel', opts?.steels)}
               {renderField('Blade Finish', 'blade_finish', opts?.finishes)}
-              {renderField('Blade Color', 'blade_color', opts?.bladeColors)}
-              {renderField('Handle Color', 'handle_color', opts?.handleColors)}
               {renderField('Handle Type', 'handle_type', opts?.handleTypes)}
               <div>
                 <div className={labelCls}>Blade Length</div>
@@ -583,15 +552,14 @@ function ModelDetail({
                 <input type="number" step="1" value={form.msrp} onChange={e => setField('msrp', e.target.value)} className={inputCls} placeholder='e.g. 225' />
               </div>
               {renderField('Product URL', 'official_product_url')}
-              <div className="flex gap-4">
-                <label className="flex items-center gap-1.5 text-xs text-ink cursor-pointer">
-                  <input type="checkbox" checked={form.is_current_catalog as boolean} onChange={e => setField('is_current_catalog', e.target.checked)} className="accent-gold" />
-                  Current catalog
-                </label>
-                <label className="flex items-center gap-1.5 text-xs text-ink cursor-pointer">
-                  <input type="checkbox" checked={form.is_discontinued as boolean} onChange={e => setField('is_discontinued', e.target.checked)} className="accent-gold" />
-                  Discontinued
-                </label>
+              <div>
+                <div className={labelCls}>Notes</div>
+                <textarea value={form.model_notes} onChange={e => setField('model_notes', e.target.value)}
+                  className={`${inputCls} resize-none`} rows={3} placeholder="Model notes..." />
+              </div>
+              <div>
+                <div className={labelCls}>Parent Model ID</div>
+                <input type="number" value={form.parent_model_id} onChange={e => setField('parent_model_id', e.target.value)} className={inputCls} placeholder='Optional' />
               </div>
             </div>
 
@@ -643,6 +611,14 @@ function ModelDetail({
                 </div>
               ))}
             </div>
+
+            {/* Notes */}
+            {model?.model_notes && (
+              <div>
+                <div className="text-muted text-xs mb-0.5">Notes</div>
+                <div className="text-ink text-sm leading-relaxed">{model.model_notes}</div>
+              </div>
+            )}
 
             {/* Links */}
             {model?.official_product_url && (

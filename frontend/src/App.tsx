@@ -22,7 +22,6 @@ const emptyFilters: FilterState = {
   search: '',
   family: '',
   handleColor: '',
-  condition: '',
   series: '',
   location: '',
 };
@@ -30,7 +29,6 @@ const emptyFilters: FilterState = {
 function countActiveFilters(filters: FilterState): number {
   return (
     (filters.handleColor ? 1 : 0) +
-    (filters.condition ? 1 : 0) +
     (filters.series ? 1 : 0) +
     (filters.location ? 1 : 0)
   );
@@ -43,7 +41,6 @@ function applyFilters(items: InventoryItem[], filters: FilterState): InventoryIt
       const q = filters.search.toLowerCase();
       const searchable = [
         item.knife_name,
-        item.nickname,
         item.series_name,
         item.catalog_line,
         item.handle_color,
@@ -63,8 +60,6 @@ function applyFilters(items: InventoryItem[], filters: FilterState): InventoryIt
       const hc = item.handle_color?.toLowerCase() ?? '';
       if (!hc.includes(filters.handleColor.toLowerCase())) return false;
     }
-    // Condition
-    if (filters.condition && item.condition !== filters.condition) return false;
     // Series
     if (filters.series) {
       const s = [item.series_name, item.catalog_line].filter(Boolean).join(' ').toLowerCase();
@@ -267,7 +262,6 @@ export default function App() {
           <div className="flex items-center gap-2 flex-wrap">
             <InlineFilter value={filters.family} onChange={v => handleFilterChange('family', v)} options={filterOptions.families} placeholder="Family" />
             <InlineFilter value={filters.handleColor} onChange={v => handleFilterChange('handleColor', v)} options={filterOptions.handleColors} placeholder="Handle Color" />
-            <InlineFilter value={filters.condition} onChange={v => handleFilterChange('condition', v)} options={['Like New', 'Very Good', 'Good', 'User']} placeholder="Condition" />
             <InlineFilter value={filters.series} onChange={v => handleFilterChange('series', v)} options={filterOptions.series} placeholder="Series" />
             {activeFilterCount > 0 && (
               <button

@@ -131,9 +131,6 @@ function Card({ item, onClick }: CardProps) {
         <div className="text-ink font-semibold text-sm leading-tight line-clamp-2">
           {item.knife_name}
         </div>
-        {item.nickname && (
-          <div className="text-muted text-xs truncate">{item.nickname}</div>
-        )}
 
         {/* Pills */}
         {pills.length > 0 && (
@@ -155,7 +152,7 @@ function Card({ item, onClick }: CardProps) {
             {formatCurrency(item.purchase_price)}
           </span>
           <span className="flex items-center gap-1">
-            <span className="text-gold text-sm font-bold">×{qty}</span>
+            <span className="text-gold text-sm font-bold">x{qty}</span>
             <button
               onClick={handleIncrement}
               title="Add another"

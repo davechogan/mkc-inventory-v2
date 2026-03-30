@@ -8,8 +8,6 @@ interface FilterDrawerProps {
   onChange: (key: keyof FilterState, value: string) => void;
 }
 
-const CONDITIONS = ['', 'New', 'Like New', 'Very Good', 'Good', 'User'];
-
 interface FieldGroupProps {
   label: string;
   children: ReactNode;
@@ -32,7 +30,6 @@ export function FilterDrawer({ open, onClose, filters, onChange }: FilterDrawerP
     onChange('search', '');
     onChange('family', '');
     onChange('handleColor', '');
-    onChange('condition', '');
     onChange('series', '');
     onChange('location', '');
   };
@@ -79,20 +76,6 @@ export function FilterDrawer({ open, onClose, filters, onChange }: FilterDrawerP
               value={filters.handleColor}
               onChange={(e) => onChange('handleColor', e.target.value)}
             />
-          </FieldGroup>
-
-          <FieldGroup label="Condition">
-            <select
-              className={inputClass}
-              value={filters.condition}
-              onChange={(e) => onChange('condition', e.target.value)}
-            >
-              {CONDITIONS.map((c) => (
-                <option key={c} value={c}>
-                  {c || 'Any'}
-                </option>
-              ))}
-            </select>
           </FieldGroup>
 
           <FieldGroup label="Series">

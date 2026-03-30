@@ -1,0 +1,1 @@
+../artifacts/scripts/push_release_to_macstudio.sh
