@@ -38,7 +38,6 @@ interface ActiveFilters {
   type: string;
   family: string;
   series: string;
-  collaboration: string;
 }
 
 const emptyFilters: ActiveFilters = {
@@ -46,7 +45,6 @@ const emptyFilters: ActiveFilters = {
   type: '',
   family: '',
   series: '',
-  collaboration: '',
 };
 
 const SIDEBAR_KEY = 'mkc_sidebar_collapsed';
@@ -59,7 +57,6 @@ async function fetchCatalog(active: ActiveFilters): Promise<CatalogModel[]> {
   if (active.type) params.set('type', active.type);
   if (active.family) params.set('family', active.family);
   if (active.series) params.set('series', active.series);
-  if (active.collaboration) params.set('collaboration', active.collaboration);
   const res = await fetch(`/api/v2/catalog?${params.toString()}`);
   if (!res.ok) throw new Error(`API ${res.status}`);
   return res.json();
@@ -781,6 +778,7 @@ export default function Catalog() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<CatalogModel | null>(null);
   const [addingNew, setAddingNew] = useState(false);
+  const [catalogView, setCatalogView] = useState<'cards' | 'table'>('cards');
   const [refreshKey, setRefreshKey] = useState(0);
   const refreshCatalog = useCallback(() => setRefreshKey(k => k + 1), []);
 
@@ -812,8 +810,7 @@ export default function Catalog() {
     type: filters.type,
     family: filters.family,
     series: filters.series,
-    collaboration: filters.collaboration,
-  }), [debouncedSearch, filters.type, filters.family, filters.series, filters.collaboration]);
+  }), [debouncedSearch, filters.type, filters.family, filters.series]);
 
   useEffect(() => {
     setLoading(true);
@@ -860,6 +857,20 @@ export default function Catalog() {
             >
               + Add Model
             </button>
+            <div className="flex items-center rounded-lg border border-border overflow-hidden">
+              <button onClick={() => setCatalogView('cards')} title="Card view"
+                className={`px-2 py-1.5 transition-colors ${catalogView === 'cards' ? 'bg-border/60 text-ink' : 'text-muted hover:text-ink hover:bg-border/30'}`}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" />
+                </svg>
+              </button>
+              <button onClick={() => setCatalogView('table')} title="Table view"
+                className={`px-2 py-1.5 transition-colors ${catalogView === 'table' ? 'bg-border/60 text-ink' : 'text-muted hover:text-ink hover:bg-border/30'}`}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="3" y1="9" x2="21" y2="9" /><line x1="3" y1="15" x2="21" y2="15" /><line x1="9" y1="9" x2="9" y2="21" />
+                </svg>
+              </button>
+            </div>
           </div>
 
           {/* Search */}
@@ -879,16 +890,16 @@ export default function Catalog() {
           {/* Filter dropdowns */}
           <div className="flex items-center gap-2 flex-wrap">
             <FilterSelect
-              value={filters.family}
-              onChange={(v) => handleFilterChange('family', v)}
-              options={filterOptions?.family ?? []}
-              placeholder="Family"
-            />
-            <FilterSelect
               value={filters.type}
               onChange={(v) => handleFilterChange('type', v)}
               options={filterOptions?.type ?? []}
               placeholder="Type"
+            />
+            <FilterSelect
+              value={filters.family}
+              onChange={(v) => handleFilterChange('family', v)}
+              options={filterOptions?.family ?? []}
+              placeholder="Family"
             />
             <FilterSelect
               value={filters.series}
@@ -896,14 +907,6 @@ export default function Catalog() {
               options={filterOptions?.series ?? []}
               placeholder="Series"
             />
-            {(filterOptions?.collaboration?.length ?? 0) > 0 && (
-              <FilterSelect
-                value={filters.collaboration}
-                onChange={(v) => handleFilterChange('collaboration', v)}
-                options={filterOptions?.collaboration ?? []}
-                placeholder="Collaboration"
-              />
-            )}
             {activeCount > 0 && (
               <button
                 onClick={clearFilters}
@@ -954,7 +957,7 @@ export default function Catalog() {
                   <button onClick={clearFilters} className="text-gold text-xs hover:underline">Clear filters</button>
                 )}
               </div>
-            ) : (
+            ) : catalogView === 'cards' ? (
               <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4">
                 {models.map((model) => (
                   <ModelCard
@@ -964,6 +967,39 @@ export default function Catalog() {
                     onClick={() => setSelected((prev) => prev?.id === model.id ? null : model)}
                   />
                 ))}
+              </div>
+            ) : (
+              <div className="overflow-x-auto rounded-lg border border-border">
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="bg-border/20 text-left">
+                      <th className="px-4 py-2.5 text-muted font-medium text-xs uppercase tracking-wider">Name</th>
+                      <th className="px-4 py-2.5 text-muted font-medium text-xs uppercase tracking-wider">Type</th>
+                      <th className="px-4 py-2.5 text-muted font-medium text-xs uppercase tracking-wider">Family</th>
+                      <th className="px-4 py-2.5 text-muted font-medium text-xs uppercase tracking-wider">Steel</th>
+                      <th className="px-4 py-2.5 text-muted font-medium text-xs uppercase tracking-wider">Finish</th>
+                      <th className="px-4 py-2.5 text-muted font-medium text-xs uppercase tracking-wider text-right">MSRP</th>
+                      <th className="px-4 py-2.5 text-muted font-medium text-xs uppercase tracking-wider text-center">Owned</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {models.map((model) => (
+                      <tr key={model.id}
+                        onClick={() => setSelected((prev) => prev?.id === model.id ? null : model)}
+                        className={`border-t border-border/50 cursor-pointer transition-colors ${
+                          selected?.id === model.id ? 'bg-gold/5' : 'hover:bg-border/10'
+                        }`}>
+                        <td className="px-4 py-2.5 text-ink font-medium">{model.official_name}</td>
+                        <td className="px-4 py-2.5 text-muted">{model.knife_type ?? '—'}</td>
+                        <td className="px-4 py-2.5 text-muted">{model.family_name ?? '—'}</td>
+                        <td className="px-4 py-2.5 text-muted">{model.blade_steel ?? '—'}</td>
+                        <td className="px-4 py-2.5 text-muted">{model.blade_finish ?? '—'}</td>
+                        <td className="px-4 py-2.5 text-gold text-right">{model.msrp != null ? `$${model.msrp}` : '—'}</td>
+                        <td className="px-4 py-2.5 text-center">{model.in_inventory_count > 0 ? <span className="text-gold font-bold">{model.in_inventory_count}</span> : <span className="text-muted/30">—</span>}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>

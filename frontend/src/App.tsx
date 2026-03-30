@@ -20,52 +20,37 @@ function getInitialView(): ViewMode {
 
 const emptyFilters: FilterState = {
   search: '',
+  type: '',
   family: '',
-  handleColor: '',
   series: '',
+  handleColor: '',
   location: '',
 };
 
 function countActiveFilters(filters: FilterState): number {
   return (
-    (filters.handleColor ? 1 : 0) +
+    (filters.type ? 1 : 0) +
+    (filters.family ? 1 : 0) +
     (filters.series ? 1 : 0) +
+    (filters.handleColor ? 1 : 0) +
     (filters.location ? 1 : 0)
   );
 }
 
 function applyFilters(items: InventoryItem[], filters: FilterState): InventoryItem[] {
   return items.filter((item) => {
-    // Search
     if (filters.search) {
       const q = filters.search.toLowerCase();
       const searchable = [
-        item.knife_name,
-        item.series_name,
-        item.catalog_line,
-        item.handle_color,
-        item.blade_steel,
-        item.knife_family,
-        item.knife_type,
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
+        item.knife_name, item.series_name, item.catalog_line,
+        item.handle_color, item.blade_steel, item.knife_family, item.knife_type,
+      ].filter(Boolean).join(' ').toLowerCase();
       if (!searchable.includes(q)) return false;
     }
-    // Family
+    if (filters.type && item.knife_type !== filters.type) return false;
     if (filters.family && item.knife_family !== filters.family) return false;
-    // Handle color
-    if (filters.handleColor) {
-      const hc = item.handle_color?.toLowerCase() ?? '';
-      if (!hc.includes(filters.handleColor.toLowerCase())) return false;
-    }
-    // Series
-    if (filters.series) {
-      const s = [item.series_name, item.catalog_line].filter(Boolean).join(' ').toLowerCase();
-      if (!s.includes(filters.series.toLowerCase())) return false;
-    }
-    // Location
+    if (filters.series && item.series_name !== filters.series) return false;
+    if (filters.handleColor && item.handle_color !== filters.handleColor) return false;
     if (filters.location) {
       const loc = item.location?.toLowerCase() ?? '';
       if (!loc.includes(filters.location.toLowerCase())) return false;
@@ -272,9 +257,10 @@ export default function App() {
               onChange={(e) => handleFilterChange('search', e.target.value)}
               className="w-full pl-9 pr-4 py-2 bg-card border border-border rounded-lg text-sm text-ink placeholder:text-muted focus:outline-none focus:border-gold/60 transition-colors" />
           </div>
+          <InlineFilter value={filters.type} onChange={v => handleFilterChange('type', v)} options={filterOptions.types} placeholder="Type" />
           <InlineFilter value={filters.family} onChange={v => handleFilterChange('family', v)} options={filterOptions.families} placeholder="Family" />
-          <InlineFilter value={filters.handleColor} onChange={v => handleFilterChange('handleColor', v)} options={filterOptions.handleColors} placeholder="Handle Color" />
           <InlineFilter value={filters.series} onChange={v => handleFilterChange('series', v)} options={filterOptions.series} placeholder="Series" />
+          <InlineFilter value={filters.handleColor} onChange={v => handleFilterChange('handleColor', v)} options={filterOptions.handleColors} placeholder="Handle Color" />
           {activeFilterCount > 0 && (
             <button onClick={() => setFilters(emptyFilters)}
               className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs text-muted hover:text-ink border border-border hover:border-border/70 transition-colors">

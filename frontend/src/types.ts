@@ -55,8 +55,9 @@ export interface SortState {
 
 export interface FilterState {
   search: string;
+  type: string;
   family: string;
-  handleColor: string;
   series: string;
+  handleColor: string;
   location: string;
 }
