@@ -232,52 +232,16 @@ export default function App() {
         id="appMain"
         className={`${marginClass} transition-[margin] duration-200 flex flex-col h-screen overflow-hidden`}
       >
-        {/* Top bar */}
-        <div className="flex items-center justify-between px-8 py-4 border-b border-border flex-shrink-0 gap-4 flex-wrap">
-          <div className="flex items-center gap-3 flex-shrink-0">
+        {/* Top bar — title + actions */}
+        <div className="flex items-center justify-between px-8 py-4 border-b border-border flex-shrink-0">
+          <div className="flex items-center gap-3">
             <h1 className="text-ink text-xl font-bold">Collection</h1>
-            <button
-              onClick={() => setAddOpen(true)}
-              className="px-2.5 py-1 rounded-lg bg-gold text-black text-xs font-semibold hover:bg-gold-bright transition-colors"
-            >
+            <button onClick={() => setAddOpen(true)}
+              className="px-2.5 py-1 rounded-lg bg-gold text-black text-xs font-semibold hover:bg-gold-bright transition-colors">
               + Add Knife
             </button>
           </div>
-
-          {/* Search */}
-          <div className="relative flex-1 min-w-[180px] max-w-xs">
-            <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-muted pointer-events-none" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
-            </svg>
-            <input
-              type="search"
-              placeholder="Search knives..."
-              value={filters.search}
-              onChange={(e) => handleFilterChange('search', e.target.value)}
-              className="w-full pl-9 pr-4 py-2 bg-card border border-border rounded-lg text-sm text-ink placeholder:text-muted focus:outline-none focus:border-gold/60 transition-colors"
-            />
-          </div>
-
-          {/* Filter dropdowns */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <InlineFilter value={filters.family} onChange={v => handleFilterChange('family', v)} options={filterOptions.families} placeholder="Family" />
-            <InlineFilter value={filters.handleColor} onChange={v => handleFilterChange('handleColor', v)} options={filterOptions.handleColors} placeholder="Handle Color" />
-            <InlineFilter value={filters.series} onChange={v => handleFilterChange('series', v)} options={filterOptions.series} placeholder="Series" />
-            {activeFilterCount > 0 && (
-              <button
-                onClick={() => setFilters(emptyFilters)}
-                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs text-muted hover:text-ink border border-border hover:border-border/70 transition-colors"
-              >
-                Clear {activeFilterCount}
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
-            )}
-          </div>
-
-          {/* Right side: view toggle, export, count */}
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex items-center gap-2">
             <div className="flex items-center rounded-lg border border-border overflow-hidden">
               <button onClick={() => setView('table')} title="Table view"
                 className={`px-2 py-1.5 transition-colors ${view === 'table' ? 'bg-border/60 text-ink' : 'text-muted hover:text-ink hover:bg-border/30'}`}>
@@ -292,16 +256,40 @@ export default function App() {
               className="p-1.5 rounded-lg border border-border text-muted hover:text-ink hover:border-border/80 transition-colors">
               <IconDownload />
             </a>
-            {!loading && (
-              <span className="text-muted text-xs">
-                {filteredItems.length.toLocaleString()} item{filteredItems.length !== 1 ? 's' : ''}
-              </span>
-            )}
           </div>
         </div>
 
         {/* Stat strip */}
         <StatStrip summary={summary} loading={loading} />
+
+        {/* Filters — directly above grid */}
+        <div className="flex items-center gap-3 px-8 py-3 border-b border-border flex-shrink-0 flex-wrap">
+          <div className="relative flex-1 min-w-[180px] max-w-xs">
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-muted pointer-events-none" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            <input type="search" placeholder="Search knives..." value={filters.search}
+              onChange={(e) => handleFilterChange('search', e.target.value)}
+              className="w-full pl-9 pr-4 py-2 bg-card border border-border rounded-lg text-sm text-ink placeholder:text-muted focus:outline-none focus:border-gold/60 transition-colors" />
+          </div>
+          <InlineFilter value={filters.family} onChange={v => handleFilterChange('family', v)} options={filterOptions.families} placeholder="Family" />
+          <InlineFilter value={filters.handleColor} onChange={v => handleFilterChange('handleColor', v)} options={filterOptions.handleColors} placeholder="Handle Color" />
+          <InlineFilter value={filters.series} onChange={v => handleFilterChange('series', v)} options={filterOptions.series} placeholder="Series" />
+          {activeFilterCount > 0 && (
+            <button onClick={() => setFilters(emptyFilters)}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs text-muted hover:text-ink border border-border hover:border-border/70 transition-colors">
+              Clear {activeFilterCount}
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          )}
+          {!loading && (
+            <span className="text-muted text-xs ml-auto">
+              {filteredItems.length.toLocaleString()} item{filteredItems.length !== 1 ? 's' : ''}
+            </span>
+          )}
+        </div>
 
         {/* Error banner */}
         {error && (
@@ -333,6 +321,7 @@ export default function App() {
               <InventoryCardGrid
                 items={filteredItems}
                 onCardClick={setSelectedItem}
+                onDataChanged={() => { void reload(); }}
               />
             )}
           </div>

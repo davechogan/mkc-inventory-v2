@@ -2,8 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { InventoryItem } from '../types';
 import { imageUrl } from '../api';
 
-async function incrementQuantity(id: number): Promise<number> {
-  const res = await fetch(`/api/v2/inventory/${id}/quantity`, { method: 'PATCH' });
+async function patchQuantity(id: number, delta: number): Promise<number> {
+  const res = await fetch(`/api/v2/inventory/${id}/quantity?delta=${delta}`, { method: 'PATCH' });
   if (!res.ok) throw new Error('Failed to update quantity');
   const data = await res.json() as { quantity: number };
   return data.quantity;
@@ -12,6 +12,7 @@ async function incrementQuantity(id: number): Promise<number> {
 interface InventoryCardGridProps {
   items: InventoryItem[];
   onCardClick: (item: InventoryItem) => void;
+  onDataChanged: () => void;
 }
 
 function KnifePlaceholderLarge() {
@@ -86,23 +87,21 @@ function LazyImage({ src, alt }: LazyImageProps) {
 interface CardProps {
   item: InventoryItem;
   onClick: () => void;
+  onDataChanged: () => void;
 }
 
-function Card({ item, onClick }: CardProps) {
+function Card({ item, onClick, onDataChanged }: CardProps) {
   const url = imageUrl(item);
-  const [qty, setQty] = useState(item.quantity);
 
-  const handleIncrement = useCallback(async (e: React.MouseEvent) => {
+  const handleQtyChange = useCallback(async (e: React.MouseEvent, delta: number) => {
     e.stopPropagation();
-    const next = qty + 1;
-    setQty(next); // optimistic
     try {
-      const confirmed = await incrementQuantity(item.id);
-      setQty(confirmed);
+      await patchQuantity(item.id, delta);
+      onDataChanged();
     } catch {
-      setQty(qty); // revert on error
+      // ignore
     }
-  }, [item.id, qty]);
+  }, [item.id, onDataChanged]);
 
   const pills: string[] = [];
   if (item.handle_color) pills.push(item.handle_color);
@@ -146,15 +145,24 @@ function Card({ item, onClick }: CardProps) {
           </div>
         )}
 
-        {/* Footer — price left, quantity right with hover + */}
+        {/* Footer — price left, quantity right with hover +/- */}
         <div className="flex items-center justify-between mt-1.5">
           <span className="text-gold text-sm font-bold">
             {formatCurrency(item.purchase_price)}
           </span>
           <span className="flex items-center gap-1">
-            <span className="text-gold text-sm font-bold">x{qty}</span>
             <button
-              onClick={handleIncrement}
+              onClick={(e) => handleQtyChange(e, -1)}
+              title="Remove one"
+              className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center w-4 h-4 rounded-full bg-border/40 hover:bg-red-900/40 text-muted hover:text-red-400"
+            >
+              <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+            </button>
+            <span className="text-gold text-sm font-bold">x{item.quantity}</span>
+            <button
+              onClick={(e) => handleQtyChange(e, 1)}
               title="Add another"
               className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center w-4 h-4 rounded-full bg-gold/20 hover:bg-gold/40 text-gold"
             >
@@ -169,7 +177,7 @@ function Card({ item, onClick }: CardProps) {
   );
 }
 
-export function InventoryCardGrid({ items, onCardClick }: InventoryCardGridProps) {
+export function InventoryCardGrid({ items, onCardClick, onDataChanged }: InventoryCardGridProps) {
   if (items.length === 0) {
     return (
       <div className="flex items-center justify-center py-24 text-muted text-sm">
@@ -181,7 +189,7 @@ export function InventoryCardGrid({ items, onCardClick }: InventoryCardGridProps
   return (
     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
       {items.map((item) => (
-        <Card key={item.id} item={item} onClick={() => onCardClick(item)} />
+        <Card key={item.id} item={item} onClick={() => onCardClick(item)} onDataChanged={onDataChanged} />
       ))}
     </div>
   );
