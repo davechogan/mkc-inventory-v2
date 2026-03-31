@@ -108,24 +108,6 @@
   },
   {
     "kind": "field",
-    "artifact_id": "field.condition",
-    "tags": [
-      "condition",
-      "like new",
-      "used",
-      "new in box",
-      "mint"
-    ],
-    "content": "condition is the canonical dimension for ownership condition. Use when the user asks about like new, used, mint, or condition distribution.",
-    "canonical_field": "condition",
-    "aliases": [
-      "condition",
-      "state",
-      "quality"
-    ]
-  },
-  {
-    "kind": "field",
     "artifact_id": "field.location",
     "tags": [
       "location",
@@ -197,24 +179,6 @@
   },
   {
     "kind": "field",
-    "artifact_id": "field.estimated_value",
-    "tags": [
-      "estimated value",
-      "worth",
-      "current value",
-      "value"
-    ],
-    "content": "estimated_value is the per-row estimated current value of an owned knife. Collection value aggregates use estimated_value times quantity, not purchase_price.",
-    "canonical_field": "estimated_value",
-    "aliases": [
-      "estimated value",
-      "worth",
-      "value",
-      "current value"
-    ]
-  },
-  {
-    "kind": "field",
     "artifact_id": "field.msrp",
     "tags": [
       "msrp",
@@ -222,7 +186,7 @@
       "list price",
       "retail price"
     ],
-    "content": "msrp is the manufacturer's suggested retail price. Use for completion-cost style questions or when the user explicitly asks about MSRP rather than purchase price or current value.",
+    "content": "msrp is the manufacturer's suggested retail price. Use for completion-cost style questions or when the user explicitly asks about MSRP rather than purchase price.",
     "canonical_field": "msrp",
     "aliases": [
       "msrp",
@@ -247,22 +211,6 @@
       "acquired date",
       "bought on",
       "year bought"
-    ]
-  },
-  {
-    "kind": "field",
-    "artifact_id": "field.record_status",
-    "tags": [
-      "status",
-      "record status",
-      "active",
-      "archived"
-    ],
-    "content": "record_status is a control/status field. Use only if the user explicitly asks about active, deleted, archived, or status-related filtering. Do not inject status filtering by default.",
-    "canonical_field": "record_status",
-    "aliases": [
-      "status",
-      "record status"
     ]
   },
   {
@@ -295,7 +243,7 @@
       "bronze",
       "sniper grey"
     ],
-    "content": "blade_color is the canonical field for the blade color. Use when the user asks about black, bronze, sniper grey, or other blade color values.",
+    "content": "blade_color is the canonical field for the blade color. Use when the user asks about black, bronze, sniper grey, or other blade color values. Available in inventory reports (derived from colorway data).",
     "canonical_field": "blade_color",
     "aliases": [
       "blade color",
@@ -312,7 +260,7 @@
       "fde",
       "black handle"
     ],
-    "content": "handle_color is the canonical field for the handle color. Use when the user asks about handle color, OD green, FDE, black, or other handle color values. Can be used as a filter or group_by dimension.",
+    "content": "handle_color is the canonical field for the handle color. Use when the user asks about handle color, OD green, FDE, black, or other handle color values. Available in inventory reports (derived from colorway data). Can be used as a filter or group_by dimension.",
     "canonical_field": "handle_color",
     "aliases": [
       "handle color",
@@ -329,7 +277,7 @@
       "micarta",
       "carbon fiber"
     ],
-    "content": "handle_type is the canonical field for handle material or construction type. Use when the user asks about G10, Micarta, Carbon Fiber, or other handle material values. This is a catalog-side field.",
+    "content": "handle_type is the canonical field for handle material or construction type. Use when the user asks about G10, Micarta, Carbon Fiber, or other handle material values.",
     "canonical_field": "handle_type",
     "aliases": [
       "handle type",
@@ -366,62 +314,6 @@
       "quantity",
       "qty",
       "how many"
-    ]
-  },
-  {
-    "kind": "field",
-    "artifact_id": "field.purchase_source",
-    "tags": [
-      "purchase source",
-      "source",
-      "where bought",
-      "vendor",
-      "retailer"
-    ],
-    "content": "purchase_source is the canonical field for where a knife was purchased. Use when the user asks about purchase source, vendor, retailer, or where they bought a knife.",
-    "canonical_field": "purchase_source",
-    "aliases": [
-      "purchase source",
-      "source",
-      "vendor",
-      "where bought"
-    ]
-  },
-  {
-    "kind": "field",
-    "artifact_id": "field.generation_label",
-    "tags": [
-      "generation",
-      "gen",
-      "version",
-      "2.0",
-      "revision"
-    ],
-    "content": "generation_label is the canonical catalog field for product generation or version. Use when the user asks about Gen 2, version 2.0, or generational differences. This is a catalog-side field.",
-    "canonical_field": "generation_label",
-    "aliases": [
-      "generation",
-      "gen",
-      "version"
-    ]
-  },
-  {
-    "kind": "field",
-    "artifact_id": "field.size_modifier",
-    "tags": [
-      "size",
-      "mini",
-      "large",
-      "compact",
-      "full size"
-    ],
-    "content": "size_modifier is the canonical catalog field for size variants such as Mini, Large, or Compact. Use when the user asks about size variants within a product family. This is a catalog-side field.",
-    "canonical_field": "size_modifier",
-    "aliases": [
-      "size",
-      "mini",
-      "large",
-      "compact"
     ]
   },
   {

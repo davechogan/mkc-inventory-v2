@@ -17,16 +17,16 @@
   },
   {
     "kind": "example",
-    "artifact_id": "example.value_by_family",
+    "artifact_id": "example.spend_by_family",
     "tags": [
-      "value",
-      "worth",
+      "spend",
+      "spent",
       "by family"
     ],
-    "content": "Estimated value grouped by family in inventory.",
-    "natural_query": "what is my collection value by family",
+    "content": "Total spend grouped by family in inventory.",
+    "natural_query": "how much have I spent by family",
     "hint_intent": "aggregate",
-    "hint_metric": "estimated_value",
+    "hint_metric": "total_spend",
     "hint_scope": "inventory",
     "hint_year_compare": null,
     "hint_group_by": "family_name"
@@ -213,7 +213,7 @@
       "steel breakdown",
       "magnacut"
     ],
-    "content": "Steel breakdown uses aggregate count grouped by steel unless the user asked for value/spend by steel.",
+    "content": "Steel breakdown uses aggregate count grouped by steel unless the user asked for spend by steel.",
     "natural_query": "show me my knives by steel",
     "hint_intent": "aggregate",
     "hint_metric": "count",

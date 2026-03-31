@@ -13,7 +13,7 @@
         "by",
         "grouped by"
       ],
-      "content": "Use aggregate intent when the user wants totals or counts grouped by a dimension such as family, series, steel, condition, collaborator, location, or knife type. Common phrasings: 'how many by family', 'show the breakdown by steel', 'distribution by condition'.",
+      "content": "Use aggregate intent when the user wants totals or counts grouped by a dimension such as family, series, steel, collaborator, location, or knife type. Common phrasings: 'how many by family', 'show the breakdown by steel', 'distribution by location'.",
       "canonical_intent": "aggregate"
     },
     {
@@ -29,19 +29,6 @@
         "money spent"
       ],
       "content": "Use aggregate intent with metric total_spend when the user asks how much was spent, what was paid, or spend by period/dimension. total_spend means sum of purchase_price times quantity for inventory rows.",
-      "canonical_intent": "aggregate"
-    },
-    {
-      "kind": "intent",
-      "artifact_id": "intent.aggregate.estimated_value",
-      "tags": [
-        "aggregate",
-        "value",
-        "worth",
-        "estimated value",
-        "collection value"
-      ],
-      "content": "Use aggregate intent with metric estimated_value when the user asks what the collection is worth, total value, estimated value by family, or top value breakdowns. This is different from spend.",
       "canonical_intent": "aggregate"
     },
     {
@@ -82,7 +69,7 @@
         "year over year",
         "yoy"
       ],
-      "content": "Use compare intent for direct side-by-side comparison across two named periods or entities. If the user explicitly compares two years for spend or value, prefer compare intent or aggregate intent with year_compare depending on compiler design, but the canonical meaning is a two-period comparison.",
+      "content": "Use compare intent for direct side-by-side comparison across two named periods or entities. If the user explicitly compares two years for spend, prefer compare intent or aggregate intent with year_compare depending on compiler design, but the canonical meaning is a two-period comparison.",
       "canonical_intent": "compare"
     },
     {
@@ -95,7 +82,7 @@
         "cost to complete",
         "msrp to finish"
       ],
-      "content": "Use completion_cost intent when the user asks how much it would cost to finish the collection or buy everything they do not own. This is distinct from current spend or current value.",
+      "content": "Use completion_cost intent when the user asks how much it would cost to finish the collection or buy everything they do not own. This is distinct from current spend.",
       "canonical_intent": "completion_cost"
     },
     {
@@ -207,24 +194,6 @@
     },
     {
       "kind": "field",
-      "artifact_id": "field.condition",
-      "tags": [
-        "condition",
-        "like new",
-        "used",
-        "new in box",
-        "mint"
-      ],
-      "content": "condition is the canonical dimension for ownership condition. Use when the user asks about like new, used, mint, or condition distribution.",
-      "canonical_field": "condition",
-      "aliases": [
-        "condition",
-        "state",
-        "quality"
-      ]
-    },
-    {
-      "kind": "field",
       "artifact_id": "field.location",
       "tags": [
         "location",
@@ -296,24 +265,6 @@
     },
     {
       "kind": "field",
-      "artifact_id": "field.estimated_value",
-      "tags": [
-        "estimated value",
-        "worth",
-        "current value",
-        "value"
-      ],
-      "content": "estimated_value is the per-row estimated current value of an owned knife. Collection value aggregates use estimated_value times quantity, not purchase_price.",
-      "canonical_field": "estimated_value",
-      "aliases": [
-        "estimated value",
-        "worth",
-        "value",
-        "current value"
-      ]
-    },
-    {
-      "kind": "field",
       "artifact_id": "field.msrp",
       "tags": [
         "msrp",
@@ -321,7 +272,7 @@
         "list price",
         "retail price"
       ],
-      "content": "msrp is the manufacturer's suggested retail price. Use for completion-cost style questions or when the user explicitly asks about MSRP rather than purchase price or current value.",
+      "content": "msrp is the manufacturer's suggested retail price. Use for completion-cost style questions or when the user explicitly asks about MSRP rather than purchase price.",
       "canonical_field": "msrp",
       "aliases": [
         "msrp",
@@ -346,22 +297,6 @@
         "acquired date",
         "bought on",
         "year bought"
-      ]
-    },
-    {
-      "kind": "field",
-      "artifact_id": "field.record_status",
-      "tags": [
-        "status",
-        "record status",
-        "active",
-        "archived"
-      ],
-      "content": "record_status is a control/status field. Use only if the user explicitly asks about active, deleted, archived, or status-related filtering. Do not inject status filtering by default.",
-      "canonical_field": "record_status",
-      "aliases": [
-        "status",
-        "record status"
       ]
     },
     {
@@ -405,18 +340,6 @@
       ],
       "content": "total_spend is the aggregate metric for money spent on owned knives. It is computed from purchase_price multiplied by quantity. Use for 'how much did I spend', 'money spent', or 'spend by year/family/series'.",
       "canonical_metric": "total_spend"
-    },
-    {
-      "kind": "metric",
-      "artifact_id": "metric.estimated_value",
-      "tags": [
-        "value",
-        "worth",
-        "estimated value",
-        "collection value"
-      ],
-      "content": "estimated_value is the aggregate metric for current estimated worth. Use for 'what is my collection worth', 'value by family', or 'top value knives'. Do not confuse with spend.",
-      "canonical_metric": "estimated_value"
     },
     {
       "kind": "metric",
@@ -538,7 +461,7 @@
         "paid",
         "cost"
       ],
-      "content": "Words like spent, spend, paid, and cost usually map to the aggregate metric total_spend, not estimated_value.",
+      "content": "Words like spent, spend, paid, and cost usually map to the aggregate metric total_spend.",
       "target_dimension": "metric",
       "entity_phrases": [
         "spent",
@@ -547,23 +470,6 @@
         "cost"
       ],
       "canonical_value": "total_spend"
-    },
-    {
-      "kind": "mapping",
-      "artifact_id": "mapping.metric_value_words",
-      "tags": [
-        "value",
-        "worth",
-        "collection worth"
-      ],
-      "content": "Words like value and worth usually map to the aggregate metric estimated_value, not total_spend.",
-      "target_dimension": "metric",
-      "entity_phrases": [
-        "value",
-        "worth",
-        "what is it worth"
-      ],
-      "canonical_value": "estimated_value"
     },
     {
       "kind": "mapping",
@@ -591,7 +497,7 @@
         "view",
         "owned items"
       ],
-      "content": "Use reporting_inventory for owned-knife questions. Important fields include knife_name, series_name, family_name, knife_type, form_name, collaborator_name, steel, condition, location, acquired_date, purchase_price, estimated_value, msrp, record_status."
+      "content": "Use reporting_inventory for owned-knife questions. Fields: inventory_id, knife_model_id, knife_name, knife_type, family_name, form_name, series_name, collaborator_name, quantity, acquired_date, purchase_price, steel, blade_finish, blade_color, handle_color, handle_type, blade_length, location, notes, msrp."
     },
     {
       "kind": "rule",
@@ -602,7 +508,7 @@
         "view",
         "models"
       ],
-      "content": "Use reporting_models for catalog/model questions. Important fields include official_name, series_name, family_name, knife_type, form_name, collaborator_name, steel, msrp, and model/status fields relevant to the full catalog."
+      "content": "Use reporting_models for catalog/model questions. Fields: model_id, official_name, knife_type, family_name, form_name, series_name, collaborator_name, steel, blade_finish, handle_type, blade_length, msrp."
     },
     {
       "kind": "rule",
@@ -698,16 +604,16 @@
     },
     {
       "kind": "example",
-      "artifact_id": "example.value_by_family",
+      "artifact_id": "example.spend_by_family",
       "tags": [
-        "value",
-        "worth",
+        "spend",
+        "spent",
         "by family"
       ],
-      "content": "Estimated value grouped by family in inventory.",
-      "natural_query": "what is my collection value by family",
+      "content": "Total spend grouped by family in inventory.",
+      "natural_query": "how much have I spent by family",
       "hint_intent": "aggregate",
-      "hint_metric": "estimated_value",
+      "hint_metric": "total_spend",
       "hint_scope": "inventory",
       "hint_year_compare": null,
       "hint_group_by": "family_name"
@@ -869,7 +775,7 @@
         "steel breakdown",
         "magnacut"
       ],
-      "content": "Steel breakdown uses aggregate count grouped by steel unless the user asked for value/spend by steel.",
+      "content": "Steel breakdown uses aggregate count grouped by steel unless the user asked for spend by steel.",
       "natural_query": "show me my knives by steel",
       "hint_intent": "aggregate",
       "hint_metric": "count",

@@ -8,7 +8,7 @@
       "view",
       "owned items"
     ],
-    "content": "Use reporting_inventory for owned-knife questions. Important fields include knife_name, series_name, family_name, knife_type, form_name, collaborator_name, steel, condition, location, acquired_date, purchase_price, estimated_value, msrp, record_status."
+    "content": "Use reporting_inventory for owned-knife questions. Fields: inventory_id, knife_model_id, knife_name, knife_type, family_name, form_name, series_name, collaborator_name, quantity, acquired_date, purchase_price, steel, blade_finish, blade_color, handle_color, handle_type, blade_length, location, notes, msrp."
   },
   {
     "kind": "rule",
@@ -19,7 +19,7 @@
       "view",
       "models"
     ],
-    "content": "Use reporting_models for catalog/model questions. Important fields include official_name, series_name, family_name, knife_type, form_name, collaborator_name, steel, msrp, and model/status fields relevant to the full catalog."
+    "content": "Use reporting_models for catalog/model questions. Fields: model_id, official_name, knife_type, family_name, form_name, series_name, collaborator_name, steel, blade_finish, handle_type, blade_length, msrp."
   },
   {
     "kind": "rule",

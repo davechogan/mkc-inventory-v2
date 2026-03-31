@@ -81,7 +81,7 @@
       "paid",
       "cost"
     ],
-    "content": "Words like spent, spend, paid, and cost usually map to the aggregate metric total_spend, not estimated_value.",
+    "content": "Words like spent, spend, paid, and cost usually map to the aggregate metric total_spend.",
     "target_dimension": "metric",
     "entity_phrases": [
       "spent",
@@ -90,23 +90,6 @@
       "cost"
     ],
     "canonical_value": "total_spend"
-  },
-  {
-    "kind": "mapping",
-    "artifact_id": "mapping.metric_value_words",
-    "tags": [
-      "value",
-      "worth",
-      "collection worth"
-    ],
-    "content": "Words like value and worth usually map to the aggregate metric estimated_value, not total_spend.",
-    "target_dimension": "metric",
-    "entity_phrases": [
-      "value",
-      "worth",
-      "what is it worth"
-    ],
-    "canonical_value": "estimated_value"
   },
   {
     "kind": "mapping",

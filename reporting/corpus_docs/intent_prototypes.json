@@ -11,7 +11,7 @@
       "by",
       "grouped by"
     ],
-    "content": "Use aggregate intent when the user wants totals or counts grouped by a dimension such as family, series, steel, condition, collaborator, location, or knife type. Common phrasings: 'how many by family', 'show the breakdown by steel', 'distribution by condition'.",
+    "content": "Use aggregate intent when the user wants totals or counts grouped by a dimension such as family, series, steel, collaborator, location, or knife type. Common phrasings: 'how many by family', 'show the breakdown by steel', 'distribution by location'.",
     "canonical_intent": "aggregate"
   },
   {
@@ -27,19 +27,6 @@
       "money spent"
     ],
     "content": "Use aggregate intent with metric total_spend when the user asks how much was spent, what was paid, or spend by period/dimension. total_spend means sum of purchase_price times quantity for inventory rows.",
-    "canonical_intent": "aggregate"
-  },
-  {
-    "kind": "intent",
-    "artifact_id": "intent.aggregate.estimated_value",
-    "tags": [
-      "aggregate",
-      "value",
-      "worth",
-      "estimated value",
-      "collection value"
-    ],
-    "content": "Use aggregate intent with metric estimated_value when the user asks what the collection is worth, total value, estimated value by family, or top value breakdowns. This is different from spend.",
     "canonical_intent": "aggregate"
   },
   {
@@ -80,7 +67,7 @@
       "year over year",
       "yoy"
     ],
-    "content": "Use compare intent for direct side-by-side comparison across two named periods or entities. If the user explicitly compares two years for spend or value, prefer compare intent or aggregate intent with year_compare depending on compiler design, but the canonical meaning is a two-period comparison.",
+    "content": "Use compare intent for direct side-by-side comparison across two named periods or entities. If the user explicitly compares two years for spend, prefer compare intent or aggregate intent with year_compare depending on compiler design, but the canonical meaning is a two-period comparison.",
     "canonical_intent": "compare"
   },
   {
@@ -93,7 +80,7 @@
       "cost to complete",
       "msrp to finish"
     ],
-    "content": "Use completion_cost intent when the user asks how much it would cost to finish the collection or buy everything they do not own. This is distinct from current spend or current value.",
+    "content": "Use completion_cost intent when the user asks how much it would cost to finish the collection or buy everything they do not own. This is distinct from current spend.",
     "canonical_intent": "completion_cost"
   }
 ]
