@@ -325,7 +325,9 @@ function AccessLog() {
 
   const formatDate = (iso: string) => {
     try {
-      return new Date(iso).toLocaleString('en-US', {
+      // DB stores UTC — append Z so the browser parses as UTC and displays in local time
+      const utc = iso.endsWith('Z') ? iso : iso + 'Z';
+      return new Date(utc).toLocaleString('en-US', {
         month: 'short', day: 'numeric', year: 'numeric',
         hour: 'numeric', minute: '2-digit',
       });

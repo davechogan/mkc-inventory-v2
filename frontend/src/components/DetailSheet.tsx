@@ -20,7 +20,9 @@ function formatCurrency(value: number | null | undefined): string {
 function formatDate(value: string | null | undefined): string {
   if (!value) return '—';
   try {
-    return new Date(value).toLocaleDateString('en-US', {
+    // DB stores UTC — append Z so the browser parses as UTC and displays in local time
+    const utc = value.endsWith('Z') ? value : value + 'Z';
+    return new Date(utc).toLocaleDateString('en-US', {
       year: 'numeric',
       month: 'short',
       day: 'numeric',
