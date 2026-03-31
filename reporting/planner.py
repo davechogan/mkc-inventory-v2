@@ -54,7 +54,7 @@ _PLANNER_SYSTEM = (
     "{\n"
     '  "intent": "list | missing_models",\n'
     '  "scope": "inventory | catalog",\n'
-    '  "metric": "count | total_spend | estimated_value | msrp",\n'
+    '  "metric": "count | total_spend | msrp",\n'
     '  "group_by": [],\n'
     '  "filters": [],\n'
     '  "exclusions": [],\n'
@@ -80,10 +80,14 @@ _PLANNER_SYSTEM = (
     "  IMPORTANT: scope can change between turns. Even if prior turns used catalog scope,\n"
     "    switch to inventory when the current question is about what the user personally owns.\n"
     "  If genuinely ambiguous and cannot be inferred from context, set needs_clarification=true.\n\n"
-    "metric: count, total_spend, estimated_value, msrp\n\n"
+    "metric: count, total_spend, msrp\n"
+    "  count — default. Use for listings, counting, filtering.\n"
+    "  total_spend — ONLY for 'how much spent' / 'total spend' aggregation questions.\n"
+    "  msrp — retail price aggregation from catalog.\n"
+    "  When the user asks 'most expensive' or 'sorted by price', use metric=count with sort on purchase_price.\n\n"
     "group_by: array of zero or more dimension names:\n"
     "  series_name, family_name, knife_type, form_name, collaborator_name, steel,\n"
-    "  blade_finish, handle_color, condition, location\n\n"
+    "  blade_finish, handle_color, handle_type, location\n\n"
     "filters: ARRAY of {\"field\": \"...\", \"op\": \"...\", \"value\": ...} for required matches. Always an array, never a dict.\n"
     "exclusions: ARRAY of {\"field\": \"...\", \"op\": \"...\", \"value\": ...} for NOT/except/exclude conditions. Always an array, never a dict.\n"
     "  Trigger words: 'exclude', 'except', 'without', 'if you take out', 'minus', 'not counting',\n"
@@ -98,9 +102,8 @@ _PLANNER_SYSTEM = (
     "                 {\"field\": \"series_name\",  \"op\": \"=\", \"value\": \"Traditions\"}]\n"
     "  Allowed fields: series_name, family_name, knife_type, form_name, collaborator_name,\n"
     "    steel, blade_finish, blade_color, handle_color, handle_type, blade_length,\n"
-    "    condition, location, knife_name, official_name, record_status, acquired_date,\n"
-    "    purchase_price, estimated_value, msrp, quantity, purchase_source,\n"
-    "    generation_label, size_modifier, text_search\n"
+    "    location, knife_name, official_name, acquired_date,\n"
+    "    purchase_price, msrp, quantity, text_search\n"
     "  Field glossary — use the correct field; do NOT mix up knife_type and knife_name:\n"
     "    knife_type     — knife CATEGORY, e.g. 'Hunting', 'Tactical', 'Everyday Carry', 'Culinary'.\n"
     "                     Never put a knife model name (e.g. 'Blackfoot 2.0') in knife_type.\n"
@@ -298,7 +301,6 @@ def _reporting_has_substantive_rows(intent: Optional[str], rows: list[dict[str, 
     numeric_keys = (
         "rows_count",
         "total_spend",
-        "total_estimated_value",
         "missing_models_count",
         "estimated_completion_cost_msrp",
     )
