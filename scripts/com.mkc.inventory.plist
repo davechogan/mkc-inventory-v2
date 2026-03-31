@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.mkc.inventory</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/dhogan/invapp_v2/.venv/bin/python3</string>
+        <string>-c</string>
+        <string>
+import resource, os
+os.chdir('/Users/dhogan/invapp_v2')
+try:
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    resource.setrlimit(resource.RLIMIT_NOFILE, (min(4096, hard), hard))
+except Exception:
+    pass
+import uvicorn
+uvicorn.run('app:app', host='0.0.0.0', port=8008)
+        </string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/dhogan/invapp_v2</string>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/mkc_app.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/tmp/mkc_app.log</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/Users/dhogan/invapp_v2/.venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+</dict>
+</plist>
