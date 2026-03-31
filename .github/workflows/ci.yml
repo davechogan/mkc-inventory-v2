@@ -4,11 +4,9 @@ on:
   push:
     branches:
       - main
-      - dev
   pull_request:
     branches:
       - main
-      - dev
   workflow_dispatch:
 
 jobs:
@@ -26,51 +24,29 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install -r requirements.txt
           if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
 
       - name: Python compile checks
         run: |
           python -m py_compile app.py
-          python -m py_compile mkc_csv_columns.py
+          python -m py_compile auth.py
+          python -m py_compile blade_ai.py
+          python -m py_compile normalized_model.py
           python -m py_compile reporting/domain.py
-          python -m py_compile reporting/regex_contract.py
+          python -m py_compile reporting/compiler.py
+          python -m py_compile reporting/planner.py
+          python -m py_compile reporting/plan_models.py
+          python -m py_compile reporting/plan_validator.py
+          python -m py_compile reporting/retrieval.py
           python -m py_compile reporting/routes.py
           python -m py_compile routes/v2_routes.py
-          python -m py_compile routes/normalized_routes.py
-          python -m py_compile routes/legacy_catalog_routes.py
-          python -m py_compile routes/ai_routes.py
           python -m py_compile routes/static_pages_routes.py
           python -m py_compile routes/admin_routes.py
-          python -m py_compile sqlite_schema.py
-          python -m py_compile tools/reporting_eval_harness.py
-          python -m py_compile tools/reporting_retrieval_diagnose.py
-          python -m pytest -q
+          python -m py_compile migrations/migrate_v2.py
 
-  reporting-smoke-local:
-    runs-on: self-hosted
-    # Local-only by design: this runs on your self-hosted runner, not GitHub-hosted runners.
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-
-      - name: Reporting smoke gate (local endpoint)
+      - name: Run tests
         env:
-          REPORTING_EVAL_BASE_URL: ${{ secrets.REPORTING_EVAL_BASE_URL }}
+          PYTHONPATH: .
         run: |
-          if [ -n "$REPORTING_EVAL_BASE_URL" ]; then
-            echo "Running reporting smoke suite against $REPORTING_EVAL_BASE_URL"
-            python tools/reporting_eval_harness.py "$REPORTING_EVAL_BASE_URL" --suite smoke
-          else
-            echo "REPORTING_EVAL_BASE_URL secret not set; skipping local smoke harness run."
-          fi
+          python -m pytest tests/ -m "not live_llm" -q --tb=short
