@@ -880,19 +880,20 @@ export default function Reporting() {
 
           {/* Chat panel — collapsible right side */}
           {chatOpen ? (
-          <div className="flex-shrink-0 w-[480px] overflow-hidden relative"
+          <div className="flex-shrink-0 w-[480px] overflow-hidden"
             style={{ borderLeft: '1px solid #1d2329' }}>
-            {/* Collapse chevron */}
-            <button onClick={() => setChatOpen(false)} title="Collapse chat"
-              className="absolute top-3 left-2 z-10 text-muted hover:text-ink transition-colors p-1 rounded-md hover:bg-border/30">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="9 18 15 12 9 6" />
-              </svg>
-            </button>
             <div className="flex flex-col h-full w-[480px]" style={{ backgroundColor: '#060709' }}>
               {/* Chat header */}
               <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
-                <span className="text-muted text-xs uppercase tracking-widest ml-7">Chat</span>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setChatOpen(false)} title="Collapse chat"
+                    className="text-muted hover:text-ink transition-colors p-1 rounded-md hover:bg-border/30">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="9 18 15 12 9 6" />
+                    </svg>
+                  </button>
+                  <span className="text-muted text-xs uppercase tracking-widest">Chat</span>
+                </div>
                 {sessionId && (
                   <span className="text-muted text-xs truncate max-w-[200px]">
                     {sessions.find((s) => s.id === sessionId)?.title ?? ''}
