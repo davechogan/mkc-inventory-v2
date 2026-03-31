@@ -765,12 +765,21 @@ def create_v2_router(
     def v2_get_model_image(model_id: int):
         with get_conn() as conn:
             row = conn.execute(
-                "SELECT image_blob, image_mime FROM knife_model_images WHERE knife_model_id = ?",
+                "SELECT image_blob, image_mime, updated_at FROM knife_model_images WHERE knife_model_id = ?",
                 (model_id,),
             ).fetchone()
-            if not row or not row.get("image_blob"):
+            if not row or not row["image_blob"]:
                 raise HTTPException(status_code=404, detail="No stored reference image for this model.")
-            return Response(content=row["image_blob"], media_type=(row.get("image_mime") or "image/jpeg"))
+            import hashlib
+            etag = hashlib.md5(f"model:{model_id}:{row['updated_at']}".encode()).hexdigest()
+            return Response(
+                content=row["image_blob"],
+                media_type=(row["image_mime"] or "image/jpeg"),
+                headers={
+                    "Cache-Control": "public, max-age=604800",
+                    "ETag": f'"{etag}"',
+                },
+            )
 
 
     @router.post("/api/v2/models/{model_id}/image")
@@ -840,16 +849,28 @@ def create_v2_router(
     # ── model_colorways endpoints ──────────────────────────────────────
 
     @router.get("/api/v2/colorway-images/{colorway_id}")
-    def v2_get_colorway_image(colorway_id: int):
-        """Serve the PNG blob for a colorway."""
+    def v2_get_colorway_image(colorway_id: int, request: Request):
+        """Serve the PNG blob for a colorway with cache headers + ETag."""
         with get_conn() as conn:
             row = conn.execute(
-                "SELECT image_blob FROM model_colorways WHERE id = ?",
+                "SELECT image_blob, updated_at FROM model_colorways WHERE id = ?",
                 (colorway_id,),
             ).fetchone()
             if not row or not row["image_blob"]:
                 raise HTTPException(status_code=404, detail="No image for this colorway.")
-            return Response(content=row["image_blob"], media_type="image/png")
+            import hashlib
+            etag = hashlib.md5(f"{colorway_id}:{row['updated_at']}".encode()).hexdigest()
+            # Return 304 if browser has the same version cached
+            if request.headers.get("if-none-match") == f'"{etag}"':
+                return Response(status_code=304, headers={"ETag": f'"{etag}"', "Cache-Control": "public, max-age=604800"})
+            return Response(
+                content=row["image_blob"],
+                media_type="image/png",
+                headers={
+                    "Cache-Control": "public, max-age=604800",
+                    "ETag": f'"{etag}"',
+                },
+            )
 
     @router.get("/api/v2/models/{model_id}/colorways")
     def v2_list_colorways(model_id: int):
