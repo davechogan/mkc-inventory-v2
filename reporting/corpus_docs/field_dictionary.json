@@ -116,7 +116,7 @@
       "storage",
       "where kept"
     ],
-    "content": "location is the canonical dimension for storage or physical location. If the user says safe 1, drawer, case, or where the knives are stored, use location.",
+    "content": "location is where an inventory item is stored (e.g. Home, Office, EDC). Available only in inventory scope. Use when the user asks where knives are or wants to filter by location.",
     "canonical_field": "location",
     "aliases": [
       "location",
@@ -161,20 +161,20 @@
     "kind": "field",
     "artifact_id": "field.purchase_price",
     "tags": [
-      "purchase price",
-      "paid",
-      "cost",
       "price",
+      "cost",
+      "paid",
+      "expensive",
+      "cheapest",
       "spend"
     ],
-    "content": "purchase_price is the per-row amount paid for an owned knife. total_spend is derived from purchase_price times quantity. If the user asks 'what did I spend' or 'what did I pay', purchase_price feeds the spend metric.",
+    "content": "purchase_price is the amount paid for an inventory item. Use for filtering (e.g. \"knives over 500\"), sorting (e.g. \"most expensive\", \"cheapest\"), and the total_spend metric. This is the actual price paid, which may differ from MSRP. Available only in inventory scope.",
     "canonical_field": "purchase_price",
     "aliases": [
-      "purchase price",
-      "paid",
-      "cost",
       "price",
-      "what I paid"
+      "cost",
+      "paid",
+      "purchase price"
     ]
   },
   {
@@ -186,7 +186,7 @@
       "list price",
       "retail price"
     ],
-    "content": "msrp is the manufacturer's suggested retail price. Use for completion-cost style questions or when the user explicitly asks about MSRP rather than purchase price.",
+    "content": "msrp is the manufacturer suggested retail price on the catalog model. Use when the user asks about retail price, list price, or MSRP. Available in catalog scope. For actual purchase price of owned knives, use purchase_price in inventory scope.",
     "canonical_field": "msrp",
     "aliases": [
       "msrp",
@@ -243,7 +243,7 @@
       "bronze",
       "sniper grey"
     ],
-    "content": "blade_color is the canonical field for the blade color. Use when the user asks about black, bronze, sniper grey, or other blade color values. Available in inventory reports (derived from colorway data).",
+    "content": "blade_color is the blade color of an inventory item, derived from its colorway. Available in inventory reports. Most knives have a standard blade color; only tactical and special models vary.",
     "canonical_field": "blade_color",
     "aliases": [
       "blade color",
@@ -260,7 +260,7 @@
       "fde",
       "black handle"
     ],
-    "content": "handle_color is the canonical field for the handle color. Use when the user asks about handle color, OD green, FDE, black, or other handle color values. Available in inventory reports (derived from colorway data). Can be used as a filter or group_by dimension.",
+    "content": "handle_color is the handle color of an inventory item, derived from its colorway. Available in inventory reports. Use for filtering by color (e.g. \"my orange/black knives\") or grouping (e.g. \"how many by handle color\").",
     "canonical_field": "handle_color",
     "aliases": [
       "handle color",
@@ -277,7 +277,7 @@
       "micarta",
       "carbon fiber"
     ],
-    "content": "handle_type is the canonical field for handle material or construction type. Use when the user asks about G10, Micarta, Carbon Fiber, or other handle material values.",
+    "content": "handle_type is the handle material (e.g. G-10, Paracord, Desert Ironwood). Available in both inventory and catalog reports.",
     "canonical_field": "handle_type",
     "aliases": [
       "handle type",

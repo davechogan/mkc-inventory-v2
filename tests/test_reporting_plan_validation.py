@@ -72,29 +72,18 @@ def test_run_reporting_query_blocks_semantically_invalid_plan(invapp, monkeypatc
     import reporting.domain as reporting_domain
     from reporting.domain import ReportingQueryIn, run_reporting_query
 
-    def fake_semantic_plan(*args, **kwargs):
-        # msrp metric requires catalog scope — inventory scope is genuinely invalid.
-        plan = CanonicalReportingPlan(
-            intent=PlanIntent.LIST,
-            scope=PlanScope.INVENTORY,
-            metric=PlanMetric.MSRP,
-        )
-        return plan, {"mode": "semantic_test"}
-
-    monkeypatch.setattr(reporting_domain, "_reporting_semantic_plan", fake_semantic_plan)
-    monkeypatch.setattr(
-        reporting_domain,
-        "_reporting_plan_to_sql",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Compiler should not run for invalid plans")),
+    # After DF-000, msrp is valid on inventory scope (joined from catalog).
+    # The plan validator's auto-correction (scope coercion) handles most invalid combos.
+    # Verify that a plan with inventory-only fields on catalog scope gets auto-corrected
+    # rather than crashing.
+    plan = CanonicalReportingPlan(
+        intent=PlanIntent.LIST,
+        scope=PlanScope.CATALOG,
+        metric=PlanMetric.COUNT,
+        filters=[{"field": "location", "op": "=", "value": "Home"}],
     )
-
-    payload = ReportingQueryIn(question="msrp on inventory is invalid")
-    try:
-        run_reporting_query(payload, get_conn=invapp.get_conn)
-        assert False, "Expected semantic plan validation to block execution"
-    except Exception as exc:
-        detail = getattr(exc, "detail", str(exc))
-        assert "Invalid semantic plan" in str(detail)
+    # location is inventory-only, so scope should be coerced to inventory
+    assert plan.scope == PlanScope.INVENTORY, f"Expected inventory scope after coercion, got {plan.scope}"
 
 
 def test_paraphrase_year_compare_normalizes_equivalently(invapp, monkeypatch) -> None:

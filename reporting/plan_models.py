@@ -206,8 +206,28 @@ class CanonicalReportingPlan(BaseModel):
     @classmethod
     def _coerce_metric(cls, v: object) -> object:
         # LLM sometimes returns null for metric on list intents where metric is irrelevant.
-        # Default to count rather than failing validation.
         if v is None:
+            return PlanMetric.COUNT
+        # Coerce common LLM metric mistakes to valid values
+        s = str(v).strip().lower()
+        _METRIC_ALIASES = {
+            "purchase_price": "total_spend",
+            "price": "total_spend",
+            "spend": "total_spend",
+            "cost": "total_spend",
+            "value": "total_spend",
+            "worth": "total_spend",
+            "estimated_value": "total_spend",
+            "total": "total_spend",
+            "quantity": "count",
+            "num": "count",
+            "number": "count",
+        }
+        if s in _METRIC_ALIASES:
+            return _METRIC_ALIASES[s]
+        # If it's not a valid enum value, default to count
+        valid = {m.value for m in PlanMetric}
+        if s not in valid:
             return PlanMetric.COUNT
         return v
 
