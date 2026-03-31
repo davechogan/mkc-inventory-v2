@@ -615,6 +615,7 @@ export default function Reporting() {
     }
   };
 
+  const [chatOpen, setChatOpen] = useState(true);
   const isEmpty = messages.length === 0;
   const marginClass = sidebarCollapsed ? 'ml-16' : 'ml-56';
 
@@ -625,14 +626,7 @@ export default function Reporting() {
       <main className={`${marginClass} transition-[margin] duration-200 flex flex-col h-screen`}>
         {/* Top bar */}
         <div className="flex items-center justify-between px-8 py-4 border-b border-border flex-shrink-0">
-          <div className="flex items-center gap-3">
-            <h1 className="text-ink text-xl font-bold">Reporting</h1>
-            {sessionId && (
-              <span className="text-muted text-xs truncate max-w-[240px]">
-                {sessions.find((s) => s.id === sessionId)?.title ?? ''}
-              </span>
-            )}
-          </div>
+          <h1 className="text-ink text-xl font-bold">Reporting</h1>
           <div className="flex items-center gap-2">
             <button
               onClick={handleNewChat}
@@ -651,12 +645,25 @@ export default function Reporting() {
             >
               History
             </button>
+            <button
+              onClick={() => setChatOpen((v) => !v)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs transition-colors ${
+                chatOpen
+                  ? 'border-gold/40 text-gold bg-gold/5'
+                  : 'border-border text-muted hover:text-ink hover:border-border/70'
+              }`}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              </svg>
+              Chat
+            </button>
           </div>
         </div>
 
-        {/* Body */}
+        {/* Body — dashboard + chat panel */}
         <div className="flex flex-1 overflow-hidden">
-          {/* Sessions panel */}
+          {/* Sessions panel (inside chat area) */}
           <div className={`flex-shrink-0 transition-[width] duration-200 ${sessionsPanelOpen ? 'w-60' : 'w-0'} overflow-hidden`}>
             <SessionsSidebar
               sessions={sessions}
@@ -666,82 +673,122 @@ export default function Reporting() {
             />
           </div>
 
-          {/* Chat area */}
-          <div className="flex-1 flex flex-col overflow-hidden">
-            {/* Messages */}
-            <div className="flex-1 overflow-y-auto px-8 py-6">
-              {isEmpty ? (
-                // Welcome / suggestions
-                <div className="max-w-xl mx-auto flex flex-col items-center gap-6 pt-12">
-                  <div className="w-16 h-16 rounded-full overflow-hidden ring-2 ring-gold/30 bg-surface">
-                    <img src="/static/logo.png" alt="MKC" className="w-full h-full object-cover" />
-                  </div>
-                  <div className="text-center">
-                    <h2 className="text-ink text-lg font-bold">Ask about your collection</h2>
-                    <p className="text-muted text-sm mt-1">Natural language queries over your inventory and the MKC catalog.</p>
-                  </div>
-                  <div className="w-full flex flex-col gap-2">
-                    {suggestions.map((q, i) => (
-                      <button
-                        key={i}
-                        onClick={() => void handleSend(q)}
-                        className="w-full text-left px-4 py-3 rounded-xl border border-border bg-card hover:border-gold/30 hover:bg-gold/5 transition-colors text-sm text-ink/80"
-                      >
-                        {q}
-                      </button>
-                    ))}
-                  </div>
+          {/* Dashboard area */}
+          <div className="flex-1 overflow-y-auto p-8">
+            {isEmpty && !chatOpen ? (
+              // Full welcome when chat is closed and no messages
+              <div className="max-w-xl mx-auto flex flex-col items-center gap-6 pt-12">
+                <div className="w-16 h-16 rounded-full overflow-hidden ring-2 ring-gold/30 bg-surface">
+                  <img src="/static/logo.png" alt="MKC" className="w-full h-full object-cover" />
                 </div>
-              ) : (
-                <div className="max-w-2xl mx-auto flex flex-col gap-6">
-                  {messages.map((msg) => (
-                    msg.role === 'user' ? (
-                      // User message
-                      <div key={msg.id} className="flex justify-end">
-                        <div className="max-w-[80%] bg-gold/10 border border-gold/20 rounded-2xl rounded-tr-sm px-4 py-3 text-ink text-sm">
-                          {msg.content}
-                        </div>
-                      </div>
-                    ) : (
-                      // Assistant message
-                      <AssistantMessage
-                        key={msg.id}
-                        msg={msg}
-                        sessionId={sessionId}
-                        onFollowUp={(q) => void handleSend(q)}
-                      />
-                    )
-                  ))}
-                  <div ref={messagesEndRef} />
+                <div className="text-center">
+                  <h2 className="text-ink text-lg font-bold">Reporting Dashboard</h2>
+                  <p className="text-muted text-sm mt-1">Open the chat panel to ask questions about your collection. Pin results here to build your dashboard.</p>
                 </div>
-              )}
-            </div>
+                <button onClick={() => setChatOpen(true)}
+                  className="px-4 py-2 rounded-lg bg-gold text-black text-sm font-semibold hover:bg-gold-bright transition-colors">
+                  Open Chat
+                </button>
+              </div>
+            ) : !chatOpen ? (
+              // Dashboard placeholder when chat is closed but we have messages
+              <div className="max-w-3xl mx-auto">
+                <div className="text-center py-12">
+                  <p className="text-muted text-sm">Dashboard widgets will appear here when you pin results from the chat.</p>
+                  <button onClick={() => setChatOpen(true)}
+                    className="mt-4 px-4 py-2 rounded-lg border border-border text-muted hover:text-ink text-sm transition-colors">
+                    Open Chat
+                  </button>
+                </div>
+              </div>
+            ) : (
+              // When chat is open, dashboard area is empty/minimal
+              <div className="flex items-center justify-center h-full">
+                <div className="text-center">
+                  <p className="text-muted/40 text-sm">Pin results from chat to build your dashboard</p>
+                </div>
+              </div>
+            )}
+          </div>
 
-            {/* Input */}
-            <div className="px-8 py-4 border-t border-border flex-shrink-0">
-              <div className="max-w-2xl mx-auto">
+          {/* Chat panel — collapsible right side */}
+          <div className={`flex-shrink-0 transition-[width] duration-200 overflow-hidden ${chatOpen ? 'w-[480px]' : 'w-0'}`}
+            style={{ borderLeft: chatOpen ? '1px solid #1d2329' : 'none' }}>
+            <div className="flex flex-col h-full w-[480px]" style={{ backgroundColor: '#060709' }}>
+              {/* Chat header */}
+              <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
+                <span className="text-muted text-xs uppercase tracking-widest">Chat</span>
+                {sessionId && (
+                  <span className="text-muted text-xs truncate max-w-[200px]">
+                    {sessions.find((s) => s.id === sessionId)?.title ?? ''}
+                  </span>
+                )}
+              </div>
+
+              {/* Messages */}
+              <div className="flex-1 overflow-y-auto px-4 py-4">
+                {isEmpty ? (
+                  <div className="flex flex-col items-center gap-4 pt-8">
+                    <div className="w-12 h-12 rounded-full overflow-hidden ring-2 ring-gold/30 bg-surface">
+                      <img src="/static/logo.png" alt="MKC" className="w-full h-full object-cover" />
+                    </div>
+                    <p className="text-muted text-sm text-center">Ask about your collection</p>
+                    <div className="w-full flex flex-col gap-1.5">
+                      {suggestions.slice(0, 4).map((q, i) => (
+                        <button key={i} onClick={() => void handleSend(q)}
+                          className="w-full text-left px-3 py-2 rounded-lg border border-border bg-card hover:border-gold/30 hover:bg-gold/5 transition-colors text-xs text-ink/80">
+                          {q}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-5">
+                    {messages.map((msg) => (
+                      msg.role === 'user' ? (
+                        <div key={msg.id} className="flex justify-end">
+                          <div className="max-w-[85%] bg-gold/10 border border-gold/20 rounded-2xl rounded-tr-sm px-3 py-2 text-ink text-sm">
+                            {msg.content}
+                          </div>
+                        </div>
+                      ) : (
+                        <AssistantMessage
+                          key={msg.id}
+                          msg={msg}
+                          sessionId={sessionId}
+                          onFollowUp={(q) => void handleSend(q)}
+                        />
+                      )
+                    ))}
+                    <div ref={messagesEndRef} />
+                  </div>
+                )}
+              </div>
+
+              {/* Input */}
+              <div className="px-4 py-3 border-t border-border flex-shrink-0">
                 <div className="relative flex items-end gap-2 bg-card border border-border rounded-xl focus-within:border-gold/50 transition-colors">
                   <textarea
                     ref={inputRef}
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    placeholder="Ask about your collection…"
+                    placeholder="Ask about your collection..."
                     rows={1}
                     disabled={loading}
-                    className="flex-1 px-4 py-3 bg-transparent resize-none text-sm text-ink placeholder:text-muted focus:outline-none min-h-[44px] max-h-32 disabled:opacity-50"
+                    className="flex-1 px-3 py-2.5 bg-transparent resize-none text-sm text-ink placeholder:text-muted focus:outline-none min-h-[40px] max-h-28 disabled:opacity-50"
                     style={{ lineHeight: '1.5' }}
                   />
                   <button
                     onClick={() => void handleSend(input)}
                     disabled={!input.trim() || loading}
-                    className="flex-shrink-0 m-2 w-8 h-8 rounded-lg bg-gold text-black flex items-center justify-center hover:bg-gold-bright disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                    className="flex-shrink-0 m-1.5 w-7 h-7 rounded-lg bg-gold text-black flex items-center justify-center hover:bg-gold-bright disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                   >
                     <IconSend />
                   </button>
                 </div>
-                <div className="text-center mt-1.5">
-                  <span className="text-muted/40 text-xs">Enter to send · Shift+Enter for new line</span>
+                <div className="text-center mt-1">
+                  <span className="text-muted/30 text-[10px]">Enter to send · Shift+Enter for new line</span>
                 </div>
               </div>
             </div>
