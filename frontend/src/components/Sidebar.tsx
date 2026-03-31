@@ -64,10 +64,24 @@ interface NavItem {
   active: boolean;
 }
 
+interface AuthUser {
+  email: string;
+  name: string | null;
+  role: string;
+}
+
 export function Sidebar() {
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     return localStorage.getItem(STORAGE_KEY) === 'true';
   });
+  const [user, setUser] = useState<AuthUser | null>(null);
+
+  useEffect(() => {
+    fetch('/api/v2/me')
+      .then(r => r.json())
+      .then(d => { if (d.authenticated) setUser(d.user as AuthUser); })
+      .catch(() => {});
+  }, []);
 
   const currentPath = window.location.pathname;
 
@@ -153,6 +167,27 @@ export function Sidebar() {
           </a>
         ))}
       </nav>
+
+      {/* User info */}
+      {user && (
+        <div className={`border-t border-border px-3 py-3 flex-shrink-0 ${collapsed ? 'flex justify-center' : ''}`}>
+          {collapsed ? (
+            <div className="w-7 h-7 rounded-full bg-gold/20 flex items-center justify-center text-gold text-xs font-bold" title={user.email}>
+              {user.email[0].toUpperCase()}
+            </div>
+          ) : (
+            <div className="flex items-center gap-2.5">
+              <div className="w-7 h-7 rounded-full bg-gold/20 flex items-center justify-center text-gold text-xs font-bold flex-shrink-0">
+                {user.email[0].toUpperCase()}
+              </div>
+              <div className="min-w-0">
+                <div className="text-ink text-xs font-medium truncate">{user.name ?? user.email.split('@')[0]}</div>
+                <div className="text-muted text-[10px] truncate">{user.email}</div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </aside>
   );
 }

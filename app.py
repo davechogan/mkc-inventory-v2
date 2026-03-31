@@ -1357,6 +1357,11 @@ class IdentifierQuery(BaseModel):
 
 app = FastAPI(title="MKC Inventory Manager")
 init_db()
+
+# Auth middleware — captures Cloudflare Access identity headers
+from auth import CloudflareAccessMiddleware
+app.add_middleware(CloudflareAccessMiddleware, get_conn=get_conn)
+
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 # ---------------------------------------------------------------------------

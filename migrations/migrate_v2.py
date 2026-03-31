@@ -94,6 +94,16 @@ def ensure_v2_exclusive_schema(conn: sqlite3.Connection) -> None:
         );
         CREATE UNIQUE INDEX IF NOT EXISTS uq_model_colorway
             ON model_colorways (knife_model_id, handle_color_id, COALESCE(blade_color_id, -1));
+
+        CREATE TABLE IF NOT EXISTS users (
+            id          TEXT PRIMARY KEY,
+            email       TEXT NOT NULL UNIQUE,
+            name        TEXT,
+            tenant_id   TEXT NOT NULL DEFAULT 'default',
+            role        TEXT NOT NULL DEFAULT 'user',
+            first_seen  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            last_seen   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
         """
     )
 

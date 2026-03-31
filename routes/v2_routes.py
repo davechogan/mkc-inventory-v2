@@ -11,7 +11,7 @@ from typing import Any, Optional, Type
 
 import blade_ai
 import normalized_model
-from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Body, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field, field_validator
 
@@ -399,6 +399,24 @@ def create_v2_router(
                 "collaboration": pluck(collab_vals),
             }
 
+
+    @router.get("/api/v2/me")
+    def v2_me(request: Request):
+        """Return the current authenticated user's profile, or null if unauthenticated."""
+        from auth import get_current_user
+        user = get_current_user(request)
+        if not user:
+            return {"authenticated": False, "user": None}
+        return {
+            "authenticated": True,
+            "user": {
+                "id": user.id,
+                "email": user.email,
+                "name": user.name,
+                "tenant_id": user.tenant_id,
+                "role": user.role,
+            },
+        }
 
     @router.get("/api/v2/colors")
     def v2_colors():
