@@ -15,7 +15,7 @@ const SIDEBAR_KEY = 'mkc_sidebar_collapsed';
 
 function getInitialView(): ViewMode {
   const stored = localStorage.getItem(VIEW_KEY);
-  return stored === 'cards' ? 'cards' : 'table';
+  return stored === 'table' ? 'table' : 'cards';
 }
 
 const emptyFilters: FilterState = {
