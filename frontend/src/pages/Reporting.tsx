@@ -716,7 +716,9 @@ export default function Reporting() {
   );
   const [sessionsPanelOpen, setSessionsPanelOpen] = useState(false);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(
+    () => localStorage.getItem('mkc_reporting_session') || null
+  );
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -735,10 +737,49 @@ export default function Reporting() {
     return () => window.removeEventListener('mkc-sidebar-toggle', handler);
   }, []);
 
-  // Load initial data
+  // Persist session ID to localStorage
+  useEffect(() => {
+    if (sessionId) {
+      localStorage.setItem('mkc_reporting_session', sessionId);
+    } else {
+      localStorage.removeItem('mkc_reporting_session');
+    }
+  }, [sessionId]);
+
+  // Load initial data + restore session if saved
   useEffect(() => {
     fetchSuggestedQuestions().then(setSuggestions).catch(() => {});
     fetchSessions().then(setSessions).catch(() => {});
+    // Restore saved session messages
+    const saved = localStorage.getItem('mkc_reporting_session');
+    if (saved) {
+      fetchSession(saved).then((stored) => {
+        if (stored.length > 0) {
+          const converted: Message[] = stored.map((m) => ({
+            id: nextId(),
+            role: m.role,
+            content: m.content,
+            data: m.role === 'assistant' && m.result
+              ? {
+                  session_id: saved,
+                  answer_text: m.content,
+                  columns: m.result.columns ?? [],
+                  rows: m.result.rows ?? [],
+                  chart_spec: null,
+                  sql_executed: null,
+                  follow_ups: [],
+                  confidence: null,
+                  limitations: null,
+                  generation_mode: null,
+                  execution_ms: null,
+                  assistant_message_id: m.id,
+                }
+              : undefined,
+          }));
+          setMessages(converted);
+        }
+      }).catch(() => {});
+    }
   }, []);
 
   // Scroll to bottom on new messages
@@ -818,6 +859,7 @@ export default function Reporting() {
     setSessionId(null);
     setMessages([]);
     setSessionsPanelOpen(false);
+    localStorage.removeItem('mkc_reporting_session');
     inputRef.current?.focus();
   }, []);
 

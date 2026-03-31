@@ -832,7 +832,30 @@ class ReportingFeedbackIn(BaseModel):
     helpful: bool
 
 
+_SESSION_TTL_DAYS = 30
+
+def _reporting_cleanup_old_sessions(conn: sqlite3.Connection) -> int:
+    """Delete sessions and their messages older than TTL. Returns count deleted."""
+    cutoff = f"datetime('now', '-{_SESSION_TTL_DAYS} days')"
+    old = conn.execute(f"SELECT id FROM reporting_sessions WHERE updated_at < {cutoff}").fetchall()
+    if not old:
+        return 0
+    old_ids = [r["id"] for r in old]
+    for sid in old_ids:
+        conn.execute("DELETE FROM reporting_messages WHERE session_id = ?", (sid,))
+    conn.execute(f"DELETE FROM reporting_sessions WHERE updated_at < {cutoff}")
+    return len(old_ids)
+
+
 def _reporting_create_session(conn: sqlite3.Connection, model_default: Optional[str] = None) -> dict[str, Any]:
+    # Opportunistic cleanup of old sessions
+    try:
+        cleaned = _reporting_cleanup_old_sessions(conn)
+        if cleaned:
+            logging.getLogger("mkc_app").info("Cleaned up %d old reporting sessions", cleaned)
+    except Exception:
+        pass
+
     sid = str(uuid.uuid4())
     conn.execute(
         """
