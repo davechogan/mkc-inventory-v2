@@ -492,6 +492,215 @@ function SessionsSidebar({
   );
 }
 
+// ── Dashboard ────────────────────────────────────────────────────────────────
+
+const CHART_GOLD = '#c8921a';
+const CHART_GOLD_BRIGHT = '#e8a820';
+
+interface DashboardItem {
+  knife_name: string;
+  handle_color: string | null;
+  purchase_price: number | null;
+  acquired_date: string | null;
+  quantity: number;
+  knife_model_id: number;
+  colorway_image_url: string | null;
+  knife_family: string | null;
+}
+
+interface CatalogGap {
+  id: number;
+  official_name: string;
+  msrp: number | null;
+  blade_steel: string | null;
+  family_name: string | null;
+}
+
+function Dashboard() {
+  const [items, setItems] = useState<DashboardItem[]>([]);
+  const [summary, setSummary] = useState<{ total_quantity: number; total_spend: number; by_family: { family: string; total_quantity: number }[] } | null>(null);
+  const [gaps, setGaps] = useState<CatalogGap[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.all([
+      fetch('/api/v2/inventory').then(r => r.json()) as Promise<DashboardItem[]>,
+      fetch('/api/v2/inventory/summary').then(r => r.json()),
+      fetch('/api/v2/catalog').then(r => r.json()),
+    ]).then(([inv, sum, catalog]) => {
+      setItems(inv);
+      setSummary(sum);
+      // Compute catalog gaps
+      const ownedIds = new Set(inv.map((i: DashboardItem) => i.knife_model_id));
+      const missing = (catalog as CatalogGap[]).filter(m => !ownedIds.has(m.id) && m.msrp);
+      missing.sort((a, b) => (b.msrp ?? 0) - (a.msrp ?? 0));
+      setGaps(missing);
+    }).catch(() => {}).finally(() => setLoading(false));
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        {Array.from({ length: 6 }).map((_, i) => <div key={i} className="skeleton h-48 rounded-xl" />)}
+      </div>
+    );
+  }
+
+  // Compute data
+  const latest = [...items].filter(i => i.acquired_date).sort((a, b) => (b.acquired_date ?? '').localeCompare(a.acquired_date ?? ''))[0];
+
+  const familyData = (summary?.by_family ?? [])
+    .sort((a, b) => b.total_quantity - a.total_quantity)
+    .slice(0, 15)
+    .map(f => ({ name: f.family, count: f.total_quantity }));
+
+  const monthlySpend: Record<string, number> = {};
+  for (const i of items) {
+    if (i.acquired_date && i.purchase_price) {
+      const month = i.acquired_date.slice(0, 7);
+      monthlySpend[month] = (monthlySpend[month] ?? 0) + (i.purchase_price * (i.quantity || 1));
+    }
+  }
+  const spendData = Object.entries(monthlySpend)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([month, amount]) => ({
+      month: new Date(month + '-01').toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
+      amount: Math.round(amount),
+    }));
+
+  const topKnives = [...items]
+    .filter(i => i.purchase_price)
+    .sort((a, b) => (b.purchase_price ?? 0) - (a.purchase_price ?? 0))
+    .slice(0, 5);
+
+  const cardCls = "bg-card border border-border rounded-xl p-5 flex flex-col";
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+      {/* Text card: Collection Value */}
+      <div className={cardCls}>
+        <div className="text-muted text-xs uppercase tracking-widest mb-3">Collection Value</div>
+        <div className="text-gold text-3xl font-bold">
+          ${(summary?.total_spend ?? 0).toLocaleString('en-US', { minimumFractionDigits: 0 })}
+        </div>
+        <div className="text-muted text-sm mt-1">
+          {summary?.total_quantity ?? 0} knives across {summary?.by_family?.length ?? 0} families
+        </div>
+      </div>
+
+      {/* Text card: Latest Addition */}
+      <div className={cardCls}>
+        <div className="text-muted text-xs uppercase tracking-widest mb-3">Latest Addition</div>
+        {latest ? (
+          <>
+            <div className="flex items-center gap-3">
+              {latest.colorway_image_url && (
+                <img src={latest.colorway_image_url} alt="" className="w-12 h-9 object-contain rounded bg-surface border border-border" />
+              )}
+              <div>
+                <div className="text-ink text-sm font-semibold">{latest.knife_name}</div>
+                {latest.handle_color && <div className="text-muted text-xs">{latest.handle_color}</div>}
+              </div>
+            </div>
+            <div className="text-muted text-xs mt-2">
+              {latest.acquired_date && new Date(latest.acquired_date + 'Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+              {latest.purchase_price && ` · $${latest.purchase_price.toLocaleString()}`}
+            </div>
+          </>
+        ) : (
+          <div className="text-muted text-sm">No items yet</div>
+        )}
+      </div>
+
+      {/* Chart: Collection by Family */}
+      <div className={`${cardCls} md:col-span-2 xl:col-span-1`}>
+        <div className="text-muted text-xs uppercase tracking-widest mb-3">Collection by Family</div>
+        <div className="flex-1 min-h-[200px]">
+          <ChartErrorBoundary>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={familyData} layout="vertical" margin={{ left: 70 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1d2329" />
+                <XAxis type="number" tick={{ fill: '#7a8899', fontSize: 10 }} />
+                <YAxis type="category" dataKey="name" tick={{ fill: '#7a8899', fontSize: 10 }} width={70} />
+                <Tooltip contentStyle={{ backgroundColor: '#0f1114', border: '1px solid #1d2329', borderRadius: 8, fontSize: 12 }} />
+                <Bar dataKey="count" fill={CHART_GOLD} radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartErrorBoundary>
+        </div>
+      </div>
+
+      {/* Chart: Spend by Month */}
+      <div className={`${cardCls} md:col-span-2 xl:col-span-2`}>
+        <div className="text-muted text-xs uppercase tracking-widest mb-3">Spend by Month</div>
+        <div className="flex-1 min-h-[200px]">
+          <ChartErrorBoundary>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={spendData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1d2329" />
+                <XAxis dataKey="month" tick={{ fill: '#7a8899', fontSize: 10 }} angle={-30} textAnchor="end" height={50} />
+                <YAxis tick={{ fill: '#7a8899', fontSize: 10 }} tickFormatter={(v: number) => `$${(v / 1000).toFixed(0)}k`} />
+                <Tooltip contentStyle={{ backgroundColor: '#0f1114', border: '1px solid #1d2329', borderRadius: 8, fontSize: 12 }}
+                  formatter={(value) => [`$${Number(value).toLocaleString()}`, 'Spent']} />
+                <Bar dataKey="amount" fill={CHART_GOLD_BRIGHT} radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartErrorBoundary>
+        </div>
+      </div>
+
+      {/* Grid: Most Expensive */}
+      <div className={`${cardCls} xl:col-span-1`}>
+        <div className="text-muted text-xs uppercase tracking-widest mb-3">Most Expensive</div>
+        <div className="flex flex-col gap-2">
+          {topKnives.map((k, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <span className="text-muted/40 text-xs w-4">{i + 1}.</span>
+              {k.colorway_image_url && (
+                <img src={k.colorway_image_url} alt="" className="w-8 h-6 object-contain rounded bg-surface" />
+              )}
+              <span className="text-ink text-xs flex-1 truncate">{k.knife_name}</span>
+              <span className="text-gold text-xs font-bold">${k.purchase_price?.toLocaleString()}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Grid: Catalog Gaps (Wish List) */}
+      <div className={`${cardCls} md:col-span-2`}>
+        <div className="text-muted text-xs uppercase tracking-widest mb-3">
+          Wish List <span className="text-muted/40">({gaps.length} models not owned)</span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-left text-muted/60">
+                <th className="pb-2 font-medium">Model</th>
+                <th className="pb-2 font-medium">Family</th>
+                <th className="pb-2 font-medium">Steel</th>
+                <th className="pb-2 font-medium text-right">MSRP</th>
+              </tr>
+            </thead>
+            <tbody>
+              {gaps.slice(0, 8).map((g, i) => (
+                <tr key={i} className="border-t border-border/30">
+                  <td className="py-1.5 text-ink">{g.official_name}</td>
+                  <td className="py-1.5 text-muted">{g.family_name ?? '—'}</td>
+                  <td className="py-1.5 text-muted">{g.blade_steel ?? '—'}</td>
+                  <td className="py-1.5 text-gold text-right">${g.msrp?.toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {gaps.length > 8 && (
+            <div className="text-muted/40 text-xs mt-2">+ {gaps.length - 8} more</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 let msgCounter = 0;
@@ -674,41 +883,8 @@ export default function Reporting() {
           </div>
 
           {/* Dashboard area */}
-          <div className="flex-1 overflow-y-auto p-8">
-            {isEmpty && !chatOpen ? (
-              // Full welcome when chat is closed and no messages
-              <div className="max-w-xl mx-auto flex flex-col items-center gap-6 pt-12">
-                <div className="w-16 h-16 rounded-full overflow-hidden ring-2 ring-gold/30 bg-surface">
-                  <img src="/static/logo.png" alt="MKC" className="w-full h-full object-cover" />
-                </div>
-                <div className="text-center">
-                  <h2 className="text-ink text-lg font-bold">Reporting Dashboard</h2>
-                  <p className="text-muted text-sm mt-1">Open the chat panel to ask questions about your collection. Pin results here to build your dashboard.</p>
-                </div>
-                <button onClick={() => setChatOpen(true)}
-                  className="px-4 py-2 rounded-lg bg-gold text-black text-sm font-semibold hover:bg-gold-bright transition-colors">
-                  Open Chat
-                </button>
-              </div>
-            ) : !chatOpen ? (
-              // Dashboard placeholder when chat is closed but we have messages
-              <div className="max-w-3xl mx-auto">
-                <div className="text-center py-12">
-                  <p className="text-muted text-sm">Dashboard widgets will appear here when you pin results from the chat.</p>
-                  <button onClick={() => setChatOpen(true)}
-                    className="mt-4 px-4 py-2 rounded-lg border border-border text-muted hover:text-ink text-sm transition-colors">
-                    Open Chat
-                  </button>
-                </div>
-              </div>
-            ) : (
-              // When chat is open, dashboard area is empty/minimal
-              <div className="flex items-center justify-center h-full">
-                <div className="text-center">
-                  <p className="text-muted/40 text-sm">Pin results from chat to build your dashboard</p>
-                </div>
-              </div>
-            )}
+          <div className="flex-1 overflow-y-auto p-6">
+            <Dashboard />
           </div>
 
           {/* Chat panel — collapsible right side */}
