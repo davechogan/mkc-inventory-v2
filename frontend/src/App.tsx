@@ -51,10 +51,7 @@ function applyFilters(items: InventoryItem[], filters: FilterState): InventoryIt
     if (filters.family && item.knife_family !== filters.family) return false;
     if (filters.series && item.series_name !== filters.series) return false;
     if (filters.handleColor && item.handle_color !== filters.handleColor) return false;
-    if (filters.location) {
-      const loc = item.location?.toLowerCase() ?? '';
-      if (!loc.includes(filters.location.toLowerCase())) return false;
-    }
+    if (filters.location && item.location !== filters.location) return false;
     return true;
   });
 }
@@ -191,17 +188,20 @@ export default function App() {
     const typ = new Set<string>();
     const ser = new Set<string>();
     const hc = new Set<string>();
+    const loc = new Set<string>();
     for (const item of items) {
       if (item.knife_family) fam.add(item.knife_family);
       if (item.knife_type) typ.add(item.knife_type);
       if (item.series_name) ser.add(item.series_name);
       if (item.handle_color) hc.add(item.handle_color);
+      if (item.location) loc.add(item.location);
     }
     return {
       families: [...fam].sort(),
       types: [...typ].sort(),
       series: [...ser].sort(),
       handleColors: [...hc].sort(),
+      locations: [...loc].sort(),
     };
   }, [items]);
 
@@ -261,6 +261,7 @@ export default function App() {
           <InlineFilter value={filters.family} onChange={v => handleFilterChange('family', v)} options={filterOptions.families} placeholder="Family" />
           <InlineFilter value={filters.series} onChange={v => handleFilterChange('series', v)} options={filterOptions.series} placeholder="Series" />
           <InlineFilter value={filters.handleColor} onChange={v => handleFilterChange('handleColor', v)} options={filterOptions.handleColors} placeholder="Handle Color" />
+          <InlineFilter value={filters.location} onChange={v => handleFilterChange('location', v)} options={filterOptions.locations} placeholder="Location" />
           {activeFilterCount > 0 && (
             <button onClick={() => setFilters(emptyFilters)}
               className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs text-muted hover:text-ink border border-border hover:border-border/70 transition-colors">

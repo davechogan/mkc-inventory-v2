@@ -460,7 +460,7 @@ def create_v2_router(
                        kt.name AS knife_type, fam.name AS family_name, frm.name AS form_name,
                        ks.name AS series_name, c.name AS collaborator_name,
                        bs.name AS blade_steel, bf.name AS blade_finish, ht.name AS handle_type,
-                       km.blade_length
+                       km.blade_length, km.msrp
                 FROM knife_models_v2 km
                 LEFT JOIN knife_types kt ON kt.id = km.type_id
                 LEFT JOIN knife_forms frm ON frm.id = km.form_id

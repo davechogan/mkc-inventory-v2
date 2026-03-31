@@ -5,10 +5,15 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 interface ModelResult {
   id: number;
   official_name: string;
+  knife_type: string | null;
   family_name: string | null;
+  form_name: string | null;
   series_name: string | null;
-  steel: string | null;
+  blade_steel: string | null;
+  blade_finish: string | null;
+  handle_type: string | null;
   blade_length: number | null;
+  msrp: number | null;
 }
 
 interface ColorwayOption {
@@ -140,7 +145,11 @@ export function AddInventoryDrawer({ open, onClose, onAdded }: AddInventoryDrawe
     setSelectedModel(model);
     setQuery('');
     setResults([]);
-    setForm(prev => ({ ...prev, colorway_id: '' }));
+    setForm(prev => ({
+      ...prev,
+      colorway_id: '',
+      purchase_price: model.msrp != null ? String(model.msrp) : '',
+    }));
     fetchColorways(model.id);
   }, [fetchColorways]);
 
@@ -211,22 +220,27 @@ export function AddInventoryDrawer({ open, onClose, onAdded }: AddInventoryDrawe
               </label>
 
               {selectedModel ? (
-                // Selected model card
-                <div className="flex items-start justify-between gap-2 p-3 rounded-xl border border-gold/40 bg-gold/5">
-                  <div className="min-w-0">
+                // Selected model card with catalog specs
+                <div className="p-3 rounded-xl border border-gold/40 bg-gold/5">
+                  <div className="flex items-start justify-between gap-2 mb-2">
                     <div className="text-ink text-sm font-semibold leading-tight">{selectedModel.official_name}</div>
-                    <div className="text-muted text-xs mt-0.5">
-                      {[selectedModel.family_name, selectedModel.steel, selectedModel.blade_length ? `${selectedModel.blade_length}"` : null]
-                        .filter(Boolean).join(' · ')}
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => { setSelectedModel(null); setColorways([]); setForm(emptyForm); }}
+                      className="text-muted hover:text-ink transition-colors flex-shrink-0 text-xs px-2 py-1 rounded border border-border hover:border-border/70"
+                    >
+                      Change
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => { setSelectedModel(null); setColorways([]); }}
-                    className="text-muted hover:text-ink transition-colors flex-shrink-0 text-xs px-2 py-1 rounded border border-border hover:border-border/70"
-                  >
-                    Change
-                  </button>
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                    {selectedModel.knife_type && <div><span className="text-muted">Type:</span> <span className="text-ink">{selectedModel.knife_type}</span></div>}
+                    {selectedModel.family_name && <div><span className="text-muted">Family:</span> <span className="text-ink">{selectedModel.family_name}</span></div>}
+                    {selectedModel.blade_steel && <div><span className="text-muted">Steel:</span> <span className="text-ink">{selectedModel.blade_steel}</span></div>}
+                    {selectedModel.blade_finish && <div><span className="text-muted">Finish:</span> <span className="text-ink">{selectedModel.blade_finish}</span></div>}
+                    {selectedModel.handle_type && <div><span className="text-muted">Handle:</span> <span className="text-ink">{selectedModel.handle_type}</span></div>}
+                    {selectedModel.blade_length && <div><span className="text-muted">Length:</span> <span className="text-ink">{selectedModel.blade_length}"</span></div>}
+                    {selectedModel.msrp != null && <div><span className="text-muted">MSRP:</span> <span className="text-gold">${selectedModel.msrp}</span></div>}
+                  </div>
                 </div>
               ) : (
                 // Search input + results
@@ -253,7 +267,7 @@ export function AddInventoryDrawer({ open, onClose, onAdded }: AddInventoryDrawe
                         >
                           <div className="text-ink text-sm font-medium leading-tight">{m.official_name}</div>
                           <div className="text-muted text-xs mt-0.5">
-                            {[m.family_name, m.steel, m.blade_length ? `${m.blade_length}"` : null]
+                            {[m.family_name, m.blade_steel, m.blade_finish, m.blade_length ? `${m.blade_length}"` : null, m.msrp != null ? `$${m.msrp}` : null]
                               .filter(Boolean).join(' · ')}
                           </div>
                         </button>
