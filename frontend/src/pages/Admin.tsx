@@ -2,6 +2,16 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+interface UserRecord {
+  id: string;
+  email: string;
+  name: string | null;
+  tenant_id: string;
+  role: string;
+  first_seen: string;
+  last_seen: string;
+}
+
 interface OptionItem {
   id: number;
   name: string;
@@ -299,12 +309,82 @@ function ImageAudit() {
   );
 }
 
+// ── AccessLog ────────────────────────────────────────────────────────────────
+
+function AccessLog() {
+  const [users, setUsers] = useState<UserRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch('/api/v2/users')
+      .then(r => r.json())
+      .then(d => setUsers(d as UserRecord[]))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const formatDate = (iso: string) => {
+    try {
+      return new Date(iso).toLocaleString('en-US', {
+        month: 'short', day: 'numeric', year: 'numeric',
+        hour: 'numeric', minute: '2-digit',
+      });
+    } catch { return iso; }
+  };
+
+  return (
+    <div>
+      <p className="text-muted text-sm mb-4">
+        Users authenticated via Cloudflare Access. Sorted by most recent activity.
+      </p>
+      {loading ? (
+        <div className="text-muted text-sm">Loading...</div>
+      ) : users.length === 0 ? (
+        <div className="text-muted text-sm py-8 text-center">No users have accessed the app yet.</div>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-border">
+          <table className="w-full text-sm border-collapse">
+            <thead>
+              <tr className="bg-border/20 text-left">
+                <th className="px-4 py-2.5 text-muted font-medium text-xs uppercase tracking-wider">Email</th>
+                <th className="px-4 py-2.5 text-muted font-medium text-xs uppercase tracking-wider">Name</th>
+                <th className="px-4 py-2.5 text-muted font-medium text-xs uppercase tracking-wider">Tenant</th>
+                <th className="px-4 py-2.5 text-muted font-medium text-xs uppercase tracking-wider">Role</th>
+                <th className="px-4 py-2.5 text-muted font-medium text-xs uppercase tracking-wider">First Seen</th>
+                <th className="px-4 py-2.5 text-muted font-medium text-xs uppercase tracking-wider">Last Seen</th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.map(u => (
+                <tr key={u.id} className="border-t border-border/50 hover:bg-border/10 transition-colors">
+                  <td className="px-4 py-2.5 text-ink">{u.email}</td>
+                  <td className="px-4 py-2.5 text-muted">{u.name ?? '—'}</td>
+                  <td className="px-4 py-2.5">
+                    <span className="px-2 py-0.5 rounded-full bg-border/60 text-muted text-xs">{u.tenant_id}</span>
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <span className={`px-2 py-0.5 rounded-full text-xs ${
+                      u.role === 'admin' ? 'bg-gold/20 text-gold' : 'bg-border/60 text-muted'
+                    }`}>{u.role}</span>
+                  </td>
+                  <td className="px-4 py-2.5 text-muted text-xs">{formatDate(u.first_seen)}</td>
+                  <td className="px-4 py-2.5 text-muted text-xs">{formatDate(u.last_seen)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Admin page ────────────────────────────────────────────────────────────────
 
 export default function Admin() {
   const [options, setOptions] = useState<OptionsMap>({});
   const [loading, setLoading] = useState(true);
-  const [activeSection, setActiveSection] = useState<'options' | 'images' | 'catalog'>('options');
+  const [activeSection, setActiveSection] = useState<'options' | 'images' | 'access' | 'catalog'>('options');
 
   const fetchOptions = useCallback(async () => {
     const res = await fetch('/api/v2/options');
@@ -374,7 +454,7 @@ export default function Admin() {
       {/* Nav tabs */}
       <div className="border-b border-border px-6">
         <nav className="flex gap-6">
-          {([['options', 'Dropdown Options'], ['images', 'Image Audit'], ['catalog', 'Catalog']] as const).map(([key, label]) => (
+          {([['options', 'Dropdown Options'], ['images', 'Image Audit'], ['access', 'Access Log'], ['catalog', 'Catalog']] as const).map(([key, label]) => (
             <button
               key={key}
               onClick={() => setActiveSection(key)}
@@ -418,6 +498,10 @@ export default function Admin() {
 
         {activeSection === 'images' && (
           <ImageAudit />
+        )}
+
+        {activeSection === 'access' && (
+          <AccessLog />
         )}
 
         {activeSection === 'catalog' && (

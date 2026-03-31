@@ -418,6 +418,15 @@ def create_v2_router(
             },
         }
 
+    @router.get("/api/v2/users")
+    def v2_list_users():
+        """Return all users with access history. Admin-only in future RBAC."""
+        with get_conn() as conn:
+            rows = conn.execute(
+                "SELECT id, email, name, tenant_id, role, first_seen, last_seen FROM users ORDER BY last_seen DESC"
+            ).fetchall()
+            return [dict(r) for r in rows]
+
     @router.get("/api/v2/colors")
     def v2_colors():
         """Return handle and blade colors from the normalized lookup tables."""

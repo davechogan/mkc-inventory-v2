@@ -137,11 +137,20 @@ Answer + rows
 
 ## DB safety
 
-`data/mkc_inventory.db` is the live production DB containing real collection data. Before any operation that could modify it:
+### NEVER overwrite the production DB on Mac Studio
+
+The production DB lives on the Mac Studio at `/Users/dhogan/invapp_v2/data/mkc_inventory.db`. The deploy script **excludes** it — code deploys never touch the production data. **Do not manually copy, rsync, or scp the dev DB to the Mac Studio.** All inventory and catalog data changes are made by the user on `macstudio:8008`.
+
+- **Schema migrations** (new columns, new tables): add to `ensure_v2_exclusive_schema()` in `migrations/migrate_v2.py` — runs automatically on app startup.
+- **Destructive schema changes** (drops, rebuilds): write a migration script, deploy the code, then run the script on the Mac Studio DB manually.
+
+### Backup before schema changes
 
 ```bash
 ./scripts/backup_mkc_db.sh
 ```
+
+`data/mkc_inventory.db` is the live production DB containing real collection data. Back it up before any `ALTER TABLE`, `CREATE TABLE`, `DROP TABLE`, or bulk `UPDATE`/`DELETE`.
 
 The test suite always uses a temp copy of the seed DB — never the live DB. `MKC_INVENTORY_DB` env var controls which DB the app uses; if unset, it defaults to `data/mkc_inventory.db`.
 
