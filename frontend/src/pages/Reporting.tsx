@@ -521,6 +521,7 @@ function Dashboard() {
   const [summary, setSummary] = useState<{ total_quantity: number; total_spend: number; by_family: { family: string; total_quantity: number }[] } | null>(null);
   const [gaps, setGaps] = useState<CatalogGap[]>([]);
   const [loading, setLoading] = useState(true);
+  const [wishListExpanded, setWishListExpanded] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -671,9 +672,9 @@ function Dashboard() {
         <div className="text-muted text-xs uppercase tracking-widest mb-3">
           Wish List <span className="text-muted/40">({gaps.length} models not owned)</span>
         </div>
-        <div className="overflow-x-auto">
+        <div className={`overflow-x-auto ${!wishListExpanded ? 'max-h-[280px]' : 'max-h-[600px]'} overflow-y-auto transition-[max-height] duration-300`}>
           <table className="w-full text-xs">
-            <thead>
+            <thead className="sticky top-0 bg-card">
               <tr className="text-left text-muted/60">
                 <th className="pb-2 font-medium">Model</th>
                 <th className="pb-2 font-medium">Family</th>
@@ -682,7 +683,7 @@ function Dashboard() {
               </tr>
             </thead>
             <tbody>
-              {gaps.slice(0, 8).map((g, i) => (
+              {(wishListExpanded ? gaps : gaps.slice(0, 8)).map((g, i) => (
                 <tr key={i} className="border-t border-border/30">
                   <td className="py-1.5 text-ink">{g.official_name}</td>
                   <td className="py-1.5 text-muted">{g.family_name ?? '—'}</td>
@@ -692,10 +693,13 @@ function Dashboard() {
               ))}
             </tbody>
           </table>
-          {gaps.length > 8 && (
-            <div className="text-muted/40 text-xs mt-2">+ {gaps.length - 8} more</div>
-          )}
         </div>
+        {gaps.length > 8 && (
+          <button onClick={() => setWishListExpanded(v => !v)}
+            className="text-gold/70 hover:text-gold text-xs mt-2 transition-colors">
+            {wishListExpanded ? 'Show less' : `Show all ${gaps.length} models`}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -888,8 +892,9 @@ export default function Reporting() {
           </div>
 
           {/* Chat panel — collapsible right side */}
-          <div className={`flex-shrink-0 transition-[width] duration-200 overflow-hidden ${chatOpen ? 'w-[480px]' : 'w-0'}`}
-            style={{ borderLeft: chatOpen ? '1px solid #1d2329' : 'none' }}>
+          {chatOpen && (
+          <div className="flex-shrink-0 w-[480px] overflow-hidden"
+            style={{ borderLeft: '1px solid #1d2329' }}>
             <div className="flex flex-col h-full w-[480px]" style={{ backgroundColor: '#060709' }}>
               {/* Chat header */}
               <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
@@ -969,6 +974,7 @@ export default function Reporting() {
               </div>
             </div>
           </div>
+          )}
         </div>
       </main>
     </div>
