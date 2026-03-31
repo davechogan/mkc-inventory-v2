@@ -388,8 +388,9 @@ def _compile_canonical(
         )
         return sql, {"mode": "semantic_compiled_aggregate"}
 
-    # Scalar aggregate (no group_by, but metric is a sum/count over the whole set).
-    if plan.metric in (PlanMetric.TOTAL_SPEND,) and not _inv_only_metric:
+    # Scalar aggregate (no group_by, no sort, metric is a sum over the whole set).
+    # If there's a sort field, the user wants a list, not an aggregate total.
+    if plan.metric in (PlanMetric.TOTAL_SPEND,) and not _inv_only_metric and not plan.sort:
         sql = f"SELECT {agg_expr} FROM {source_view} {where_sql}"
         return sql, {"mode": "semantic_compiled_aggregate"}
 

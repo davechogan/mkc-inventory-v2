@@ -80,7 +80,7 @@
       "catalog",
       "series"
     ],
-    "content": "When the user asks what Blood Brothers knives MKC has, offers, or makes, the subject is MKC's catalog — not the user's inventory. Use scope=catalog, filter series_name=Blood Brothers.",
+    "content": "When the user asks what Blood Brothers knives MKC has, offers, or makes, the subject is MKC's catalog \u2014 not the user's inventory. Use scope=catalog, filter series_name=Blood Brothers.",
     "natural_query": "show me all of the blood brothers knives MKC has",
     "hint_intent": "list",
     "hint_metric": "count",
@@ -197,7 +197,7 @@
       "all models",
       "available"
     ],
-    "content": "When MKC (not the user) is the subject — 'MKC has', 'MKC offers', 'MKC makes', 'MKC carries', 'does MKC make', 'are available' — use scope=catalog. The catalog covers all MKC models ever made, not just what the user owns.",
+    "content": "When MKC (not the user) is the subject \u2014 'MKC has', 'MKC offers', 'MKC makes', 'MKC carries', 'does MKC make', 'are available' \u2014 use scope=catalog. The catalog covers all MKC models ever made, not just what the user owns.",
     "natural_query": "how many speedgoats has MKC made",
     "hint_intent": "aggregate",
     "hint_metric": "count",
@@ -220,5 +220,61 @@
     "hint_scope": "inventory",
     "hint_year_compare": null,
     "hint_group_by": "steel"
+  },
+  {
+    "kind": "example",
+    "artifact_id": "example.filter_list_price",
+    "tags": [
+      "filter",
+      "price",
+      "list",
+      "over",
+      "more than",
+      "expensive"
+    ],
+    "content": "When the user says \"which knives cost more than X\" or \"knives over X\" or \"show me knives priced above X\", this is a LIST with a purchase_price filter, NOT an aggregate. Use intent=list, metric=count, with a filter on purchase_price > X. The sort should be purchase_price desc.",
+    "example_question": "which knives cost more than 500?",
+    "example_plan": {
+      "intent": "list",
+      "scope": "inventory",
+      "metric": "count",
+      "group_by": [],
+      "filters": [
+        {
+          "field": "purchase_price",
+          "op": ">",
+          "value": 500
+        }
+      ],
+      "sort": {
+        "field": "purchase_price",
+        "direction": "desc"
+      }
+    }
+  },
+  {
+    "kind": "example",
+    "artifact_id": "example.most_expensive",
+    "tags": [
+      "expensive",
+      "costly",
+      "priciest",
+      "top",
+      "most"
+    ],
+    "content": "When the user asks for \"most expensive\" or \"priciest\" or \"top knives by price\", use intent=list, metric=count, sort purchase_price desc, limit 1 (or 5/10 if they say top 5/top 10). Do NOT use total_spend metric \u2014 that aggregates into a sum.",
+    "example_question": "what is my most expensive knife?",
+    "example_plan": {
+      "intent": "list",
+      "scope": "inventory",
+      "metric": "count",
+      "group_by": [],
+      "filters": [],
+      "sort": {
+        "field": "purchase_price",
+        "direction": "desc"
+      },
+      "limit": 1
+    }
   }
 ]

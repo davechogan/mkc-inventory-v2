@@ -211,17 +211,20 @@ class CanonicalReportingPlan(BaseModel):
         # Coerce common LLM metric mistakes to valid values
         s = str(v).strip().lower()
         _METRIC_ALIASES = {
-            "purchase_price": "total_spend",
-            "price": "total_spend",
             "spend": "total_spend",
             "cost": "total_spend",
-            "value": "total_spend",
             "worth": "total_spend",
-            "estimated_value": "total_spend",
             "total": "total_spend",
             "quantity": "count",
             "num": "count",
             "number": "count",
+            # price/purchase_price → count, not total_spend.
+            # When the LLM says metric=purchase_price it usually means
+            # "sort by price" not "aggregate spend". The sort field handles it.
+            "purchase_price": "count",
+            "price": "count",
+            "value": "count",
+            "estimated_value": "count",
         }
         if s in _METRIC_ALIASES:
             return _METRIC_ALIASES[s]
