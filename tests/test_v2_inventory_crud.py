@@ -21,8 +21,14 @@ def any_knife_model_id(invapp) -> int:
             return int(row["id"])
         slug = f"pytest-crud-{uuid.uuid4().hex[:12]}"
         # Handle both old schema (with normalized_name) and new schema (without)
-        cols = [r[1] for r in conn.execute("PRAGMA table_info(knife_models_v2)")]
-        if "normalized_name" in cols:
+        # Check if old schema (has normalized_name) or new schema
+        has_normalized = False
+        try:
+            conn.execute("SELECT normalized_name FROM knife_models_v2 LIMIT 0")
+            has_normalized = True
+        except Exception:
+            pass
+        if has_normalized:
             cur = conn.execute(
                 "INSERT INTO knife_models_v2 (official_name, normalized_name, sortable_name, slug, record_status) VALUES (?, ?, ?, ?, 'active')",
                 ("Pytest CRUD Model", "pytest crud model", "pytest crud model", slug),
