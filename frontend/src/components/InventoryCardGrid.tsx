@@ -201,7 +201,6 @@ function GroupCard({ group, onCardClick, onDataChanged }: GroupCardProps) {
                   <line x1="5" y1="12" x2="19" y2="12" />
                 </svg>
               </button>
-              {count > 1 && <span className="text-gold text-sm font-bold">x{count}</span>}
               <button onClick={handleDuplicate} title="Add another"
                 className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center w-4 h-4 rounded-full bg-gold/20 hover:bg-gold/40 text-gold">
                 <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
