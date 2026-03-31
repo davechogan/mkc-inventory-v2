@@ -20,8 +20,13 @@ data/*.empty-broken.*
 /local/**
 !/local/README.md
 
-# Retired colorway images — now stored as blobs in model_colorways table
+# Image working directories — source PNGs and zips (images live as DB blobs)
 Images/MKC_Colors_TO_DELETE/
+Images/MKC-images-no-bkgrnd/
+Images/*.zip
+
+# Claude Code worktrees
+.claude/worktrees/
 
 # Artifact policy reference:
 # Non-release artifacts belong in Artifacts.git per:
