@@ -245,7 +245,11 @@ def _reporting_llm_plan(
         planner_debug = {"model": model, "system": _PLANNER_SYSTEM, "user": user}
 
     try:
+        import logging
+        _plog = logging.getLogger("mkc_planner")
+        _plog.info("LLM planner calling model=%s question=%s", model, question[:60])
         raw = blade_ai.ollama_chat(model, _PLANNER_SYSTEM, user, timeout=60.0)
+        _plog.info("LLM planner raw response length=%d", len(raw or ""))
         if debug:
             planner_debug["raw_response"] = raw
 
@@ -284,6 +288,8 @@ def _reporting_llm_plan(
         return result.canonical_plan, planner_debug
 
     except Exception as exc:
+        import logging
+        logging.getLogger("mkc_planner").error("LLM planner exception: %s", repr(exc), exc_info=True)
         if debug:
             planner_debug["exception"] = repr(exc)
         return None, planner_debug

@@ -40,6 +40,10 @@ if [ -n "$EXISTING" ]; then
   done
 fi
 
+# Raise file descriptor limit — the app uses Chroma, httpx, SQLite connections
+# that can exhaust the default 256 FD limit under load.
+ulimit -n 4096
+
 # Use python -m uvicorn so we do not rely on .venv/bin/uvicorn's shebang.
 # No --reload in production — avoids parent/child process complexity.
 exec "$PY" -m uvicorn app:app --host 0.0.0.0 --port 8008
