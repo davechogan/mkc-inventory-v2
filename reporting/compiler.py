@@ -343,7 +343,7 @@ def _compile_canonical(
         and source_view == "reporting_models"
     )
     if plan.metric == PlanMetric.TOTAL_SPEND and not _inv_only_metric:
-        agg_expr = "ROUND(SUM(COALESCE(purchase_price, 0) * COALESCE(quantity, 1)), 2) AS total_spend"
+        agg_expr = "ROUND(SUM(COALESCE(purchase_price, 0)), 2) AS total_spend"
         agg_sort_col = "total_spend"
     else:
         agg_expr = "COUNT(*) AS rows_count"
@@ -398,7 +398,7 @@ def _compile_canonical(
     sort_field = plan.sort.field if plan.sort else ""
     sort_dir = plan.sort.direction.value if plan.sort else "asc"
     ord_kw = "DESC" if sort_dir == "desc" else "ASC"
-    line_total_sql = "(COALESCE(purchase_price, 0) * COALESCE(quantity, 1))"
+    line_total_sql = "COALESCE(purchase_price, 0)"
 
     if use_catalog:
         catalog_sort_map = {

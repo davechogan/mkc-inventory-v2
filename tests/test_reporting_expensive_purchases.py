@@ -13,7 +13,7 @@ from reporting.plan_models import (
 )
 
 
-def test_sql_list_inventory_orders_by_line_total_and_limits() -> None:
+def test_sql_list_inventory_orders_by_purchase_price_and_limits() -> None:
     plan = CanonicalReportingPlan(
         intent=PlanIntent.LIST,
         scope=PlanScope.INVENTORY,
@@ -24,7 +24,8 @@ def test_sql_list_inventory_orders_by_line_total_and_limits() -> None:
     sql, meta = compile_plan(plan, None, None, 100)
     assert meta.get("mode") == "semantic_compiled_list_inventory"
     assert "line_purchase_total" in sql
-    assert "ORDER BY (COALESCE(purchase_price, 0) * COALESCE(quantity, 1)) DESC" in sql
+    # Each row is one knife — no quantity multiplication
+    assert "ORDER BY COALESCE(purchase_price, 0) DESC" in sql
     assert "LIMIT 10" in sql
 
 

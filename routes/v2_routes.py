@@ -169,8 +169,8 @@ def create_v2_router(
                 """
                 SELECT
                     COUNT(*) AS inventory_rows,
-                    COALESCE(SUM(i.quantity), 0) AS total_quantity,
-                    COALESCE(SUM(COALESCE(i.purchase_price, 0) * i.quantity), 0) AS total_spend
+                    COUNT(*) AS total_quantity,
+                    COALESCE(SUM(COALESCE(i.purchase_price, 0)), 0) AS total_spend
                 FROM inventory_items_v2 i
                 """
             ).fetchone()
@@ -185,7 +185,7 @@ def create_v2_router(
                 SELECT
                     COALESCE(NULLIF(TRIM(fam.name), ''), 'Uncategorized') AS family,
                     COUNT(*) AS inventory_rows,
-                    COALESCE(SUM(i.quantity), 0) AS total_quantity
+                    COUNT(*) AS total_quantity
                 FROM inventory_items_v2 i
                 LEFT JOIN knife_models_v2 km ON km.id = i.knife_model_id
                 LEFT JOIN knife_families fam ON fam.id = km.family_id
@@ -1448,21 +1448,23 @@ def create_v2_router(
 
     @router.post("/api/v2/inventory/{item_id}/duplicate")
     def v2_duplicate_inventory_item(item_id: int):
+        """Create a copy of an inventory item with qty=1. Returns the new item's id."""
         with get_conn() as conn:
             row = conn.execute("SELECT * FROM inventory_items_v2 WHERE id = ?", (item_id,)).fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="Inventory item not found.")
+            rd = dict(row)
             cur = conn.execute(
                 """
                 INSERT INTO inventory_items_v2
                 (knife_model_id, colorway_id, quantity, purchase_price, acquired_date,
                  mkc_order_number, location_id, notes, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                VALUES (?, ?, 1, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 """,
                 (
-                    row["knife_model_id"], row.get("colorway_id"), row["quantity"],
-                    row["purchase_price"], row["acquired_date"],
-                    row.get("mkc_order_number"), row.get("location_id"), row["notes"],
+                    rd["knife_model_id"], rd.get("colorway_id"),
+                    rd.get("purchase_price"), rd.get("acquired_date"),
+                    rd.get("mkc_order_number"), rd.get("location_id"), None,
                 ),
             )
             return {"id": cur.lastrowid, "message": "Duplicated"}
