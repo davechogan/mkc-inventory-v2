@@ -858,19 +858,6 @@ export default function Reporting() {
             >
               History
             </button>
-            <button
-              onClick={() => setChatOpen((v) => !v)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs transition-colors ${
-                chatOpen
-                  ? 'border-gold/40 text-gold bg-gold/5'
-                  : 'border-border text-muted hover:text-ink hover:border-border/70'
-              }`}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-              </svg>
-              Chat
-            </button>
           </div>
         </div>
 
@@ -892,13 +879,20 @@ export default function Reporting() {
           </div>
 
           {/* Chat panel — collapsible right side */}
-          {chatOpen && (
-          <div className="flex-shrink-0 w-[480px] overflow-hidden"
+          {chatOpen ? (
+          <div className="flex-shrink-0 w-[480px] overflow-hidden relative"
             style={{ borderLeft: '1px solid #1d2329' }}>
+            {/* Collapse chevron */}
+            <button onClick={() => setChatOpen(false)} title="Collapse chat"
+              className="absolute top-3 left-2 z-10 text-muted hover:text-ink transition-colors p-1 rounded-md hover:bg-border/30">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
+            </button>
             <div className="flex flex-col h-full w-[480px]" style={{ backgroundColor: '#060709' }}>
               {/* Chat header */}
               <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
-                <span className="text-muted text-xs uppercase tracking-widest">Chat</span>
+                <span className="text-muted text-xs uppercase tracking-widest ml-7">Chat</span>
                 {sessionId && (
                   <span className="text-muted text-xs truncate max-w-[200px]">
                     {sessions.find((s) => s.id === sessionId)?.title ?? ''}
@@ -974,6 +968,18 @@ export default function Reporting() {
               </div>
             </div>
           </div>
+          ) : (
+            /* Collapsed chat — expand handle on right edge */
+            <div className="flex-shrink-0 flex items-start pt-3">
+              <button onClick={() => setChatOpen(true)} title="Open chat"
+                className="flex items-center gap-1 px-1.5 py-3 rounded-l-lg border border-r-0 border-border bg-card text-muted hover:text-gold hover:bg-gold/5 transition-colors"
+                style={{ writingMode: 'vertical-rl' }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="rotate-180">
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+                <span className="text-xs tracking-wider">Chat</span>
+              </button>
+            </div>
           )}
         </div>
       </main>
