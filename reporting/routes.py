@@ -322,16 +322,17 @@ def create_reporting_router(
             ).fetchall()
             parsed_msgs = []
             for m in msgs:
+                md = dict(m)
                 parsed_msgs.append(
                     {
-                        "id": m["id"],
-                        "role": m["role"],
-                        "content": m["content"],
-                        "sql_executed": m.get("sql_executed"),
-                        "result": json.loads(m["result_json"]) if m.get("result_json") else None,
-                        "chart_spec": json.loads(m["chart_spec_json"]) if m.get("chart_spec_json") else None,
-                        "meta": json.loads(m["meta_json"]) if m.get("meta_json") else None,
-                        "created_at": m["created_at"],
+                        "id": md["id"],
+                        "role": md["role"],
+                        "content": md["content"],
+                        "sql_executed": md.get("sql_executed"),
+                        "result": json.loads(md["result_json"]) if md.get("result_json") else None,
+                        "chart_spec": json.loads(md["chart_spec_json"]) if md.get("chart_spec_json") else None,
+                        "meta": json.loads(md["meta_json"]) if md.get("meta_json") else None,
+                        "created_at": md["created_at"],
                     }
                 )
             return {"session": session, "messages": parsed_msgs}

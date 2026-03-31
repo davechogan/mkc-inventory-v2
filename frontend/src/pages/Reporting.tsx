@@ -58,6 +58,7 @@ interface StoredMessage {
   role: 'user' | 'assistant';
   content: string;
   result: { columns?: string[]; rows?: unknown[] } | null;
+  chart_spec: ChartSpec | null;
   meta: { feedback_helpful?: boolean } | null;
   created_at: string;
 }
@@ -765,7 +766,7 @@ export default function Reporting() {
                   answer_text: m.content,
                   columns: m.result.columns ?? [],
                   rows: m.result.rows ?? [],
-                  chart_spec: null,
+                  chart_spec: m.chart_spec ?? null,
                   sql_executed: null,
                   follow_ups: [],
                   confidence: null,
@@ -841,7 +842,7 @@ export default function Reporting() {
             answer_text: m.content,
             columns: m.result.columns ?? [],
             rows: m.result.rows ?? [],
-            chart_spec: null,
+            chart_spec: m.chart_spec ?? null,
             sql_executed: null,
             follow_ups: [],
             confidence: null,
