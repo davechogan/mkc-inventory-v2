@@ -91,3 +91,20 @@ class CloudflareAccessMiddleware(BaseHTTPMiddleware):
 def get_current_user(request: Request) -> Optional[UserInfo]:
     """Helper to extract user from request.state. Returns None if unauthenticated."""
     return getattr(request.state, "user", None)
+
+
+def get_tenant_id(request: Request) -> Optional[str]:
+    """Extract tenant_id from the authenticated user. Returns None in dev mode (no auth)."""
+    user = get_current_user(request)
+    return user.tenant_id if user else None
+
+
+def tenant_filter_sql(tenant_id: Optional[str], table_alias: str = "i") -> tuple[str, list]:
+    """Return a WHERE clause fragment and params for tenant scoping.
+
+    If tenant_id is None (dev mode / no auth), returns empty string and no params
+    so all data is visible. In production with auth, scopes to the user's tenant.
+    """
+    if tenant_id is None:
+        return "", []
+    return f"{table_alias}.tenant_id = ?", [tenant_id]

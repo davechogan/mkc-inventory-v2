@@ -100,6 +100,7 @@ def create_v2_router(
 
     @router.get("/api/v2/inventory")
     def v2_list_inventory(
+        request: Request,
         search: Optional[str] = None,
         type: Optional[str] = None,
         family: Optional[str] = None,
@@ -111,10 +112,17 @@ def create_v2_router(
         location: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         """Return flattened inventory rows from v2 tables. Supports server-side filters."""
+        from auth import get_tenant_id, tenant_filter_sql
         with get_conn() as conn:
             base = _v2_inventory_base_sql()
             conditions = []
             params: list[Any] = []
+
+            # Tenant scoping
+            tf, tp = tenant_filter_sql(get_tenant_id(request))
+            if tf:
+                conditions.append(tf)
+                params.extend(tp)
 
             if search and search.strip():
                 q = f"%{search.strip()}%"
@@ -162,26 +170,33 @@ def create_v2_router(
 
 
     @router.get("/api/v2/inventory/summary")
-    def v2_inventory_summary() -> dict[str, Any]:
+    def v2_inventory_summary(request: Request) -> dict[str, Any]:
         """Return inventory summary: rows, total quantity, spend, master count, by_family."""
+        from auth import get_tenant_id, tenant_filter_sql
         with get_conn() as conn:
+            tf, tp = tenant_filter_sql(get_tenant_id(request))
+            tenant_where = f"WHERE {tf}" if tf else ""
+            tenant_and = f"AND {tf}" if tf else ""
             summary = conn.execute(
-                """
+                f"""
                 SELECT
                     COUNT(*) AS inventory_rows,
                     COUNT(*) AS total_quantity,
                     COALESCE(SUM(COALESCE(i.purchase_price, 0)), 0) AS total_spend
                 FROM inventory_items_v2 i
-                """
+                {tenant_where}
+                """,
+                tp,
             ).fetchone()
             master_models = conn.execute(
-                "SELECT COUNT(DISTINCT knife_model_id) AS c FROM inventory_items_v2 WHERE knife_model_id IS NOT NULL"
+                f"SELECT COUNT(DISTINCT knife_model_id) AS c FROM inventory_items_v2 i WHERE knife_model_id IS NOT NULL {tenant_and}",
+                tp,
             ).fetchone()["c"]
             catalog_total = conn.execute(
                 "SELECT COUNT(*) AS c FROM knife_models_v2"
             ).fetchone()["c"]
             by_family = conn.execute(
-                """
+                f"""
                 SELECT
                     COALESCE(NULLIF(TRIM(fam.name), ''), 'Uncategorized') AS family,
                     COUNT(*) AS inventory_rows,
@@ -189,9 +204,11 @@ def create_v2_router(
                 FROM inventory_items_v2 i
                 LEFT JOIN knife_models_v2 km ON km.id = i.knife_model_id
                 LEFT JOIN knife_families fam ON fam.id = km.family_id
+                {tenant_where}
                 GROUP BY family
                 ORDER BY total_quantity DESC, family COLLATE NOCASE
-                """
+                """,
+                tp,
             ).fetchall()
             return {
                 "inventory_rows": summary["inventory_rows"],
@@ -1356,8 +1373,10 @@ def create_v2_router(
 
 
     @router.post("/api/v2/inventory")
-    def v2_create_inventory_item(payload: InventoryItemV2In):
+    def v2_create_inventory_item(request: Request, payload: InventoryItemV2In):
         """Create inventory item in v2 only (canonical write path)."""
+        from auth import get_tenant_id
+        tenant_id = get_tenant_id(request) or "default"
         with get_conn() as conn:
             model_exists = conn.execute(
                 "SELECT id FROM knife_models_v2 WHERE id = ?",
@@ -1369,8 +1388,8 @@ def create_v2_router(
                 """
                 INSERT INTO inventory_items_v2
                 (knife_model_id, colorway_id, quantity, purchase_price, acquired_date,
-                 mkc_order_number, location_id, notes, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                 mkc_order_number, location_id, notes, tenant_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 """,
                 (
                     payload.knife_model_id,
@@ -1381,15 +1400,29 @@ def create_v2_router(
                     payload.mkc_order_number,
                     payload.location_id,
                     payload.notes,
+                    tenant_id,
                 ),
             )
             return {"id": cur.lastrowid, "message": "Created"}
 
 
+    def _verify_inventory_ownership(conn, item_id: int, request: Request) -> None:
+        """Verify the inventory item belongs to the current tenant. No-op in dev mode."""
+        from auth import get_tenant_id
+        tid = get_tenant_id(request)
+        if tid is None:
+            return  # dev mode — no tenant check
+        row = conn.execute("SELECT tenant_id FROM inventory_items_v2 WHERE id = ?", (item_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Inventory item not found.")
+        if row["tenant_id"] != tid:
+            raise HTTPException(status_code=403, detail="Access denied.")
+
     @router.put("/api/v2/inventory/{item_id}")
-    def v2_update_inventory_item(item_id: int, payload: InventoryItemV2In):
+    def v2_update_inventory_item(item_id: int, request: Request, payload: InventoryItemV2In):
         """Update inventory item in v2 only (canonical write path)."""
         with get_conn() as conn:
+            _verify_inventory_ownership(conn, item_id, request)
             model_exists = conn.execute(
                 "SELECT id FROM knife_models_v2 WHERE id = ?",
                 (payload.knife_model_id,),
@@ -1438,8 +1471,9 @@ def create_v2_router(
             return {"id": item_id, "quantity": new_qty}
 
     @router.delete("/api/v2/inventory/{item_id}")
-    def v2_delete_inventory_item(item_id: int):
+    def v2_delete_inventory_item(item_id: int, request: Request):
         with get_conn() as conn:
+            _verify_inventory_ownership(conn, item_id, request)
             cur = conn.execute("DELETE FROM inventory_items_v2 WHERE id = ?", (item_id,))
             if cur.rowcount == 0:
                 raise HTTPException(status_code=404, detail="Inventory item not found.")
@@ -1447,9 +1481,12 @@ def create_v2_router(
 
 
     @router.post("/api/v2/inventory/{item_id}/duplicate")
-    def v2_duplicate_inventory_item(item_id: int):
+    def v2_duplicate_inventory_item(item_id: int, request: Request):
         """Create a copy of an inventory item with qty=1. Returns the new item's id."""
+        from auth import get_tenant_id
+        tenant_id = get_tenant_id(request) or "default"
         with get_conn() as conn:
+            _verify_inventory_ownership(conn, item_id, request)
             row = conn.execute("SELECT * FROM inventory_items_v2 WHERE id = ?", (item_id,)).fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="Inventory item not found.")
@@ -1458,13 +1495,13 @@ def create_v2_router(
                 """
                 INSERT INTO inventory_items_v2
                 (knife_model_id, colorway_id, quantity, purchase_price, acquired_date,
-                 mkc_order_number, location_id, notes, created_at, updated_at)
-                VALUES (?, ?, 1, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                 mkc_order_number, location_id, notes, tenant_id, created_at, updated_at)
+                VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 """,
                 (
                     rd["knife_model_id"], rd.get("colorway_id"),
                     rd.get("purchase_price"), rd.get("acquired_date"),
-                    rd.get("mkc_order_number"), rd.get("location_id"), None,
+                    rd.get("mkc_order_number"), rd.get("location_id"), None, tenant_id,
                 ),
             )
             return {"id": cur.lastrowid, "message": "Duplicated"}
