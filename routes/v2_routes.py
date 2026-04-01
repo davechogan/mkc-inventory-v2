@@ -419,21 +419,166 @@ def create_v2_router(
 
     @router.get("/api/v2/me")
     def v2_me(request: Request):
-        """Return the current authenticated user's profile, or null if unauthenticated."""
+        """Return the current authenticated user's profile with tenant memberships."""
         from auth import get_current_user
         user = get_current_user(request)
         if not user:
-            return {"authenticated": False, "user": None}
+            return {"authenticated": False, "user": None, "memberships": []}
         return {
             "authenticated": True,
             "user": {
                 "id": user.id,
                 "email": user.email,
                 "name": user.name,
-                "tenant_id": user.tenant_id,
-                "role": user.role,
             },
+            "memberships": [
+                {"tenant_id": m.tenant_id, "tenant_name": m.tenant_name, "role": m.role}
+                for m in user.memberships
+            ],
+            "is_new": user.is_new,
+            "needs_onboarding": len(user.memberships) == 0,
         }
+
+    # ── Tenant management ───────────────────────────────────────────────
+
+    @router.get("/api/v2/tenants")
+    def v2_list_tenants(request: Request):
+        """List tenants the current user belongs to."""
+        from auth import get_current_user
+        user = get_current_user(request)
+        if not user:
+            return []
+        return [
+            {"tenant_id": m.tenant_id, "tenant_name": m.tenant_name, "role": m.role}
+            for m in user.memberships
+        ]
+
+    @router.post("/api/v2/tenants")
+    def v2_create_tenant(request: Request, payload: dict = Body(...)):
+        """Create a new tenant. The authenticated user becomes the owner."""
+        from auth import get_current_user
+        user = get_current_user(request)
+        if not user:
+            raise HTTPException(status_code=401, detail="Authentication required.")
+        name = (payload.get("name") or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Tenant name is required.")
+        import uuid as _uuid
+        tenant_id = str(_uuid.uuid4())
+        with get_conn() as conn:
+            conn.execute(
+                "INSERT INTO tenants (id, name, created_by) VALUES (?, ?, ?)",
+                (tenant_id, name, user.id),
+            )
+            conn.execute(
+                "INSERT INTO tenant_members (tenant_id, user_id, role) VALUES (?, ?, 'owner')",
+                (tenant_id, user.id),
+            )
+        return {"tenant_id": tenant_id, "name": name, "role": "owner"}
+
+    @router.put("/api/v2/tenants/{tenant_id}")
+    def v2_rename_tenant(tenant_id: str, request: Request, payload: dict = Body(...)):
+        """Rename a tenant. Owner only."""
+        from auth import verify_tenant_access
+        verify_tenant_access(request, tenant_id, required_role="owner")
+        name = (payload.get("name") or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Name is required.")
+        with get_conn() as conn:
+            conn.execute("UPDATE tenants SET name = ? WHERE id = ?", (name, tenant_id))
+        return {"message": "Renamed"}
+
+    @router.delete("/api/v2/tenants/{tenant_id}")
+    def v2_delete_tenant(tenant_id: str, request: Request):
+        """Delete a tenant and all its inventory. Owner only."""
+        from auth import verify_tenant_access
+        verify_tenant_access(request, tenant_id, required_role="owner")
+        if tenant_id == "default":
+            raise HTTPException(status_code=400, detail="Cannot delete the default tenant.")
+        with get_conn() as conn:
+            conn.execute("DELETE FROM inventory_items_v2 WHERE tenant_id = ?", (tenant_id,))
+            conn.execute("DELETE FROM tenant_members WHERE tenant_id = ?", (tenant_id,))
+            conn.execute("DELETE FROM tenants WHERE id = ?", (tenant_id,))
+        return {"message": "Deleted"}
+
+    @router.get("/api/v2/tenants/{tenant_id}/members")
+    def v2_list_members(tenant_id: str, request: Request):
+        """List members of a tenant."""
+        from auth import verify_tenant_access
+        verify_tenant_access(request, tenant_id)
+        with get_conn() as conn:
+            rows = conn.execute(
+                """SELECT tm.id, tm.user_id, tm.invited_email, tm.role, tm.created_at,
+                          u.email, u.name
+                   FROM tenant_members tm
+                   LEFT JOIN users u ON u.id = tm.user_id
+                   WHERE tm.tenant_id = ?
+                   ORDER BY tm.role, u.email""",
+                (tenant_id,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    @router.post("/api/v2/tenants/{tenant_id}/members")
+    def v2_invite_member(tenant_id: str, request: Request, payload: dict = Body(...)):
+        """Invite a user to a tenant by email. Owner only."""
+        from auth import verify_tenant_access
+        verify_tenant_access(request, tenant_id, required_role="owner")
+        email = (payload.get("email") or "").strip().lower()
+        role = (payload.get("role") or "viewer").strip().lower()
+        if not email:
+            raise HTTPException(status_code=400, detail="Email is required.")
+        if role not in ("editor", "viewer"):
+            raise HTTPException(status_code=400, detail="Role must be 'editor' or 'viewer'.")
+        with get_conn() as conn:
+            # Check if already a member
+            existing = conn.execute(
+                "SELECT id FROM tenant_members WHERE tenant_id = ? AND (user_id = (SELECT id FROM users WHERE email = ?) OR invited_email = ?)",
+                (tenant_id, email, email),
+            ).fetchone()
+            if existing:
+                raise HTTPException(status_code=409, detail="This email is already a member or has a pending invite.")
+            conn.execute(
+                "INSERT INTO tenant_members (tenant_id, invited_email, role) VALUES (?, ?, ?)",
+                (tenant_id, email, role),
+            )
+        return {"message": f"Invited {email} as {role}"}
+
+    @router.put("/api/v2/tenants/{tenant_id}/members/{member_id}")
+    def v2_change_member_role(tenant_id: str, member_id: int, request: Request, payload: dict = Body(...)):
+        """Change a member's role. Owner only."""
+        from auth import verify_tenant_access
+        verify_tenant_access(request, tenant_id, required_role="owner")
+        role = (payload.get("role") or "").strip().lower()
+        if role not in ("owner", "editor", "viewer"):
+            raise HTTPException(status_code=400, detail="Role must be 'owner', 'editor', or 'viewer'.")
+        with get_conn() as conn:
+            cur = conn.execute(
+                "UPDATE tenant_members SET role = ? WHERE id = ? AND tenant_id = ?",
+                (role, member_id, tenant_id),
+            )
+            if cur.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Member not found.")
+        return {"message": "Role updated"}
+
+    @router.delete("/api/v2/tenants/{tenant_id}/members/{member_id}")
+    def v2_remove_member(tenant_id: str, member_id: int, request: Request):
+        """Remove a member from a tenant. Owner only."""
+        from auth import verify_tenant_access
+        verify_tenant_access(request, tenant_id, required_role="owner")
+        with get_conn() as conn:
+            # Don't let the owner remove themselves
+            member = conn.execute(
+                "SELECT user_id, role FROM tenant_members WHERE id = ? AND tenant_id = ?",
+                (member_id, tenant_id),
+            ).fetchone()
+            if not member:
+                raise HTTPException(status_code=404, detail="Member not found.")
+            from auth import get_current_user
+            user = get_current_user(request)
+            if user and member["user_id"] == user.id and member["role"] == "owner":
+                raise HTTPException(status_code=400, detail="Cannot remove yourself as owner.")
+            conn.execute("DELETE FROM tenant_members WHERE id = ?", (member_id,))
+        return {"message": "Removed"}
 
     @router.get("/api/v2/users")
     def v2_list_users():
