@@ -104,8 +104,50 @@ def ensure_v2_exclusive_schema(conn: sqlite3.Connection) -> None:
             first_seen  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             last_seen   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE TABLE IF NOT EXISTS tenants (
+            id          TEXT PRIMARY KEY,
+            name        TEXT NOT NULL,
+            created_by  TEXT REFERENCES users(id),
+            created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS tenant_members (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id       TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+            user_id         TEXT REFERENCES users(id),
+            invited_email   TEXT,
+            role            TEXT NOT NULL DEFAULT 'viewer',
+            created_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(tenant_id, user_id),
+            UNIQUE(tenant_id, invited_email)
+        );
         """
     )
+
+    # Migration: ensure the "default" tenant exists and existing users are members
+    _ensure_default_tenant(conn)
+
+
+def _ensure_default_tenant(conn):
+    """Create the default tenant and assign existing users as owners if not already done."""
+    existing = conn.execute("SELECT id FROM tenants WHERE id = 'default'").fetchone()
+    if existing:
+        return
+    # Find the first user to be the creator (or NULL if no users yet)
+    first_user = conn.execute("SELECT id FROM users ORDER BY first_seen LIMIT 1").fetchone()
+    creator_id = first_user["id"] if first_user else None
+    conn.execute(
+        "INSERT INTO tenants (id, name, created_by) VALUES ('default', 'My Collection', ?)",
+        (creator_id,),
+    )
+    # Make all existing users owners of the default tenant
+    users = conn.execute("SELECT id FROM users").fetchall()
+    for u in users:
+        conn.execute(
+            "INSERT OR IGNORE INTO tenant_members (tenant_id, user_id, role) VALUES ('default', ?, 'owner')",
+            (u["id"],),
+        )
 
     # Ensure v3 schema columns exist (added by migrate_schema_v3.py on production,
     # but need to be added here for test/seed DBs that haven't been rebuilt)

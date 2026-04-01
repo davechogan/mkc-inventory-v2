@@ -1,7 +1,22 @@
 import { StrictMode, lazy, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 import './index.css';
+import { getActiveTenantId } from './tenantContext';
 import App from './App';
+
+// Intercept all fetch calls to add X-Tenant-Id header for tenant-scoped API calls
+const _origFetch = window.fetch;
+window.fetch = function (input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const tid = getActiveTenantId();
+  if (tid) {
+    const headers = new Headers(init?.headers);
+    if (!headers.has('X-Tenant-Id')) {
+      headers.set('X-Tenant-Id', tid);
+    }
+    return _origFetch(input, { ...init, headers });
+  }
+  return _origFetch(input, init);
+};
 
 const Identify = lazy(() => import('./pages/Identify'));
 const Catalog = lazy(() => import('./pages/Catalog'));

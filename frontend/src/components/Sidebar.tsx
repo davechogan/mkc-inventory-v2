@@ -72,10 +72,15 @@ interface NavItem {
   active: boolean;
 }
 
+interface TenantMembership {
+  tenant_id: string;
+  tenant_name: string;
+  role: string;
+}
+
 interface AuthUser {
   email: string;
   name: string | null;
-  role: string;
 }
 
 export function Sidebar() {
@@ -84,12 +89,31 @@ export function Sidebar() {
   });
   const [mobileOpen, setMobileOpen] = useState(false);
   const [user, setUser] = useState<AuthUser | null>(null);
+  const [memberships, setMemberships] = useState<TenantMembership[]>([]);
+  const [activeTenant, setActiveTenantState] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch('/api/v2/me')
-      .then(r => r.json())
-      .then(d => { if (d.authenticated) setUser(d.user as AuthUser); })
-      .catch(() => {});
+    import('../tenantContext').then(({ getActiveTenantId, setActiveTenantId }) => {
+      fetch('/api/v2/me')
+        .then(r => r.json())
+        .then(d => {
+          if (d.authenticated) {
+            setUser(d.user as AuthUser);
+            setMemberships(d.memberships ?? []);
+            // Set active tenant from localStorage or first membership
+            const saved = getActiveTenantId();
+            const validSaved = (d.memberships ?? []).find((m: TenantMembership) => m.tenant_id === saved);
+            if (validSaved) {
+              setActiveTenantState(saved);
+            } else if (d.memberships?.length > 0) {
+              const first = d.memberships[0].tenant_id;
+              setActiveTenantId(first);
+              setActiveTenantState(first);
+            }
+          }
+        })
+        .catch(() => {});
+    });
   }, []);
 
   const currentPath = window.location.pathname;
@@ -112,6 +136,51 @@ export function Sidebar() {
     window.dispatchEvent(new CustomEvent('mkc-sidebar-toggle', { detail: { collapsed } }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const handleTenantChange = (tenantId: string) => {
+    import('../tenantContext').then(({ setActiveTenantId }) => {
+      setActiveTenantId(tenantId);
+      setActiveTenantState(tenantId);
+      window.location.reload(); // reload to apply new tenant scope
+    });
+  };
+
+  const roleColor = (role: string) => {
+    if (role === 'owner') return 'text-gold';
+    if (role === 'editor') return 'text-blue-400';
+    return 'text-muted';
+  };
+
+  // Tenant picker (shared between desktop and mobile)
+  const tenantPicker = (showFull: boolean) => memberships.length > 0 && (
+    <div className={`border-b border-border flex-shrink-0 ${showFull ? 'px-3 py-2' : 'px-1 py-2 flex justify-center'}`}>
+      {showFull ? (
+        memberships.length === 1 ? (
+          <div className="flex items-center gap-2 px-1">
+            <span className={`text-[10px] font-bold uppercase ${roleColor(memberships[0].role)}`}>{memberships[0].role}</span>
+            <span className="text-ink text-xs truncate">{memberships[0].tenant_name}</span>
+          </div>
+        ) : (
+          <select
+            value={activeTenant ?? ''}
+            onChange={e => handleTenantChange(e.target.value)}
+            className="w-full px-2 py-1.5 bg-surface border border-border rounded-lg text-xs text-ink focus:outline-none focus:border-gold/60 transition-colors"
+          >
+            {memberships.map(m => (
+              <option key={m.tenant_id} value={m.tenant_id}>
+                {m.tenant_name} ({m.role})
+              </option>
+            ))}
+          </select>
+        )
+      ) : (
+        <div className="w-7 h-7 rounded-full bg-border/40 flex items-center justify-center text-[10px] text-muted font-bold"
+          title={memberships.find(m => m.tenant_id === activeTenant)?.tenant_name ?? ''}>
+          {(memberships.find(m => m.tenant_id === activeTenant)?.tenant_name ?? '?')[0].toUpperCase()}
+        </div>
+      )}
+    </div>
+  );
 
   // Nav link content (shared between desktop and mobile)
   const navContent = (onNavigate?: () => void) => (
@@ -196,6 +265,7 @@ export function Sidebar() {
                 </svg>
               </button>
             </div>
+            {tenantPicker(true)}
             {navContent(() => setMobileOpen(false))}
             {userSection(true)}
           </aside>
@@ -229,6 +299,7 @@ export function Sidebar() {
             </button>
           </div>
         )}
+        {tenantPicker(!collapsed)}
         {navContent()}
         {userSection(!collapsed)}
       </aside>
