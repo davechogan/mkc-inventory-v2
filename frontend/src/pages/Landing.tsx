@@ -4,9 +4,10 @@
  */
 
 export default function Landing() {
-  // The sign-in URL goes to Cloudflare Access which handles the OAuth flow
-  // After authentication, the user is redirected back to the app
-  const signInUrl = window.location.origin + '/';
+  // Point to the Cloudflare Access login endpoint, which triggers the OAuth flow
+  // and redirects back to the app root after authentication.
+  // If no Cloudflare (dev mode), this just reloads the page.
+  const signInUrl = window.location.origin + '/cdn-cgi/access/login?redirect_url=' + encodeURIComponent(window.location.origin + '/');
 
   return (
     <div className="min-h-screen bg-surface flex flex-col">
