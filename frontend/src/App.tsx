@@ -207,7 +207,7 @@ export default function App() {
 
   const activeFilterCount = countActiveFilters(filters);
 
-  const marginClass = sidebarCollapsed ? 'ml-16' : 'ml-56';
+  const marginClass = sidebarCollapsed ? 'md:ml-16' : 'md:ml-56';
 
   return (
     <div className="min-h-screen bg-surface">
@@ -218,7 +218,7 @@ export default function App() {
         className={`${marginClass} transition-[margin] duration-200 flex flex-col h-screen overflow-hidden`}
       >
         {/* Top bar — title + actions */}
-        <div className="flex items-center justify-between px-8 py-4 border-b border-border flex-shrink-0">
+        <div className="flex items-center justify-between pl-14 pr-4 md:px-8 py-4 border-b border-border flex-shrink-0">
           <div className="flex items-center gap-3">
             <h1 className="text-ink text-xl font-bold">Collection</h1>
             <button onClick={() => setAddOpen(true)}
@@ -248,7 +248,7 @@ export default function App() {
         <StatStrip summary={summary} loading={loading} />
 
         {/* Filters — directly above grid */}
-        <div className="flex items-center gap-3 px-8 py-3 border-b border-border flex-shrink-0 flex-wrap">
+        <div className="flex items-center gap-2 md:gap-3 px-4 md:px-8 py-3 border-b border-border flex-shrink-0 flex-wrap">
           <div className="relative flex-1 min-w-[180px] max-w-xs">
             <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-muted pointer-events-none" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />

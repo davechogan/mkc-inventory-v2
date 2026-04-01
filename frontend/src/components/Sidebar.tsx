@@ -57,6 +57,14 @@ function IconChevronRight() {
   );
 }
 
+function IconMenu() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
+    </svg>
+  );
+}
+
 interface NavItem {
   label: string;
   href: string;
@@ -74,6 +82,7 @@ export function Sidebar() {
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     return localStorage.getItem(STORAGE_KEY) === 'true';
   });
+  const [mobileOpen, setMobileOpen] = useState(false);
   const [user, setUser] = useState<AuthUser | null>(null);
 
   useEffect(() => {
@@ -104,90 +113,125 @@ export function Sidebar() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return (
-    <aside
-      className={`fixed left-0 top-0 h-full flex flex-col z-50 transition-all duration-200 ${
-        collapsed ? 'w-16' : 'w-56'
-      }`}
-      style={{ backgroundColor: '#060709', borderRight: '1px solid #1d2329' }}
-    >
-      {collapsed ? (
-        /* ── Collapsed header ── */
-        <div className="flex flex-col items-center pt-4 pb-3 border-b border-border flex-shrink-0 gap-1.5">
-          <img src="/static/logo.png" alt="MKC" className="w-10 h-10 object-contain" />
-          <span className="text-gold text-xs font-bold tracking-widest">MKC</span>
-          <button
-            onClick={toggle}
-            title="Expand sidebar"
-            className="text-muted hover:text-ink transition-colors p-1 rounded-md hover:bg-border/30"
-          >
-            <IconChevronRight />
-          </button>
+  // Nav link content (shared between desktop and mobile)
+  const navContent = (onNavigate?: () => void) => (
+    <nav className="flex-1 px-2 py-3 flex flex-col gap-1">
+      {navItems.map((item) => (
+        <a
+          key={item.href}
+          href={item.href}
+          title={item.label}
+          onClick={onNavigate}
+          className={`flex items-center gap-3 px-3 py-3 md:px-2 md:py-2.5 rounded-lg transition-colors relative group ${
+            item.active
+              ? 'text-ink bg-gold/8 border-l-2 border-gold pl-[10px] md:pl-[6px]'
+              : 'text-muted hover:text-ink hover:bg-border/30 border-l-2 border-transparent'
+          }`}
+        >
+          <span className="flex-shrink-0">{item.icon}</span>
+          {(!collapsed || mobileOpen) && (
+            <span className="text-sm font-medium truncate">{item.label}</span>
+          )}
+          {collapsed && !mobileOpen && (
+            <span className="absolute left-full ml-2 px-2 py-1 bg-card border border-border rounded-md text-xs text-ink whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
+              {item.label}
+            </span>
+          )}
+        </a>
+      ))}
+    </nav>
+  );
+
+  const userSection = (showFull: boolean) => user && (
+    <div className={`border-t border-border px-3 py-3 flex-shrink-0 ${!showFull ? 'flex justify-center' : ''}`}>
+      {showFull ? (
+        <div className="flex items-center gap-2.5">
+          <div className="w-7 h-7 rounded-full bg-gold/20 flex items-center justify-center text-gold text-xs font-bold flex-shrink-0">
+            {user.email[0].toUpperCase()}
+          </div>
+          <div className="min-w-0">
+            <div className="text-ink text-xs font-medium truncate">{user.name ?? user.email.split('@')[0]}</div>
+            <div className="text-muted text-[10px] truncate">{user.email}</div>
+          </div>
         </div>
       ) : (
-        /* ── Expanded header ── */
-        <div className="relative flex flex-col items-center px-4 pt-6 pb-4 border-b border-border flex-shrink-0 gap-2">
-          <img src="/static/logo.png" alt="MKC Logo" className="w-24 h-24 object-contain" />
-          <div className="text-center">
-            <div className="text-ink font-bold text-sm leading-tight tracking-wide">Montana Knife Company</div>
-            <div className="text-muted text-xs tracking-widest uppercase mt-0.5">Collection</div>
+        <div className="w-7 h-7 rounded-full bg-gold/20 flex items-center justify-center text-gold text-xs font-bold" title={user.email}>
+          {user.email[0].toUpperCase()}
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <>
+      {/* Mobile hamburger button — fixed top-left, visible only on small screens */}
+      <button
+        onClick={() => setMobileOpen(true)}
+        className="fixed top-3 left-3 z-50 md:hidden p-2 rounded-lg bg-card border border-border text-muted hover:text-ink transition-colors"
+        aria-label="Open menu"
+      >
+        <IconMenu />
+      </button>
+
+      {/* Mobile overlay */}
+      {mobileOpen && (
+        <div className="fixed inset-0 bg-black/60 z-50 md:hidden" onClick={() => setMobileOpen(false)}>
+          <aside
+            className="w-64 h-full flex flex-col"
+            style={{ backgroundColor: '#060709' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Mobile header */}
+            <div className="flex items-center justify-between px-4 pt-5 pb-4 border-b border-border flex-shrink-0">
+              <div className="flex items-center gap-3">
+                <img src="/static/logo.png" alt="MKC" className="w-10 h-10 object-contain" />
+                <div>
+                  <div className="text-ink font-bold text-sm">MKC</div>
+                  <div className="text-muted text-[10px] uppercase tracking-widest">Collection</div>
+                </div>
+              </div>
+              <button onClick={() => setMobileOpen(false)} className="text-muted hover:text-ink p-1">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+            {navContent(() => setMobileOpen(false))}
+            {userSection(true)}
+          </aside>
+        </div>
+      )}
+
+      {/* Desktop sidebar — hidden on mobile */}
+      <aside
+        className={`fixed left-0 top-0 h-full flex-col z-40 transition-all duration-200 hidden md:flex ${
+          collapsed ? 'w-16' : 'w-56'
+        }`}
+        style={{ backgroundColor: '#060709', borderRight: '1px solid #1d2329' }}
+      >
+        {collapsed ? (
+          <div className="flex flex-col items-center pt-4 pb-3 border-b border-border flex-shrink-0 gap-1.5">
+            <img src="/static/logo.png" alt="MKC" className="w-10 h-10 object-contain" />
+            <span className="text-gold text-xs font-bold tracking-widest">MKC</span>
+            <button onClick={toggle} title="Expand sidebar" className="text-muted hover:text-ink transition-colors p-1 rounded-md hover:bg-border/30">
+              <IconChevronRight />
+            </button>
           </div>
-          <button
-            onClick={toggle}
-            title="Collapse sidebar"
-            className="absolute top-3 right-3 text-muted hover:text-ink transition-colors p-1 rounded-md hover:bg-border/30"
-          >
-            <IconChevronLeft />
-          </button>
-        </div>
-      )}
-
-      {/* Nav */}
-      <nav className="flex-1 px-2 py-3 flex flex-col gap-1">
-        {navItems.map((item) => (
-          <a
-            key={item.href}
-            href={item.href}
-            title={item.label}
-            className={`flex items-center gap-3 px-2 py-2.5 rounded-lg transition-colors relative group ${
-              item.active
-                ? 'text-ink bg-gold/8 border-l-2 border-gold pl-[6px]'
-                : 'text-muted hover:text-ink hover:bg-border/30 border-l-2 border-transparent'
-            }`}
-          >
-            <span className="flex-shrink-0">{item.icon}</span>
-            {!collapsed && (
-              <span className="text-sm font-medium truncate">{item.label}</span>
-            )}
-            {collapsed && (
-              <span className="absolute left-full ml-2 px-2 py-1 bg-card border border-border rounded-md text-xs text-ink whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
-                {item.label}
-              </span>
-            )}
-          </a>
-        ))}
-      </nav>
-
-      {/* User info */}
-      {user && (
-        <div className={`border-t border-border px-3 py-3 flex-shrink-0 ${collapsed ? 'flex justify-center' : ''}`}>
-          {collapsed ? (
-            <div className="w-7 h-7 rounded-full bg-gold/20 flex items-center justify-center text-gold text-xs font-bold" title={user.email}>
-              {user.email[0].toUpperCase()}
+        ) : (
+          <div className="relative flex flex-col items-center px-4 pt-6 pb-4 border-b border-border flex-shrink-0 gap-2">
+            <img src="/static/logo.png" alt="MKC Logo" className="w-24 h-24 object-contain" />
+            <div className="text-center">
+              <div className="text-ink font-bold text-sm leading-tight tracking-wide">Montana Knife Company</div>
+              <div className="text-muted text-xs tracking-widest uppercase mt-0.5">Collection</div>
             </div>
-          ) : (
-            <div className="flex items-center gap-2.5">
-              <div className="w-7 h-7 rounded-full bg-gold/20 flex items-center justify-center text-gold text-xs font-bold flex-shrink-0">
-                {user.email[0].toUpperCase()}
-              </div>
-              <div className="min-w-0">
-                <div className="text-ink text-xs font-medium truncate">{user.name ?? user.email.split('@')[0]}</div>
-                <div className="text-muted text-[10px] truncate">{user.email}</div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-    </aside>
+            <button onClick={toggle} title="Collapse sidebar" className="absolute top-3 right-3 text-muted hover:text-ink transition-colors p-1 rounded-md hover:bg-border/30">
+              <IconChevronLeft />
+            </button>
+          </div>
+        )}
+        {navContent()}
+        {userSection(!collapsed)}
+      </aside>
+    </>
   );
 }

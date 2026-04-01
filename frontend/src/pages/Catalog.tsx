@@ -839,7 +839,7 @@ export default function Catalog() {
 
   const activeCount = Object.entries(filters).filter(([k, v]) => k !== 'search' && v).length;
 
-  const marginClass = sidebarCollapsed ? 'ml-16' : 'ml-56';
+  const marginClass = sidebarCollapsed ? 'md:ml-16' : 'md:ml-56';
   const hasDetail = selected !== null || addingNew;
 
   return (
@@ -848,7 +848,7 @@ export default function Catalog() {
 
       <main className={`${marginClass} transition-[margin] duration-200 flex flex-col h-screen overflow-hidden`}>
         {/* Top bar */}
-        <div className="flex items-center justify-between px-8 py-4 border-b border-border flex-shrink-0 gap-4 flex-wrap">
+        <div className="flex items-center justify-between pl-14 pr-4 md:px-8 py-4 border-b border-border flex-shrink-0 gap-4 flex-wrap">
           <div className="flex items-center gap-3 flex-shrink-0">
             <h1 className="text-ink text-xl font-bold">Catalog</h1>
             <button

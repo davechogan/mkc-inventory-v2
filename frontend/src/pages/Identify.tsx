@@ -307,7 +307,7 @@ export default function Identify() {
     setError(null);
   };
 
-  const marginClass = sidebarCollapsed ? 'ml-16' : 'ml-56';
+  const marginClass = sidebarCollapsed ? 'md:ml-16' : 'md:ml-56';
 
   return (
     <div className="min-h-screen bg-surface">

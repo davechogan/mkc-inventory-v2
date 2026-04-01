@@ -873,7 +873,7 @@ export default function Reporting() {
 
   const [chatOpen, setChatOpen] = useState(true);
   const isEmpty = messages.length === 0;
-  const marginClass = sidebarCollapsed ? 'ml-16' : 'ml-56';
+  const marginClass = sidebarCollapsed ? 'md:ml-16' : 'md:ml-56';
 
   return (
     <div className="min-h-screen bg-surface">
@@ -881,7 +881,7 @@ export default function Reporting() {
 
       <main className={`${marginClass} transition-[margin] duration-200 flex flex-col h-screen`}>
         {/* Top bar */}
-        <div className="flex items-center justify-between px-8 py-4 border-b border-border flex-shrink-0">
+        <div className="flex items-center justify-between pl-14 pr-4 md:px-8 py-4 border-b border-border flex-shrink-0">
           <h1 className="text-ink text-xl font-bold">Reporting</h1>
           <div className="flex items-center gap-2">
             <button
@@ -923,9 +923,9 @@ export default function Reporting() {
 
           {/* Chat panel — collapsible right side */}
           {chatOpen ? (
-          <div className="flex-shrink-0 w-[480px] overflow-hidden"
+          <div className="flex-shrink-0 w-full md:w-[480px] overflow-hidden"
             style={{ borderLeft: '1px solid #1d2329' }}>
-            <div className="flex flex-col h-full w-[480px]" style={{ backgroundColor: '#060709' }}>
+            <div className="flex flex-col h-full w-full md:w-[480px]" style={{ backgroundColor: '#060709' }}>
               {/* Chat header */}
               <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
                 <div className="flex items-center gap-2">
