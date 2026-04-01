@@ -2,7 +2,7 @@ import { StrictMode, lazy, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 import './index.css';
 import { getActiveTenantId } from './tenantContext';
-import App from './App';
+import AuthGate from './AuthGate';
 
 // Intercept all fetch calls to add X-Tenant-Id header for tenant-scoped API calls
 const _origFetch = window.fetch;
@@ -38,7 +38,7 @@ if (path === '/identify') {
 } else if (path === '/admin') {
   Page = Admin;
 } else {
-  Page = App;
+  Page = AuthGate;
 }
 
 createRoot(rootEl).render(
