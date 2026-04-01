@@ -1,14 +1,21 @@
-"""Legacy web UI HTML shells (mounted from app; assets via /static mount)."""
+"""Web UI page routes (mounted from app; assets via /static mount)."""
 from __future__ import annotations
 
 from pathlib import Path
 
 from fastapi import APIRouter
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 
 
 def create_static_pages_router(*, static_dir: Path) -> APIRouter:
     router = APIRouter(tags=["static-pages"])
+
+    @router.get("/auth/login")
+    def auth_login():
+        """Login redirect — Cloudflare Access protects this path and forces authentication.
+        After auth, the user arrives here with JWT headers set, and we redirect to /.
+        The AuthGate at / then checks /api/v2/me and routes to the right page."""
+        return RedirectResponse(url="/", status_code=302)
 
     @router.get("/")
     def root():

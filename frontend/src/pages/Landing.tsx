@@ -4,10 +4,10 @@
  */
 
 export default function Landing() {
-  // Point to the Cloudflare Access login endpoint, which triggers the OAuth flow
-  // and redirects back to the app root after authentication.
-  // If no Cloudflare (dev mode), this just reloads the page.
-  const signInUrl = window.location.origin + '/cdn-cgi/access/login?redirect_url=' + encodeURIComponent(window.location.origin + '/');
+  // Link to a protected path — Cloudflare Access intercepts it and forces login.
+  // After authentication, Cloudflare redirects back to this path, which serves
+  // the React app. The AuthGate then checks /api/v2/me and routes accordingly.
+  const signInUrl = '/auth/login';
 
   return (
     <div className="min-h-screen bg-surface flex flex-col">
