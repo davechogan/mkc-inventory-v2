@@ -86,10 +86,10 @@ def test_reporting_direct_llm_sql_toggle_does_not_bypass_planner(invapp, monkeyp
             cur_new = conn.execute(
                 """
                 INSERT INTO knife_models_v2
-                    (official_name, normalized_name, sortable_name, slug, record_status)
-                VALUES (?, ?, ?, ?, 'active')
+                    (official_name, sortable_name, slug)
+                VALUES (?, ?, ?)
                 """,
-                (knife_new, knife_new.lower(), knife_new.lower(), slug_new),
+                (knife_new, knife_new.lower(), slug_new),
             )
             model_new_id = int(cur_new.lastrowid)
             inserted_model_ids.append(model_new_id)
@@ -97,10 +97,10 @@ def test_reporting_direct_llm_sql_toggle_does_not_bypass_planner(invapp, monkeyp
             cur_old = conn.execute(
                 """
                 INSERT INTO knife_models_v2
-                    (official_name, normalized_name, sortable_name, slug, record_status)
-                VALUES (?, ?, ?, ?, 'active')
+                    (official_name, sortable_name, slug)
+                VALUES (?, ?, ?)
                 """,
-                (knife_old, knife_old.lower(), knife_old.lower(), slug_old),
+                (knife_old, knife_old.lower(), slug_old),
             )
             model_old_id = int(cur_old.lastrowid)
             inserted_model_ids.append(model_old_id)
@@ -108,20 +108,20 @@ def test_reporting_direct_llm_sql_toggle_does_not_bypass_planner(invapp, monkeyp
             cur_inv_old = conn.execute(
                 """
                 INSERT INTO inventory_items_v2
-                    (knife_model_id, nickname, quantity, acquired_date, condition, notes, created_at, updated_at)
-                VALUES (?, ?, 1, ?, 'Like New', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    (knife_model_id, quantity, acquired_date, notes, created_at, updated_at)
+                VALUES (?, 1, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 """,
-                (model_old_id, "old", old_date, "old-notes"),
+                (model_old_id, old_date, "old-notes"),
             )
             inserted_inventory_ids.append(int(cur_inv_old.lastrowid))
 
             cur_inv_new = conn.execute(
                 """
                 INSERT INTO inventory_items_v2
-                    (knife_model_id, nickname, quantity, acquired_date, condition, notes, created_at, updated_at)
-                VALUES (?, ?, 1, ?, 'Like New', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    (knife_model_id, quantity, acquired_date, notes, created_at, updated_at)
+                VALUES (?, 1, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 """,
-                (model_new_id, "new", new_date, "new-notes"),
+                (model_new_id, new_date, "new-notes"),
             )
             inserted_inventory_ids.append(int(cur_inv_new.lastrowid))
 
