@@ -13,13 +13,19 @@ def create_static_pages_router(*, static_dir: Path) -> APIRouter:
     @router.get("/auth/login")
     def auth_login():
         """Login redirect — Cloudflare Access protects this path and forces authentication.
-        After auth, the user arrives here with JWT headers set, and we redirect to /.
-        The AuthGate at / then checks /api/v2/me and routes to the right page."""
-        return RedirectResponse(url="/", status_code=302)
+        After auth, the user arrives here with JWT headers set, and we redirect to /collection.
+        The AuthGate at /collection then checks /api/v2/me and routes to the right page."""
+        return RedirectResponse(url="/collection", status_code=302)
 
     @router.get("/")
     def root():
-        # Serve the React SPA build; falls back to legacy HTML if build is missing
+        # Public landing page — always accessible
+        react_build = static_dir / "dist" / "index.html"
+        return FileResponse(react_build if react_build.exists() else static_dir / "index.html")
+
+    @router.get("/collection")
+    def collection_page():
+        # Protected collection page — AuthGate checks auth client-side
         react_build = static_dir / "dist" / "index.html"
         return FileResponse(react_build if react_build.exists() else static_dir / "index.html")
 

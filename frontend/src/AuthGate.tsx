@@ -1,8 +1,12 @@
 /**
- * AuthGate — wraps the root route (/) to handle:
- * 1. Unauthenticated → Landing page
+ * AuthGate — handles auth routing:
+ * 1. Unauthenticated → Landing page (Phase 5: app-native login form)
  * 2. Authenticated, no memberships → Onboarding
  * 3. Authenticated, has memberships → Collection (App)
+ *
+ * Currently used at both / and /collection. With Cloudflare Access active,
+ * all visitors are pre-authenticated so state 1 only triggers in dev mode
+ * or after Phase 5 (app-native auth).
  */
 
 import { useState, useEffect, lazy, Suspense } from 'react';
@@ -26,12 +30,26 @@ export default function AuthGate() {
   const [state, setState] = useState<AuthState>('loading');
   const [email, setEmail] = useState('');
 
+  const isProd = window.location.hostname === 'inventory.davechogan.com';
+
   const checkAuth = () => {
     fetch('/api/v2/me')
-      .then(r => r.json())
-      .then((d: MeResponse) => {
+      .then(r => {
+        // If Cloudflare blocks the request (user not authenticated), it returns
+        // a redirect or HTML page instead of JSON. Detect this and show landing.
+        const ct = r.headers.get('content-type') || '';
+        if (!ct.includes('application/json')) {
+          setState(isProd ? 'unauthenticated' : 'ready');
+          return;
+        }
+        return r.json();
+      })
+      .then((d: MeResponse | undefined) => {
+        if (!d) return; // handled above
         if (!d.authenticated) {
-          setState('unauthenticated');
+          // No Cloudflare headers — in dev/LAN mode, skip auth and go straight to app.
+          // In prod (behind Cloudflare), this shouldn't happen, but show landing if it does.
+          setState(isProd ? 'unauthenticated' : 'ready');
         } else if (d.needs_onboarding) {
           setEmail(d.user?.email ?? '');
           setState('needs_onboarding');
@@ -46,8 +64,9 @@ export default function AuthGate() {
         }
       })
       .catch(() => {
-        // If /me fails (no auth middleware), assume dev mode — go straight to app
-        setState('ready');
+        // If /me fails entirely (network error, CORS block, etc.):
+        // Dev/LAN: go straight to app. Prod: show landing as safe fallback.
+        setState(isProd ? 'unauthenticated' : 'ready');
       });
   };
 

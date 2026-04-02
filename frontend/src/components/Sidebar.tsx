@@ -65,6 +65,15 @@ function IconMenu() {
   );
 }
 
+function IconSettings() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  );
+}
+
 interface NavItem {
   label: string;
   href: string;
@@ -182,32 +191,38 @@ export function Sidebar() {
     </div>
   );
 
+  const adminItem: NavItem = { label: 'Admin', href: '/admin', icon: <IconSettings />, active: currentPath === '/admin' };
+
+  const navLink = (item: NavItem, onNavigate?: () => void) => (
+    <a
+      key={item.href}
+      href={item.href}
+      title={item.label}
+      onClick={onNavigate}
+      className={`flex items-center gap-3 px-3 py-3 md:px-2 md:py-2.5 rounded-lg transition-colors relative group ${
+        item.active
+          ? 'text-ink bg-gold/8 border-l-2 border-gold pl-[10px] md:pl-[6px]'
+          : 'text-muted hover:text-ink hover:bg-border/30 border-l-2 border-transparent'
+      }`}
+    >
+      <span className="flex-shrink-0">{item.icon}</span>
+      {(!collapsed || mobileOpen) && (
+        <span className="text-sm font-medium truncate">{item.label}</span>
+      )}
+      {collapsed && !mobileOpen && (
+        <span className="absolute left-full ml-2 px-2 py-1 bg-card border border-border rounded-md text-xs text-ink whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
+          {item.label}
+        </span>
+      )}
+    </a>
+  );
+
   // Nav link content (shared between desktop and mobile)
   const navContent = (onNavigate?: () => void) => (
     <nav className="flex-1 px-2 py-3 flex flex-col gap-1">
-      {navItems.map((item) => (
-        <a
-          key={item.href}
-          href={item.href}
-          title={item.label}
-          onClick={onNavigate}
-          className={`flex items-center gap-3 px-3 py-3 md:px-2 md:py-2.5 rounded-lg transition-colors relative group ${
-            item.active
-              ? 'text-ink bg-gold/8 border-l-2 border-gold pl-[10px] md:pl-[6px]'
-              : 'text-muted hover:text-ink hover:bg-border/30 border-l-2 border-transparent'
-          }`}
-        >
-          <span className="flex-shrink-0">{item.icon}</span>
-          {(!collapsed || mobileOpen) && (
-            <span className="text-sm font-medium truncate">{item.label}</span>
-          )}
-          {collapsed && !mobileOpen && (
-            <span className="absolute left-full ml-2 px-2 py-1 bg-card border border-border rounded-md text-xs text-ink whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
-              {item.label}
-            </span>
-          )}
-        </a>
-      ))}
+      {navItems.map((item) => navLink(item, onNavigate))}
+      <div className="flex-1" />
+      {navLink(adminItem, onNavigate)}
     </nav>
   );
 

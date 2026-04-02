@@ -18,6 +18,7 @@ window.fetch = function (input: RequestInfo | URL, init?: RequestInit): Promise<
   return _origFetch(input, init);
 };
 
+const Landing = lazy(() => import('./pages/Landing'));
 const Identify = lazy(() => import('./pages/Identify'));
 const Catalog = lazy(() => import('./pages/Catalog'));
 const Reporting = lazy(() => import('./pages/Reporting'));
@@ -37,7 +38,13 @@ if (path === '/identify') {
   Page = Reporting;
 } else if (path === '/admin') {
   Page = Admin;
+} else if (path === '/collection') {
+  Page = AuthGate;
 } else {
+  // Root (/) — AuthGate handles auth check.
+  // When Cloudflare Access is active, all visitors are already authenticated.
+  // When we move to app-native auth (Phase 5), AuthGate will show Landing for
+  // unauthenticated users and the /collection route takes over.
   Page = AuthGate;
 }
 

@@ -1,4 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { Sidebar } from '../components/Sidebar';
+
+const SIDEBAR_KEY = 'mkc_sidebar_collapsed';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -384,9 +387,21 @@ function AccessLog() {
 // ── Admin page ────────────────────────────────────────────────────────────────
 
 export default function Admin() {
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(
+    () => localStorage.getItem(SIDEBAR_KEY) === 'true'
+  );
   const [options, setOptions] = useState<OptionsMap>({});
   const [loading, setLoading] = useState(true);
   const [activeSection, setActiveSection] = useState<'options' | 'images' | 'access' | 'catalog'>('options');
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const ce = e as CustomEvent<{ collapsed: boolean }>;
+      setSidebarCollapsed(ce.detail.collapsed);
+    };
+    window.addEventListener('mkc-sidebar-toggle', handler);
+    return () => window.removeEventListener('mkc-sidebar-toggle', handler);
+  }, []);
 
   const fetchOptions = useCallback(async () => {
     const res = await fetch('/api/v2/options');
@@ -442,15 +457,17 @@ export default function Admin() {
     }));
   };
 
+  const marginClass = sidebarCollapsed ? 'md:ml-16' : 'md:ml-56';
+
   return (
     <div className="min-h-screen bg-surface text-ink">
+      <Sidebar />
+
+      <div className={`${marginClass} transition-[margin] duration-200`}>
       {/* Header */}
-      <header className="border-b border-border px-6 py-4 flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-bold text-ink tracking-wide">Admin</h1>
-          <p className="text-muted text-xs mt-0.5">Hidden — manage dropdowns and catalog data</p>
-        </div>
-        <a href="/" className="text-muted text-sm hover:text-gold transition-colors">← Collection</a>
+      <header className="border-b border-border px-6 py-4 pl-14 md:pl-6">
+        <h1 className="text-lg font-bold text-ink tracking-wide">Admin</h1>
+        <p className="text-muted text-xs mt-0.5">Manage dropdowns, catalog data, and system settings</p>
       </header>
 
       {/* Nav tabs */}
@@ -512,6 +529,7 @@ export default function Admin() {
           </div>
         )}
       </main>
+      </div>
     </div>
   );
 }
