@@ -297,6 +297,7 @@ export default function Identify() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<IdentifyResult | null>(null);
+  const [showAll, setShowAll] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -337,6 +338,7 @@ export default function Identify() {
     setLoading(true);
     setError(null);
     setSelected(null);
+    setShowAll(false);
     try {
       const res = await identifyByImage(imageFile, form);
       setResults(res);
@@ -626,27 +628,39 @@ export default function Identify() {
               </div>
             )}
 
-            {results && !loading && results.results.length > 0 && (
-              <div className="p-4 flex flex-col gap-2">
-                <div className="text-muted text-xs px-1 mb-1 flex items-center justify-between">
-                  <span>
-                    {results.results.length} match{results.results.length !== 1 ? 'es' : ''} — ranked by score
-                  </span>
-                  <span>
-                    {results.families_eliminated} families eliminated, {results.families_remaining} remaining
-                    {results.vision_used && ' · vision used'}
-                  </span>
+            {results && !loading && results.results.length > 0 && (() => {
+              const visible = showAll ? results.results : results.results.slice(0, 5);
+              const hasMore = results.results.length > 5;
+              return (
+                <div className="p-4 flex flex-col gap-2">
+                  <div className="text-muted text-xs px-1 mb-1 flex items-center justify-between">
+                    <span>
+                      Top {visible.length} of {results.results.length} match{results.results.length !== 1 ? 'es' : ''}
+                    </span>
+                    <span>
+                      {results.families_eliminated} eliminated
+                      {results.vision_used && ' · vision used'}
+                    </span>
+                  </div>
+                  {visible.map(r => (
+                    <ResultCard
+                      key={r.id}
+                      result={r}
+                      selected={selected?.id === r.id}
+                      onClick={() => setSelected(r)}
+                    />
+                  ))}
+                  {hasMore && !showAll && (
+                    <button
+                      onClick={() => setShowAll(true)}
+                      className="mt-1 py-2 px-4 rounded-lg border border-border text-muted text-xs hover:text-ink hover:border-border/70 transition-colors"
+                    >
+                      Show {results.results.length - 5} more results
+                    </button>
+                  )}
                 </div>
-                {results.results.map(r => (
-                  <ResultCard
-                    key={r.id}
-                    result={r}
-                    selected={selected?.id === r.id}
-                    onClick={() => setSelected(r)}
-                  />
-                ))}
-              </div>
-            )}
+              );
+            })()}
           </div>
 
           {/* ── Right: detail pane ── */}

@@ -2078,14 +2078,14 @@ def create_v2_router(
                 has_any_filter = bool(handle_material or selected_forms or blade_length_bin
                                       or handle_color or blade_color or is_culinary is not None)
 
-                # Handle material — match or penalize mismatch
+                # Handle material — match or hard penalize mismatch
                 if handle_material:
                     if row["handle_type"]:
                         if handle_material.lower() == row["handle_type"].lower():
                             score += 20
                             reasons.append(f"handle material: {row['handle_type']}")
                         else:
-                            score -= 15
+                            score -= 30
                             reasons.append(f"handle mismatch: {row['handle_type']} (not {handle_material})")
 
                 # Blade form — match or penalize
