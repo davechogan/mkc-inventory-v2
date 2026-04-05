@@ -2075,44 +2075,57 @@ def create_v2_router(
                 score = 0.0
                 reasons: list[str] = []
 
-                # Handle material match
-                if handle_material and row["handle_type"]:
-                    if handle_material.lower() == row["handle_type"].lower():
-                        score += 20
-                        reasons.append(f"handle material: {row['handle_type']}")
+                has_any_filter = bool(handle_material or selected_forms or blade_length_bin
+                                      or handle_color or blade_color or is_culinary is not None)
 
-                # Blade form match
-                if selected_forms and row["form_name"]:
-                    if row["form_name"] in selected_forms:
-                        score += 20
-                        reasons.append(f"blade shape: {row['form_name']}")
+                # Handle material — match or penalize mismatch
+                if handle_material:
+                    if row["handle_type"]:
+                        if handle_material.lower() == row["handle_type"].lower():
+                            score += 20
+                            reasons.append(f"handle material: {row['handle_type']}")
+                        else:
+                            score -= 15
+                            reasons.append(f"handle mismatch: {row['handle_type']} (not {handle_material})")
+
+                # Blade form — match or penalize
+                if selected_forms:
+                    if row["form_name"]:
+                        if row["form_name"] in selected_forms:
+                            score += 20
+                            reasons.append(f"blade shape: {row['form_name']}")
+                        else:
+                            score -= 10
 
                 # Blade length proximity (bin-based)
                 if blade_length_bin and blade_length_bin in _LENGTH_BINS and row["blade_length"]:
                     lo, hi = _LENGTH_BINS[blade_length_bin]
-                    mid = (lo + hi) / 2
-                    diff = abs(row["blade_length"] - mid)
-                    span = (hi - lo) / 2
                     if lo <= row["blade_length"] <= hi:
                         score += 15
                         reasons.append(f"blade length {row['blade_length']}\" in range")
-                    elif diff <= span + 1.0:
+                    elif abs(row["blade_length"] - (lo + hi) / 2) <= (hi - lo) / 2 + 1.0:
                         score += 5
                         reasons.append(f"blade length {row['blade_length']}\" near range")
+                    else:
+                        score -= 5
 
-                # Handle color match (check colorways)
+                # Handle color — match or penalize
                 if handle_color:
                     model_colors = colorway_data.get(row["id"], [])
                     if any(handle_color.lower() == c["handle_color"].lower() for c in model_colors):
                         score += 10
                         reasons.append(f"handle color: {handle_color}")
+                    elif model_colors:
+                        score -= 5
 
-                # Blade color match (check colorways)
+                # Blade color — match or penalize
                 if blade_color:
                     model_colors = colorway_data.get(row["id"], [])
                     if any(blade_color.lower() == (c["blade_color"] or "").lower() for c in model_colors):
                         score += 10
                         reasons.append(f"blade color: {blade_color}")
+                    elif model_colors:
+                        score -= 5
 
                 # Culinary match
                 if is_culinary is not None:
@@ -2120,6 +2133,8 @@ def create_v2_router(
                     if is_culinary == is_model_culinary:
                         score += 10
                         reasons.append("culinary" if is_culinary else "non-culinary")
+                    else:
+                        score -= 10
 
                 # Series/variant bonus
                 if handle_material:
@@ -2132,9 +2147,11 @@ def create_v2_router(
                         score += 5
                         reasons.append("Ultra series (carbon fiber)")
 
-                # Give a baseline score of 1 so attribute-less queries still return results
-                if score == 0:
-                    score = 1
+                # Baseline for no-filter queries; skip negatively-scored models when filters are active
+                if not has_any_filter:
+                    score = max(score, 1)
+                elif score <= 0:
+                    continue
 
                 results.append({
                     "id": row["id"],
