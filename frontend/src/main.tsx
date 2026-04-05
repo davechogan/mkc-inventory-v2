@@ -36,16 +36,13 @@ if (path === '/identify') {
   Page = Catalog;
 } else if (path === '/reporting') {
   Page = Reporting;
-} else if (path === '/admin') {
+} else if (path === '/master/admin') {
   Page = Admin;
 } else if (path === '/collection') {
   Page = AuthGate;
 } else {
-  // Root (/) — AuthGate handles auth check.
-  // When Cloudflare Access is active, all visitors are already authenticated.
-  // When we move to app-native auth (Phase 5), AuthGate will show Landing for
-  // unauthenticated users and the /collection route takes over.
-  Page = AuthGate;
+  // Root (/) — public landing page. /collection is the protected entry point.
+  Page = Landing;
 }
 
 createRoot(rootEl).render(

@@ -191,7 +191,7 @@ export function Sidebar() {
     </div>
   );
 
-  const adminItem: NavItem = { label: 'Admin', href: '/admin', icon: <IconSettings />, active: currentPath === '/admin' };
+  const adminItem: NavItem = { label: 'Admin', href: '/master/admin', icon: <IconSettings />, active: currentPath === '/master/admin' };
 
   const navLink = (item: NavItem, onNavigate?: () => void) => (
     <a

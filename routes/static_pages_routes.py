@@ -41,7 +41,7 @@ def create_static_pages_router(*, static_dir: Path) -> APIRouter:
         react_build = static_dir / "dist" / "index.html"
         return FileResponse(react_build if react_build.exists() else static_dir / "master.html")
 
-    @router.get("/admin")
+    @router.get("/master/admin")
     def admin_page():
         react_build = static_dir / "dist" / "index.html"
         return FileResponse(react_build if react_build.exists() else static_dir / "index.html")

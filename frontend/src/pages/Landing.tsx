@@ -7,7 +7,7 @@ export default function Landing() {
   // Link to a protected path — Cloudflare Access intercepts it and forces login.
   // After authentication, Cloudflare redirects back to this path, which serves
   // the React app. The AuthGate then checks /api/v2/me and routes accordingly.
-  const signInUrl = '/auth/login';
+  const signInUrl = '/collection';
 
   return (
     <div className="min-h-screen bg-surface flex flex-col">
