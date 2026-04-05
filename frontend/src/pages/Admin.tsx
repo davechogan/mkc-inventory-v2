@@ -384,6 +384,196 @@ function AccessLog() {
   );
 }
 
+// ── QuickTag ─────────────────────────────────────────────────────────────────
+
+interface TagField {
+  key: string;          // JSON field name sent to PATCH
+  label: string;        // Display label
+  optionsKey: string;   // Key in /api/v2/options response
+}
+
+const TAG_FIELDS: TagField[] = [
+  { key: 'handle_type',  label: 'Handle Type',  optionsKey: 'handle-types' },
+  { key: 'steel',        label: 'Blade Steel',  optionsKey: 'blade-steels' },
+  { key: 'blade_finish', label: 'Blade Finish', optionsKey: 'blade-finishes' },
+];
+
+interface TagModel {
+  id: number;
+  official_name: string;
+  family_name: string | null;
+  knife_type: string | null;
+  handle_type: string | null;
+  blade_steel: string | null;
+  blade_finish: string | null;
+  blade_length: number | null;
+  [key: string]: unknown;
+}
+
+// Map TAG_FIELDS.key to the model property name returned by /api/v2/models/search
+const FIELD_TO_PROP: Record<string, keyof TagModel> = {
+  handle_type: 'handle_type',
+  steel: 'blade_steel',
+  blade_finish: 'blade_finish',
+};
+
+function QuickTag({ options }: { options: OptionsMap }) {
+  const [models, setModels] = useState<TagModel[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [activeField, setActiveField] = useState<TagField>(TAG_FIELDS[0]);
+  const [filter, setFilter] = useState<'unset' | 'all'>('unset');
+  const [saving, setSaving] = useState<number | null>(null);
+  const [saved, setSaved] = useState<number | null>(null);
+
+  useEffect(() => {
+    fetch('/api/v2/models/search?limit=200')
+      .then(r => r.json())
+      .then(d => setModels(d as TagModel[]))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const propName = FIELD_TO_PROP[activeField.key];
+  const filtered = filter === 'unset'
+    ? models.filter(m => !m[propName])
+    : models;
+
+  // Group by family
+  const grouped = new Map<string, TagModel[]>();
+  for (const m of filtered) {
+    const fam = m.family_name || '(no family)';
+    if (!grouped.has(fam)) grouped.set(fam, []);
+    grouped.get(fam)!.push(m);
+  }
+
+  const fieldOptions = options[activeField.optionsKey] ?? [];
+  const unsetCount = models.filter(m => !m[propName]).length;
+
+  const handleChange = async (model: TagModel, value: string) => {
+    setSaving(model.id);
+    try {
+      const res = await fetch(`/api/v2/models/${model.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [activeField.key]: value || null }),
+      });
+      if (res.ok) {
+        setModels(prev => prev.map(m =>
+          m.id === model.id ? { ...m, [propName]: value || null } : m
+        ));
+        setSaved(model.id);
+        setTimeout(() => setSaved(prev => prev === model.id ? null : prev), 1200);
+      }
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  return (
+    <div>
+      {/* Controls */}
+      <div className="flex flex-wrap items-center gap-4 mb-5">
+        <div className="flex items-center gap-2">
+          <span className="text-muted text-xs">Field:</span>
+          <div className="flex rounded-lg border border-border overflow-hidden">
+            {TAG_FIELDS.map(f => (
+              <button
+                key={f.key}
+                onClick={() => setActiveField(f)}
+                className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                  activeField.key === f.key
+                    ? 'bg-gold/20 text-gold'
+                    : 'text-muted hover:text-ink hover:bg-border/30'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-muted text-xs">Show:</span>
+          <div className="flex rounded-lg border border-border overflow-hidden">
+            {([['unset', `Unset (${unsetCount})`], ['all', `All (${models.length})`]] as const).map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => setFilter(key)}
+                className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                  filter === key
+                    ? 'bg-gold/20 text-gold'
+                    : 'text-muted hover:text-ink hover:bg-border/30'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="text-muted text-sm">Loading…</div>
+      ) : filtered.length === 0 ? (
+        <div className="text-muted text-sm py-12 text-center">
+          {filter === 'unset' ? `All models have ${activeField.label.toLowerCase()} set.` : 'No models found.'}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-6">
+          {[...grouped.entries()].map(([family, familyModels]) => (
+            <div key={family}>
+              <h3 className="text-ink text-sm font-semibold mb-2 flex items-center gap-2">
+                {family}
+                <span className="text-muted text-xs font-normal">({familyModels.length})</span>
+              </h3>
+              <div className="flex flex-col gap-1">
+                {familyModels.map(m => (
+                  <div
+                    key={m.id}
+                    className="flex items-center gap-3 px-3 py-2 rounded-lg border border-border bg-card hover:border-border/70 transition-colors"
+                  >
+                    {/* Thumbnail */}
+                    <img
+                      src={`/api/v2/models/${m.id}/image`}
+                      alt=""
+                      className="w-10 h-10 rounded object-contain bg-surface flex-shrink-0"
+                      onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                    />
+                    {/* Name + type */}
+                    <div className="flex-1 min-w-0">
+                      <div className="text-ink text-sm truncate">{m.official_name}</div>
+                      <div className="text-muted text-xs truncate">{m.knife_type}</div>
+                    </div>
+                    {/* Current value + dropdown */}
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <select
+                        value={(m[propName] as string) ?? ''}
+                        onChange={e => handleChange(m, e.target.value)}
+                        disabled={saving === m.id}
+                        className={`w-44 px-2 py-1.5 bg-surface border rounded-lg text-sm focus:outline-none focus:border-gold/60 transition-colors ${
+                          m[propName]
+                            ? 'border-border text-ink'
+                            : 'border-gold/40 text-muted'
+                        }`}
+                      >
+                        <option value="">— unset —</option>
+                        {fieldOptions.map(o => (
+                          <option key={o.id} value={o.name}>{o.name}</option>
+                        ))}
+                      </select>
+                      {saving === m.id && <span className="text-muted text-xs">saving…</span>}
+                      {saved === m.id && <span className="text-green-400 text-xs">✓</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Admin page ────────────────────────────────────────────────────────────────
 
 export default function Admin() {
@@ -392,7 +582,7 @@ export default function Admin() {
   );
   const [options, setOptions] = useState<OptionsMap>({});
   const [loading, setLoading] = useState(true);
-  const [activeSection, setActiveSection] = useState<'options' | 'images' | 'access'>('options');
+  const [activeSection, setActiveSection] = useState<'options' | 'images' | 'access' | 'quicktag'>('options');
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -473,7 +663,7 @@ export default function Admin() {
       {/* Nav tabs */}
       <div className="border-b border-border px-6">
         <nav className="flex gap-6">
-          {([['options', 'Dropdown Options'], ['images', 'Image Audit'], ['access', 'Access Log']] as const).map(([key, label]) => (
+          {([['options', 'Dropdown Options'], ['images', 'Image Audit'], ['access', 'Access Log'], ['quicktag', 'Quick Tag']] as const).map(([key, label]) => (
             <button
               key={key}
               onClick={() => setActiveSection(key)}
@@ -521,6 +711,10 @@ export default function Admin() {
 
         {activeSection === 'access' && (
           <AccessLog />
+        )}
+
+        {activeSection === 'quicktag' && (
+          <QuickTag options={options} />
         )}
 
       </main>

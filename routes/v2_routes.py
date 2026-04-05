@@ -877,6 +877,44 @@ def create_v2_router(
             )
             return {"message": "Updated"}
 
+    # ── Lightweight single/multi-field patch (used by Quick Tag admin UI) ──
+
+    # Maps JSON field name → (column, lookup_table_or_None)
+    _PATCHABLE: dict[str, tuple[str, Optional[str]]] = {
+        "handle_type":   ("handle_type_id",   "handle_types"),
+        "steel":         ("steel_id",         "blade_steels"),
+        "blade_finish":  ("blade_finish_id",  "blade_finishes"),
+        "blade_length":  ("blade_length",     None),
+        "msrp":          ("msrp",             None),
+    }
+
+    @router.patch("/api/v2/models/{model_id}")
+    def v2_patch_model(model_id: int, payload: dict = Body(...)):
+        """Update one or more fields on a model without requiring the full payload."""
+        if not payload:
+            raise HTTPException(status_code=400, detail="Empty payload.")
+        unknown = set(payload.keys()) - set(_PATCHABLE.keys())
+        if unknown:
+            raise HTTPException(status_code=400, detail=f"Unknown fields: {', '.join(sorted(unknown))}")
+        with get_conn() as conn:
+            exists = conn.execute("SELECT id FROM knife_models_v2 WHERE id = ?", (model_id,)).fetchone()
+            if not exists:
+                raise HTTPException(status_code=404, detail="Model not found.")
+            sets: list[str] = []
+            vals: list = []
+            for field, value in payload.items():
+                col, lookup = _PATCHABLE[field]
+                if lookup:
+                    resolved = _v2_attr_id(conn, lookup, value) if value else None
+                    sets.append(f"{col} = ?")
+                    vals.append(resolved)
+                else:
+                    sets.append(f"{col} = ?")
+                    vals.append(value)
+            sets.append("updated_at = CURRENT_TIMESTAMP")
+            vals.append(model_id)
+            conn.execute(f"UPDATE knife_models_v2 SET {', '.join(sets)} WHERE id = ?", vals)
+            return {"message": "Updated", "fields": list(payload.keys())}
 
     @router.delete("/api/v2/models/{model_id}")
     def v2_delete_model(model_id: int):
