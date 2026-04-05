@@ -64,9 +64,9 @@ export default function Landing() {
               <p className="text-muted text-sm">Ask questions in plain English. Get charts, tables, and insights.</p>
             </div>
             <div className="bg-card border border-border rounded-xl p-5">
-              <div className="text-gold text-2xl mb-2">🤝</div>
-              <h3 className="text-ink font-semibold mb-1">Share Collections</h3>
-              <p className="text-muted text-sm">Invite friends and family to view or help manage your collection.</p>
+              <div className="text-gold text-2xl mb-2">🔍</div>
+              <h3 className="text-ink font-semibold mb-1">Identify Any Knife</h3>
+              <p className="text-muted text-sm">Look up any MKC knife by its features — steel, handle, blade finish, and more.</p>
             </div>
           </div>
         </div>

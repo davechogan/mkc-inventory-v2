@@ -392,7 +392,7 @@ export default function Admin() {
   );
   const [options, setOptions] = useState<OptionsMap>({});
   const [loading, setLoading] = useState(true);
-  const [activeSection, setActiveSection] = useState<'options' | 'images' | 'access' | 'catalog'>('options');
+  const [activeSection, setActiveSection] = useState<'options' | 'images' | 'access'>('options');
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -467,13 +467,13 @@ export default function Admin() {
       {/* Header */}
       <header className="border-b border-border px-6 py-4 pl-14 md:pl-6">
         <h1 className="text-lg font-bold text-ink tracking-wide">Admin</h1>
-        <p className="text-muted text-xs mt-0.5">Manage dropdowns, catalog data, and system settings</p>
+        <p className="text-muted text-xs mt-0.5">Manage dropdowns, images, and access settings</p>
       </header>
 
       {/* Nav tabs */}
       <div className="border-b border-border px-6">
         <nav className="flex gap-6">
-          {([['options', 'Dropdown Options'], ['images', 'Image Audit'], ['access', 'Access Log'], ['catalog', 'Catalog']] as const).map(([key, label]) => (
+          {([['options', 'Dropdown Options'], ['images', 'Image Audit'], ['access', 'Access Log']] as const).map(([key, label]) => (
             <button
               key={key}
               onClick={() => setActiveSection(key)}
@@ -523,11 +523,6 @@ export default function Admin() {
           <AccessLog />
         )}
 
-        {activeSection === 'catalog' && (
-          <div className="text-muted text-sm py-12 text-center">
-            Catalog management coming soon.
-          </div>
-        )}
       </main>
       </div>
     </div>
