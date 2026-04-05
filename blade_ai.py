@@ -487,6 +487,54 @@ def extract_distinguishing_features_from_image(model: str, image_b64: str) -> tu
     return t if t else None, None
 
 
+VISION_COMPARE_SYSTEM = """You are identifying a Montana Knife Company (MKC) knife by comparing the user's photo against reference images of candidate models.
+
+Compare the user's knife (Image 1) against each candidate reference image. Focus on:
+- Blade shape and profile (drop point, tanto, skinner, clip point, etc.)
+- Handle shape and proportions
+- Overall size proportions (blade-to-handle ratio)
+- Distinctive features (finger choil, jimping, lanyard hole, ring guard)
+
+For each candidate, rate the match as: STRONG, POSSIBLE, or UNLIKELY.
+
+Return VALID JSON ONLY (no markdown):
+{"comparisons": [{"model": "<exact model name>", "match": "STRONG|POSSIBLE|UNLIKELY", "reason": "<one sentence>"}]}"""
+
+
+def vision_compare_candidates(
+    model: str,
+    user_image_b64: str,
+    candidates: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Compare user's knife photo against candidate reference images via vision LLM.
+
+    Each candidate dict must have 'name' and 'reference_image_b64'.
+    Returns list of {model, match, reason} dicts.
+    """
+    # Build image list: user photo first, then candidate references
+    images = [user_image_b64]
+    candidate_list = []
+    for i, c in enumerate(candidates[:5], 2):
+        ref = c.get("reference_image_b64")
+        if ref:
+            images.append(ref)
+            candidate_list.append(f"Image {i}: {c['name']}")
+
+    if not candidate_list:
+        return []
+
+    user_text = (
+        "Image 1 is the user's knife photo. Compare it against these candidates:\n"
+        + "\n".join(candidate_list)
+    )
+
+    raw = ollama_chat(model, VISION_COMPARE_SYSTEM, user_text, images_b64=images)
+    parsed = try_parse_json_response(raw)
+    if isinstance(parsed, dict) and "comparisons" in parsed:
+        return parsed["comparisons"]
+    return []
+
+
 def vision_describe_knife(model: str, image_b64: str, user_description: str = "") -> dict[str, Any]:
     """Have the vision model describe the knife for keyword search. Returns parsed JSON or empty dict."""
     user = "Describe this knife for catalog search."

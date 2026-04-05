@@ -1937,6 +1937,296 @@ def create_v2_router(
         }
 
 
+    # ── Image-based knife identification (stages 1–5) ──────────────────────────
+
+    # Blade length bins (finger-scale) → inch ranges
+    _LENGTH_BINS: dict[int, tuple[float, float]] = {
+        1: (0.0, 3.0),       # shorter than an index finger
+        2: (3.0, 4.5),       # about one index finger
+        3: (4.5, 7.0),       # about two index fingers
+        4: (7.0, 20.0),      # longer than two index fingers
+    }
+
+    @router.post("/api/v2/identify/image")
+    async def v2_identify_by_image(
+        image: Optional[UploadFile] = File(None),
+        handle_material: Optional[str] = Form(None),
+        handle_color: Optional[str] = Form(None),
+        blade_color: Optional[str] = Form(None),
+        is_culinary: Optional[bool] = Form(None),
+        blade_forms: Optional[str] = Form(None),   # comma-separated form names
+        blade_length_bin: Optional[int] = Form(None),  # 1-4
+        use_vision: bool = Form(False),
+    ):
+        """Identify a knife from an uploaded photo and/or user-provided attributes.
+
+        Stages:
+        1. Parse user-provided filters
+        2. Family-level elimination
+        3. Score remaining models
+        4. (Optional) Vision LLM comparison against top candidates
+        5. Combined ranking
+        """
+        # Parse blade_forms from comma-separated string
+        selected_forms: list[str] = []
+        if blade_forms:
+            selected_forms = [f.strip() for f in blade_forms.split(",") if f.strip()]
+
+        # Read uploaded image
+        image_b64: Optional[str] = None
+        if image:
+            image_bytes = await image.read()
+            image_b64 = base64.b64encode(image_bytes).decode("ascii")
+
+        with get_conn() as conn:
+            # ── Load all models with attributes ──
+            rows = conn.execute(
+                """
+                SELECT km.id, km.official_name, km.blade_length, km.model_notes,
+                       bs.name AS blade_steel, bf.name AS blade_finish, ht.name AS handle_type,
+                       kt.name AS knife_type, fam.name AS family_name, frm.name AS form_name,
+                       ks.name AS series_name, c.name AS collaborator_name,
+                       km.family_id,
+                       (CASE WHEN kmi.image_blob IS NOT NULL AND length(kmi.image_blob) > 0 THEN 1 ELSE 0 END) AS has_identifier_image
+                FROM knife_models_v2 km
+                LEFT JOIN knife_types kt ON kt.id = km.type_id
+                LEFT JOIN knife_forms frm ON frm.id = km.form_id
+                LEFT JOIN knife_families fam ON fam.id = km.family_id
+                LEFT JOIN knife_series ks ON ks.id = km.series_id
+                LEFT JOIN collaborators c ON c.id = km.collaborator_id
+                LEFT JOIN blade_steels bs ON bs.id = km.steel_id
+                LEFT JOIN blade_finishes bf ON bf.id = km.blade_finish_id
+                LEFT JOIN handle_types ht ON ht.id = km.handle_type_id
+                LEFT JOIN knife_model_images kmi ON kmi.knife_model_id = km.id
+                ORDER BY fam.name COLLATE NOCASE, km.sortable_name COLLATE NOCASE
+                """
+            ).fetchall()
+
+            # ── Load colorway handle/blade colors per model ──
+            colorway_data: dict[int, list[dict[str, str]]] = {}
+            cw_rows = conn.execute(
+                """
+                SELECT mc.knife_model_id, hc.name AS handle_color, bc.name AS blade_color
+                FROM model_colorways mc
+                LEFT JOIN handle_colors hc ON hc.id = mc.handle_color_id
+                LEFT JOIN blade_colors bc ON bc.id = mc.blade_color_id
+                """
+            ).fetchall()
+            for cw in cw_rows:
+                mid = cw["knife_model_id"]
+                if mid not in colorway_data:
+                    colorway_data[mid] = []
+                colorway_data[mid].append({
+                    "handle_color": cw["handle_color"] or "",
+                    "blade_color": cw["blade_color"] or "",
+                })
+
+            # ── Stage 2: Family-level elimination ──
+            eliminated_families: set[str] = set()
+
+            # Group models by family for family-level checks
+            family_models: dict[str, list] = {}
+            for r in rows:
+                fam = r["family_name"] or "(none)"
+                if fam not in family_models:
+                    family_models[fam] = []
+                family_models[fam].append(r)
+
+            for fam, fam_rows in family_models.items():
+                # Culinary toggle
+                if is_culinary is not None:
+                    fam_types = {r["knife_type"] for r in fam_rows}
+                    if is_culinary and "Culinary" not in fam_types:
+                        eliminated_families.add(fam)
+                        continue
+                    if not is_culinary and fam_types == {"Culinary"}:
+                        eliminated_families.add(fam)
+                        continue
+
+                # Blade form selection
+                if selected_forms:
+                    fam_forms = {r["form_name"] for r in fam_rows if r["form_name"]}
+                    if fam_forms and not fam_forms.intersection(selected_forms):
+                        eliminated_families.add(fam)
+                        continue
+
+                # Handle material
+                if handle_material:
+                    fam_materials = {r["handle_type"] for r in fam_rows if r["handle_type"]}
+                    if fam_materials and handle_material not in fam_materials:
+                        eliminated_families.add(fam)
+                        continue
+
+                # Blade length bin
+                if blade_length_bin and blade_length_bin in _LENGTH_BINS:
+                    lo, hi = _LENGTH_BINS[blade_length_bin]
+                    lengths = [r["blade_length"] for r in fam_rows if r["blade_length"] is not None]
+                    if lengths and not any(lo <= bl <= hi for bl in lengths):
+                        eliminated_families.add(fam)
+                        continue
+
+            # ── Stage 3: Score remaining models ──
+            results: list[dict[str, Any]] = []
+            for row in rows:
+                fam = row["family_name"] or "(none)"
+                if fam in eliminated_families:
+                    continue
+
+                score = 0.0
+                reasons: list[str] = []
+
+                # Handle material match
+                if handle_material and row["handle_type"]:
+                    if handle_material.lower() == row["handle_type"].lower():
+                        score += 20
+                        reasons.append(f"handle material: {row['handle_type']}")
+
+                # Blade form match
+                if selected_forms and row["form_name"]:
+                    if row["form_name"] in selected_forms:
+                        score += 20
+                        reasons.append(f"blade shape: {row['form_name']}")
+
+                # Blade length proximity (bin-based)
+                if blade_length_bin and blade_length_bin in _LENGTH_BINS and row["blade_length"]:
+                    lo, hi = _LENGTH_BINS[blade_length_bin]
+                    mid = (lo + hi) / 2
+                    diff = abs(row["blade_length"] - mid)
+                    span = (hi - lo) / 2
+                    if lo <= row["blade_length"] <= hi:
+                        score += 15
+                        reasons.append(f"blade length {row['blade_length']}\" in range")
+                    elif diff <= span + 1.0:
+                        score += 5
+                        reasons.append(f"blade length {row['blade_length']}\" near range")
+
+                # Handle color match (check colorways)
+                if handle_color:
+                    model_colors = colorway_data.get(row["id"], [])
+                    if any(handle_color.lower() == c["handle_color"].lower() for c in model_colors):
+                        score += 10
+                        reasons.append(f"handle color: {handle_color}")
+
+                # Blade color match (check colorways)
+                if blade_color:
+                    model_colors = colorway_data.get(row["id"], [])
+                    if any(blade_color.lower() == (c["blade_color"] or "").lower() for c in model_colors):
+                        score += 10
+                        reasons.append(f"blade color: {blade_color}")
+
+                # Culinary match
+                if is_culinary is not None:
+                    is_model_culinary = row["knife_type"] == "Culinary"
+                    if is_culinary == is_model_culinary:
+                        score += 10
+                        reasons.append("culinary" if is_culinary else "non-culinary")
+
+                # Series/variant bonus
+                if handle_material:
+                    hm = handle_material.lower()
+                    series = (row["series_name"] or "").lower()
+                    if "ironwood" in hm and "traditions" in series:
+                        score += 5
+                        reasons.append("Traditions series (wood handle)")
+                    elif "carbon fiber" in hm and "ultra" in series:
+                        score += 5
+                        reasons.append("Ultra series (carbon fiber)")
+
+                # Give a baseline score of 1 so attribute-less queries still return results
+                if score == 0:
+                    score = 1
+
+                results.append({
+                    "id": row["id"],
+                    "name": row["official_name"],
+                    "family": row["family_name"],
+                    "category": row["knife_type"],
+                    "form": row["form_name"],
+                    "catalog_line": row["series_name"],
+                    "handle_type": row["handle_type"],
+                    "has_identifier_image": bool(row["has_identifier_image"]),
+                    "default_blade_length": row["blade_length"],
+                    "default_steel": row["blade_steel"],
+                    "default_blade_finish": row["blade_finish"],
+                    "is_collab": bool(row["collaborator_name"]),
+                    "collaboration_name": row["collaborator_name"],
+                    "score": round(score, 1),
+                    "reasons": reasons[:5],
+                })
+
+            results.sort(key=lambda item: (-item["score"], item["name"].lower()))
+
+            # ── Stage 4: Vision LLM comparison (optional) ──
+            vision_results: list[dict[str, Any]] = []
+            if use_vision and image_b64 and results:
+                # Pick top 5 candidates — one per family for shape comparison
+                seen_families: set[str] = set()
+                candidates_for_vision: list[dict[str, Any]] = []
+                for r in results:
+                    fam = r["family"] or r["name"]
+                    if fam in seen_families:
+                        continue
+                    seen_families.add(fam)
+                    # Load reference image for this model
+                    ref_row = conn.execute(
+                        "SELECT image_blob FROM knife_model_images WHERE knife_model_id = ? AND image_blob IS NOT NULL",
+                        (r["id"],),
+                    ).fetchone()
+                    if ref_row:
+                        candidates_for_vision.append({
+                            "name": r["name"],
+                            "family": fam,
+                            "reference_image_b64": base64.b64encode(ref_row["image_blob"]).decode("ascii"),
+                        })
+                    if len(candidates_for_vision) >= 5:
+                        break
+
+                if candidates_for_vision:
+                    vision_results = blade_ai.vision_compare_candidates(
+                        ollama_vision_model,
+                        image_b64,
+                        candidates_for_vision,
+                    )
+
+            # ── Stage 5: Merge vision results into scores ──
+            if vision_results:
+                vision_map: dict[str, dict] = {}
+                for vr in vision_results:
+                    vision_map[vr.get("model", "")] = vr
+
+                # Apply vision score modifiers and propagate family matches
+                family_vision: dict[str, dict] = {}
+                for vr in vision_results:
+                    # Find which family this vision result belongs to
+                    for c in candidates_for_vision:
+                        if c["name"] == vr.get("model"):
+                            family_vision[c["family"]] = vr
+                            break
+
+                for r in results:
+                    fam = r["family"] or r["name"]
+                    vr = vision_map.get(r["name"]) or family_vision.get(fam)
+                    if vr:
+                        match = vr.get("match", "").upper()
+                        if match == "STRONG":
+                            r["score"] += 30
+                        elif match == "POSSIBLE":
+                            r["score"] += 10
+                        elif match == "UNLIKELY":
+                            r["score"] -= 20
+                        r["vision_match"] = match
+                        r["vision_reason"] = vr.get("reason", "")
+                        r["reasons"].insert(0, f"vision: {match.lower()} — {vr.get('reason', '')}")
+
+                results.sort(key=lambda item: (-item["score"], item["name"].lower()))
+
+        return {
+            "results": results[:15],
+            "families_eliminated": len(eliminated_families),
+            "families_remaining": len(family_models) - len(eliminated_families),
+            "vision_used": use_vision and image_b64 is not None,
+        }
+
     @router.post("/api/v2/identify")
     def v2_identify_knives(payload: identifier_query_model):
         """Rank v2 catalog models only and return canonical v2 model IDs."""
