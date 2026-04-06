@@ -879,7 +879,7 @@ export default function Reporting() {
     <div className="min-h-screen bg-surface">
       <Sidebar />
 
-      <main className={`${marginClass} transition-[margin] duration-200 flex flex-col h-screen-safe`}>
+      <main className={`${marginClass} transition-[margin] duration-200 flex flex-col h-screen-safe overflow-hidden`}>
         {/* Top bar */}
         <div className="flex items-center justify-between pl-14 pr-4 md:px-8 py-4 border-b border-border flex-shrink-0">
           <h1 className="text-ink text-xl font-bold">Reporting</h1>
