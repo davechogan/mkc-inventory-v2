@@ -558,32 +558,35 @@ def extract_distinguishing_features_from_image(model: str, image_b64: str) -> tu
     return t if t else None, None
 
 
-VISION_COMPARE_SYSTEM = """You are identifying a Montana Knife Company (MKC) knife by comparing the user's photo against reference images of candidate models.
+VISION_COMPARE_SYSTEM = """You are identifying a Montana Knife Company (MKC) knife by comparing the user's photo against candidate models.
 
-Image 1 is the user's knife photo. Image 2 is a BLADE FORM REFERENCE SHEET showing silhouettes of different blade shapes with their names. The remaining images are candidate reference photos.
+The images are arranged in PAIRS. Image 1 is the user's knife photo.
+After that, each candidate has TWO consecutive images:
+  - A BLADE FORM SILHOUETTE showing the shape category the candidate belongs to
+  - The candidate's REFERENCE PHOTO
 
-STEP 1 — CLASSIFY the user's knife blade shape by comparing it to the silhouettes in Image 2.
-Identify which blade form (Drop Point, Trailing Point, Clip Point, Sheepsfoot, etc.) best matches the user's knife.
+For each candidate:
+1. Compare the user's knife blade profile against the candidate's BLADE FORM SILHOUETTE.
+   Does the user's knife have the SAME blade shape? Check the spine curvature, tip position, and edge profile.
+2. Compare the user's knife against the candidate's REFERENCE PHOTO for overall visual similarity.
 
-STEP 2 — For each candidate, check TWO things:
-  A) BLADE SHAPE MATCH: Does the candidate have the SAME blade shape as the user's knife?
-     If the blade shapes are clearly different, rate UNLIKELY regardless of other similarities.
-  B) VISUAL SIMILARITY: Do the handle, proportions, and features look similar?
+CRITICAL RULE: If the user's knife blade shape does NOT match the candidate's blade form silhouette, rate UNLIKELY — regardless of how similar handles or sizes may look.
 
-CRITICAL RULE: A candidate with a DIFFERENT blade shape from the user's knife MUST be rated UNLIKELY, even if the handle or size looks similar. Blade shape is the most important factor.
-
-For each candidate, rate: STRONG (same blade shape AND visually similar), POSSIBLE (same blade shape but uncertain on other details), or UNLIKELY (different blade shape OR clearly different proportions).
+Rate each: STRONG (blade shape matches silhouette AND photo looks similar), POSSIBLE (blade shape matches but uncertain on details), UNLIKELY (blade shape clearly different OR proportions clearly wrong).
 
 Return VALID JSON ONLY (no markdown):
-{"user_blade_shape": "<name from reference sheet>", "comparisons": [{"model": "<exact model name>", "match": "STRONG|POSSIBLE|UNLIKELY", "reason": "<one sentence>"}]}"""
+{"comparisons": [{"model": "<exact model name>", "match": "STRONG|POSSIBLE|UNLIKELY", "reason": "<one sentence explaining blade shape comparison>"}]}"""
 
 
-def _load_reference_sheet_b64() -> Optional[str]:
-    """Load the blade form reference sheet as base64 for the vision model."""
-    sheet_path = Path(__file__).parent / "static" / "blade-outlines" / "reference_sheet.png"
-    if not sheet_path.exists():
+def _load_form_silhouette_b64(form_name: str) -> Optional[str]:
+    """Load the individual blade form silhouette as base64."""
+    if not form_name:
         return None
-    return base64.b64encode(sheet_path.read_bytes()).decode("ascii")
+    slug = form_name.lower().replace(" ", "_").replace("/", "_")
+    sil_path = Path(__file__).parent / "static" / "blade-outlines" / f"{slug}.png"
+    if not sil_path.exists():
+        return None
+    return base64.b64encode(sil_path.read_bytes()).decode("ascii")
 
 
 def _remove_background(image_b64: str) -> str:
@@ -620,35 +623,57 @@ def vision_compare_candidates(
 
     Each candidate dict must have 'name' and 'reference_image_b64'.
     Optionally includes 'form' (blade form name) for the prompt.
+
+    For each candidate, sends a PAIR of images:
+      - The blade form silhouette for the candidate's shape category
+      - The candidate's reference photo
+    This gives the model a clear, full-size shape reference to compare against.
+
     Returns list of {model, match, reason} dicts.
     """
     # Remove background from user's photo for cleaner shape comparison
     clean_user_image = _remove_background(user_image_b64)
 
-    # Build image list: user photo, reference sheet, then candidate references
-    ref_sheet = _load_reference_sheet_b64()
+    # Build image list: user photo first, then pairs (silhouette + ref photo) per candidate
     images = [clean_user_image]
-    if ref_sheet:
-        images.append(ref_sheet)
-
-    # Candidate image numbering starts after user photo + reference sheet
-    img_offset = len(images) + 1  # next image number (1-indexed)
     candidate_list = []
-    for i, c in enumerate(candidates[:5]):
+    img_num = 2  # Image 1 is user's knife
+
+    for c in candidates[:5]:
         ref = c.get("reference_image_b64")
-        if ref:
+        if not ref:
+            continue
+
+        form_name = c.get("form", "")
+        silhouette = _load_form_silhouette_b64(form_name)
+
+        if silhouette:
+            images.append(silhouette)
+            sil_img_num = img_num
+            img_num += 1
             images.append(ref)
-            img_num = img_offset + i
-            form_note = f" (cataloged blade form: {c['form']})" if c.get("form") else ""
-            candidate_list.append(f"Image {img_num}: {c['name']}{form_note}")
+            ref_img_num = img_num
+            img_num += 1
+            candidate_list.append(
+                f"Candidate '{c['name']}' (blade form: {form_name}): "
+                f"silhouette=Image {sil_img_num}, photo=Image {ref_img_num}"
+            )
+        else:
+            # No silhouette available — just send the reference photo
+            images.append(ref)
+            ref_img_num = img_num
+            img_num += 1
+            form_note = f" (blade form: {form_name})" if form_name else ""
+            candidate_list.append(
+                f"Candidate '{c['name']}'{form_note}: photo=Image {ref_img_num}"
+            )
 
     if not candidate_list:
         return []
 
     user_text = (
-        "Image 1 is the user's knife photo."
-        + (" Image 2 is the blade form reference sheet." if ref_sheet else "")
-        + " Compare against these candidates:\n"
+        "Image 1 is the user's knife photo.\n\n"
+        "Candidates (each with a blade form silhouette and reference photo):\n"
         + "\n".join(candidate_list)
     )
 
