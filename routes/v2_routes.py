@@ -2245,6 +2245,77 @@ def create_v2_router(
             "vision_used": use_vision and image_b64 is not None,
         }
 
+    @router.post("/api/v2/identify/vision-debug")
+    async def v2_identify_vision_debug(image: UploadFile = File(None)):
+        """Debug endpoint: returns the exact images sent to the vision model as an HTML page."""
+        from fastapi.responses import HTMLResponse
+
+        if not image:
+            return HTMLResponse("<h2>Upload an image via multipart form</h2>", status_code=400)
+
+        image_bytes = await image.read()
+        image_b64 = base64.b64encode(image_bytes).decode("ascii")
+
+        # Background removal
+        clean_b64 = blade_ai._remove_background(image_b64)
+
+        # Reference sheet
+        ref_sheet_b64 = blade_ai._load_reference_sheet_b64()
+
+        # Top 5 candidate reference images (one per family, by score)
+        with get_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT km.id, km.official_name, fam.name AS family_name, frm.name AS form_name,
+                       kmi.image_blob
+                FROM knife_models_v2 km
+                LEFT JOIN knife_families fam ON fam.id = km.family_id
+                LEFT JOIN knife_forms frm ON frm.id = km.form_id
+                LEFT JOIN knife_model_images kmi ON kmi.knife_model_id = km.id
+                WHERE kmi.image_blob IS NOT NULL AND length(kmi.image_blob) > 0
+                ORDER BY fam.name, km.official_name
+                """
+            ).fetchall()
+
+        # Pick one per family (first 5 families)
+        seen: set[str] = set()
+        candidates = []
+        for r in rows:
+            fam = r["family_name"] or r["official_name"]
+            if fam in seen:
+                continue
+            seen.add(fam)
+            candidates.append({
+                "name": r["official_name"],
+                "family": fam,
+                "form": r["form_name"],
+                "image_b64": base64.b64encode(r["image_blob"]).decode("ascii"),
+            })
+            if len(candidates) >= 5:
+                break
+
+        # Build HTML
+        parts = ['<html><body style="background:#111;color:#eee;font-family:system-ui;padding:20px">']
+        parts.append("<h1>Vision Model Debug — Images Sent to LLM</h1>")
+
+        parts.append("<h2>Image 1: User photo (original)</h2>")
+        parts.append(f'<img src="data:image/jpeg;base64,{image_b64}" style="max-height:400px;border:2px solid #444">')
+
+        parts.append("<h2>Image 1 (after background removal)</h2>")
+        parts.append(f'<img src="data:image/png;base64,{clean_b64}" style="max-height:400px;border:2px solid #c89">')
+
+        if ref_sheet_b64:
+            parts.append("<h2>Image 2: Blade Form Reference Sheet</h2>")
+            parts.append(f'<img src="data:image/png;base64,{ref_sheet_b64}" style="max-height:500px;border:2px solid #444">')
+
+        for i, c in enumerate(candidates):
+            img_num = 3 + i if ref_sheet_b64 else 2 + i
+            parts.append(f'<h2>Image {img_num}: {c["name"]} (form: {c["form"] or "unknown"})</h2>')
+            parts.append(f'<img src="data:image/jpeg;base64,{c["image_b64"]}" style="max-height:400px;border:2px solid #444">')
+
+        parts.append("</body></html>")
+        return HTMLResponse("".join(parts))
+
     @router.post("/api/v2/identify")
     def v2_identify_knives(payload: identifier_query_model):
         """Rank v2 catalog models only and return canonical v2 model IDs."""
