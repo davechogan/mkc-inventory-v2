@@ -6,9 +6,11 @@ Environment:
 """
 from __future__ import annotations
 
+import base64
 import json
 import math
 import os
+from pathlib import Path
 from typing import Any, Optional
 
 import httpx
@@ -94,6 +96,55 @@ SEED_POLYGONS: dict[str, tuple[str, str, list[list[int]]]] = {
         "Short heavy wedge, often single-bevel appearance.",
         [
             [10, 40], [15, 70], [45, 78], [75, 72], [88, 55], [85, 38], [55, 32], [30, 35],
+        ],
+    ),
+    "dagger": (
+        "Dagger / double-edge",
+        "Symmetric double-edged blade tapering to a centerline point.",
+        [
+            [8, 50], [20, 42], [40, 36], [60, 32], [80, 38], [92, 50],
+            [80, 62], [60, 68], [40, 64], [20, 58],
+        ],
+    ),
+    "hawkbill": (
+        "Hawkbill / recurve",
+        "Inward-curving blade like a talon; spine and edge both curve toward the point below the handle line.",
+        [
+            [8, 42], [8, 52], [25, 50], [38, 45], [50, 42], [62, 48],
+            [78, 62], [88, 72], [90, 65], [82, 52], [68, 38], [50, 35],
+            [35, 38], [22, 42],
+        ],
+    ),
+    "santoku": (
+        "Santoku",
+        "Flat spine dropping to a sheepsfoot-like tip; wide blade with gentle belly curve.",
+        [
+            [5, 52], [10, 72], [30, 75], [55, 70], [78, 58], [88, 45],
+            [82, 38], [55, 35], [30, 38], [15, 42],
+        ],
+    ),
+    "petty": (
+        "Petty / utility",
+        "Small Japanese-style utility knife; narrow profile, slight belly, fine tip.",
+        [
+            [6, 48], [8, 55], [22, 54], [40, 48], [60, 40], [82, 38],
+            [92, 46], [88, 54], [65, 56], [40, 56], [20, 54],
+        ],
+    ),
+    "paring": (
+        "Paring",
+        "Short blade with gentle curve; designed for hand-held detail work.",
+        [
+            [8, 48], [10, 58], [25, 56], [40, 50], [55, 42], [72, 38],
+            [88, 46], [85, 55], [65, 60], [40, 60], [22, 56],
+        ],
+    ),
+    "cleaver": (
+        "Cleaver",
+        "Tall rectangular blade; straight edge, flat spine, squared-off tip.",
+        [
+            [10, 25], [10, 78], [40, 80], [70, 78], [88, 72], [90, 28],
+            [70, 24], [40, 22],
         ],
     ),
 }
@@ -489,16 +540,28 @@ def extract_distinguishing_features_from_image(model: str, image_b64: str) -> tu
 
 VISION_COMPARE_SYSTEM = """You are identifying a Montana Knife Company (MKC) knife by comparing the user's photo against reference images of candidate models.
 
+Image 1 is the user's knife photo. Image 2 is a BLADE FORM REFERENCE SHEET showing labeled silhouettes of all blade shapes — use these names when describing blade shapes. The remaining images are candidate reference photos.
+
 Compare the user's knife (Image 1) against each candidate reference image. Focus on:
-- Blade shape and profile (drop point, tanto, skinner, clip point, etc.)
+- Blade shape and profile — identify using the reference sheet (Image 2) names ONLY
 - Handle shape and proportions
 - Overall size proportions (blade-to-handle ratio)
 - Distinctive features (finger choil, jimping, lanyard hole, ring guard)
+
+IMPORTANT: Use the exact blade form names from the reference sheet (e.g. "Trailing / upswept", "Drop point", "Clip point"). Do NOT guess blade shape names — match against the silhouettes in Image 2.
 
 For each candidate, rate the match as: STRONG, POSSIBLE, or UNLIKELY.
 
 Return VALID JSON ONLY (no markdown):
 {"comparisons": [{"model": "<exact model name>", "match": "STRONG|POSSIBLE|UNLIKELY", "reason": "<one sentence>"}]}"""
+
+
+def _load_reference_sheet_b64() -> Optional[str]:
+    """Load the blade form reference sheet as base64 for the vision model."""
+    sheet_path = Path(__file__).parent / "static" / "blade-outlines" / "reference_sheet.png"
+    if not sheet_path.exists():
+        return None
+    return base64.b64encode(sheet_path.read_bytes()).decode("ascii")
 
 
 def vision_compare_candidates(
@@ -509,22 +572,33 @@ def vision_compare_candidates(
     """Compare user's knife photo against candidate reference images via vision LLM.
 
     Each candidate dict must have 'name' and 'reference_image_b64'.
+    Optionally includes 'form' (blade form name) for the prompt.
     Returns list of {model, match, reason} dicts.
     """
-    # Build image list: user photo first, then candidate references
+    # Build image list: user photo, reference sheet, then candidate references
+    ref_sheet = _load_reference_sheet_b64()
     images = [user_image_b64]
+    if ref_sheet:
+        images.append(ref_sheet)
+
+    # Candidate image numbering starts after user photo + reference sheet
+    img_offset = len(images) + 1  # next image number (1-indexed)
     candidate_list = []
-    for i, c in enumerate(candidates[:5], 2):
+    for i, c in enumerate(candidates[:5]):
         ref = c.get("reference_image_b64")
         if ref:
             images.append(ref)
-            candidate_list.append(f"Image {i}: {c['name']}")
+            img_num = img_offset + i
+            form_note = f" (cataloged blade form: {c['form']})" if c.get("form") else ""
+            candidate_list.append(f"Image {img_num}: {c['name']}{form_note}")
 
     if not candidate_list:
         return []
 
     user_text = (
-        "Image 1 is the user's knife photo. Compare it against these candidates:\n"
+        "Image 1 is the user's knife photo."
+        + (" Image 2 is the blade form reference sheet." if ref_sheet else "")
+        + " Compare against these candidates:\n"
         + "\n".join(candidate_list)
     )
 

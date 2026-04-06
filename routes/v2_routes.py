@@ -2193,6 +2193,7 @@ def create_v2_router(
                         candidates_for_vision.append({
                             "name": r["name"],
                             "family": fam,
+                            "form": r.get("form"),
                             "reference_image_b64": base64.b64encode(ref_row["image_blob"]).decode("ascii"),
                         })
                     if len(candidates_for_vision) >= 5:
