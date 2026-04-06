@@ -566,6 +566,31 @@ def _load_reference_sheet_b64() -> Optional[str]:
     return base64.b64encode(sheet_path.read_bytes()).decode("ascii")
 
 
+def _remove_background(image_b64: str) -> str:
+    """Remove background from a base64-encoded image using rembg.
+
+    Returns a base64-encoded PNG with the background removed (white bg).
+    Falls back to the original image if rembg fails.
+    """
+    try:
+        from io import BytesIO
+
+        from PIL import Image as PILImage
+        from rembg import remove
+
+        img_bytes = base64.b64decode(image_b64)
+        input_img = PILImage.open(BytesIO(img_bytes)).convert("RGBA")
+        output_img = remove(input_img)
+        # Composite onto white background for the vision model
+        white_bg = PILImage.new("RGBA", output_img.size, (255, 255, 255, 255))
+        composite = PILImage.alpha_composite(white_bg, output_img).convert("RGB")
+        buf = BytesIO()
+        composite.save(buf, format="PNG")
+        return base64.b64encode(buf.getvalue()).decode("ascii")
+    except Exception:
+        return image_b64
+
+
 def vision_compare_candidates(
     model: str,
     user_image_b64: str,
@@ -577,9 +602,12 @@ def vision_compare_candidates(
     Optionally includes 'form' (blade form name) for the prompt.
     Returns list of {model, match, reason} dicts.
     """
+    # Remove background from user's photo for cleaner shape comparison
+    clean_user_image = _remove_background(user_image_b64)
+
     # Build image list: user photo, reference sheet, then candidate references
     ref_sheet = _load_reference_sheet_b64()
-    images = [user_image_b64]
+    images = [clean_user_image]
     if ref_sheet:
         images.append(ref_sheet)
 

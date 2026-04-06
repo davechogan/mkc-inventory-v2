@@ -7,3 +7,6 @@ opencv-python-headless>=4.9,<5.0
 chromadb
 # Reporting retrieval: embedding + vector index + Chroma upsert/query when REPORTING_RETRIEVAL_BACKEND is embedding|vector|chroma
 sentence-transformers>=2.2.0,<4.0
+# Background removal for cleaner knife identification vision comparisons
+rembg[cpu]>=2.0,<3.0
+Pillow>=10.0,<12.0
