@@ -879,7 +879,7 @@ export default function Reporting() {
     <div className="min-h-screen bg-surface">
       <Sidebar />
 
-      <main className={`${marginClass} transition-[margin] duration-200 flex flex-col h-screen`}>
+      <main className={`${marginClass} transition-[margin] duration-200 flex flex-col h-screen-safe`}>
         {/* Top bar */}
         <div className="flex items-center justify-between pl-14 pr-4 md:px-8 py-4 border-b border-border flex-shrink-0">
           <h1 className="text-ink text-xl font-bold">Reporting</h1>
@@ -916,8 +916,8 @@ export default function Reporting() {
             />
           </div>
 
-          {/* Dashboard area */}
-          <div className="flex-1 overflow-y-auto p-6">
+          {/* Dashboard area — hidden on mobile when chat is open */}
+          <div className={`flex-1 overflow-y-auto p-6 ${chatOpen ? 'hidden md:block' : ''}`}>
             <Dashboard />
           </div>
 
@@ -927,7 +927,7 @@ export default function Reporting() {
             style={{ borderLeft: '1px solid #1d2329' }}>
             <div className="flex flex-col h-full w-full md:w-[480px]" style={{ backgroundColor: '#060709' }}>
               {/* Chat header */}
-              <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
+              <div className="flex items-center justify-between pl-14 pr-4 md:px-4 py-3 border-b border-border flex-shrink-0">
                 <div className="flex items-center gap-2">
                   <button onClick={() => setChatOpen(false)} title="Collapse chat"
                     className="text-muted hover:text-ink transition-colors p-1 rounded-md hover:bg-border/30">

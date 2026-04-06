@@ -215,7 +215,7 @@ export default function App() {
 
       <main
         id="appMain"
-        className={`${marginClass} transition-[margin] duration-200 flex flex-col h-screen overflow-hidden`}
+        className={`${marginClass} transition-[margin] duration-200 flex flex-col h-screen-safe overflow-hidden`}
       >
         {/* Top bar — title + actions */}
         <div className="flex items-center justify-between pl-14 pr-4 md:px-8 py-4 border-b border-border flex-shrink-0">

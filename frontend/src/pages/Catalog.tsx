@@ -846,7 +846,7 @@ export default function Catalog() {
     <div className="min-h-screen bg-surface">
       <Sidebar />
 
-      <main className={`${marginClass} transition-[margin] duration-200 flex flex-col h-screen overflow-hidden`}>
+      <main className={`${marginClass} transition-[margin] duration-200 flex flex-col h-screen-safe overflow-hidden`}>
         {/* Top bar */}
         <div className="flex items-center justify-between pl-14 pr-4 md:px-8 py-4 border-b border-border flex-shrink-0 gap-4 flex-wrap">
           <div className="flex items-center gap-3 flex-shrink-0">

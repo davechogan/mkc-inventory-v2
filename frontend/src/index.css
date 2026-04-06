@@ -23,6 +23,12 @@ body {
   background: #2a343e;
 }
 
+/* Dynamic viewport height — avoids mobile Safari address bar overlap */
+.h-screen-safe {
+  height: 100vh;
+  height: 100dvh;
+}
+
 /* Skeleton shimmer */
 @keyframes shimmer {
   0% { background-position: -400px 0; }
