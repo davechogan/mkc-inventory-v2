@@ -191,93 +191,124 @@ function ResultCard({
   );
 }
 
-function ResultDetail({ result, userImage }: { result: IdentifyResult; userImage: string | null }) {
+function ComparisonView({
+  result,
+  userImage,
+  onBack,
+}: {
+  result: IdentifyResult;
+  userImage: string | null;
+  onBack: () => void;
+}) {
   const imgSrc = result.has_identifier_image
     ? `/api/v2/models/${result.id}/image`
     : null;
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* Side-by-side comparison */}
-      {userImage && imgSrc && (
-        <div className="grid grid-cols-2 gap-2">
-          <div>
-            <div className="text-muted text-[10px] uppercase tracking-wider mb-1">Your knife</div>
-            <div className="rounded-lg overflow-hidden bg-border/20 aspect-square">
-              <img src={userImage} alt="Your knife" className="w-full h-full object-contain" />
+    <div className="flex flex-col h-full overflow-y-auto">
+      {/* Back button + title bar */}
+      <div className="flex items-center gap-3 px-6 py-3 border-b border-border flex-shrink-0">
+        <button
+          onClick={onBack}
+          className="p-1.5 rounded-lg border border-border text-muted hover:text-ink hover:border-border/70 transition-colors"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+        </button>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <h3 className="text-ink text-base font-bold leading-tight truncate">{result.name}</h3>
+            <div className="flex gap-1.5 flex-shrink-0">
+              {result.vision_match && <VisionBadge match={result.vision_match} />}
+              <ScoreBadge score={result.score} />
             </div>
           </div>
-          <div>
-            <div className="text-muted text-[10px] uppercase tracking-wider mb-1">Reference</div>
-            <div className="rounded-lg overflow-hidden bg-border/20 aspect-square">
-              <img src={imgSrc} alt={result.name} className="w-full h-full object-contain" />
+          {result.is_collab && result.collaboration_name && (
+            <div className="text-gold text-xs">Collab: {result.collaboration_name}</div>
+          )}
+        </div>
+      </div>
+
+      {/* Large side-by-side images */}
+      <div className="flex-1 min-h-0 p-4">
+        {userImage && imgSrc ? (
+          <div className="grid grid-cols-2 gap-4 h-full">
+            <div className="flex flex-col min-h-0">
+              <div className="text-muted text-[10px] uppercase tracking-wider mb-1.5">Your knife</div>
+              <div className="flex-1 min-h-0 rounded-xl overflow-hidden bg-border/20 flex items-center justify-center">
+                <img src={userImage} alt="Your knife" className="max-w-full max-h-full object-contain" />
+              </div>
+            </div>
+            <div className="flex flex-col min-h-0">
+              <div className="text-muted text-[10px] uppercase tracking-wider mb-1.5">{result.name}</div>
+              <div className="flex-1 min-h-0 rounded-xl overflow-hidden bg-border/20 flex items-center justify-center">
+                <img src={imgSrc} alt={result.name} className="max-w-full max-h-full object-contain" />
+              </div>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* Single image fallback */}
-      {!userImage && imgSrc && (
-        <div className="w-full rounded-xl overflow-hidden bg-border/20 aspect-[4/3]">
-          <img src={imgSrc} alt={result.name} className="w-full h-full object-contain" />
-        </div>
-      )}
-
-      <div>
-        <div className="flex items-start justify-between gap-2">
-          <h3 className="text-ink text-base font-bold leading-tight">{result.name}</h3>
-          <div className="flex gap-1.5">
-            {result.vision_match && <VisionBadge match={result.vision_match} />}
-            <ScoreBadge score={result.score} />
+        ) : imgSrc ? (
+          <div className="h-full flex flex-col min-h-0">
+            <div className="text-muted text-[10px] uppercase tracking-wider mb-1.5">{result.name}</div>
+            <div className="flex-1 min-h-0 rounded-xl overflow-hidden bg-border/20 flex items-center justify-center">
+              <img src={imgSrc} alt={result.name} className="max-w-full max-h-full object-contain" />
+            </div>
           </div>
+        ) : userImage ? (
+          <div className="h-full flex flex-col min-h-0">
+            <div className="text-muted text-[10px] uppercase tracking-wider mb-1.5">Your knife</div>
+            <div className="flex-1 min-h-0 rounded-xl overflow-hidden bg-border/20 flex items-center justify-center">
+              <img src={userImage} alt="Your knife" className="max-w-full max-h-full object-contain" />
+            </div>
+          </div>
+        ) : null}
+      </div>
+
+      {/* Details strip */}
+      <div className="flex-shrink-0 px-6 pb-4 flex flex-col gap-3">
+        <div className="grid grid-cols-4 gap-x-4 gap-y-2 text-sm">
+          {[
+            ['Family', result.family],
+            ['Type', result.category],
+            ['Form', result.form],
+            ['Series', result.catalog_line],
+            ['Handle', result.handle_type],
+            ['Steel', result.default_steel],
+            ['Finish', result.default_blade_finish],
+            ['Blade', result.default_blade_length ? `${result.default_blade_length}"` : null],
+          ]
+            .filter(([, v]) => v)
+            .map(([label, value]) => (
+              <div key={label as string}>
+                <div className="text-muted text-xs">{label}</div>
+                <div className="text-ink text-sm">{value}</div>
+              </div>
+            ))}
         </div>
-        {result.is_collab && result.collaboration_name && (
-          <div className="text-gold text-xs mt-0.5">Collab: {result.collaboration_name}</div>
+
+        {/* Vision reasoning */}
+        {result.vision_reason && (
+          <div className="border-t border-border pt-3">
+            <div className="text-muted text-xs mb-1">Vision analysis</div>
+            <p className="text-xs text-ink/80">{result.vision_reason}</p>
+          </div>
+        )}
+
+        {/* Match reasons */}
+        {result.reasons.length > 0 && (
+          <div className="border-t border-border pt-3">
+            <div className="text-muted text-xs mb-1.5">Match reasons</div>
+            <ul className="flex flex-wrap gap-x-4 gap-y-1">
+              {result.reasons.map((r, i) => (
+                <li key={i} className="flex items-start gap-1.5 text-xs text-ink/80">
+                  <span className="text-gold mt-0.5 flex-shrink-0">›</span>
+                  {r}
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
       </div>
-
-      <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-        {[
-          ['Family', result.family],
-          ['Type', result.category],
-          ['Form', result.form],
-          ['Series', result.catalog_line],
-          ['Handle', result.handle_type],
-          ['Steel', result.default_steel],
-          ['Finish', result.default_blade_finish],
-          ['Blade', result.default_blade_length ? `${result.default_blade_length}"` : null],
-        ]
-          .filter(([, v]) => v)
-          .map(([label, value]) => (
-            <div key={label as string}>
-              <div className="text-muted text-xs">{label}</div>
-              <div className="text-ink text-sm">{value}</div>
-            </div>
-          ))}
-      </div>
-
-      {/* Vision reasoning */}
-      {result.vision_reason && (
-        <div className="border-t border-border pt-3">
-          <div className="text-muted text-xs mb-1">Vision analysis</div>
-          <p className="text-xs text-ink/80">{result.vision_reason}</p>
-        </div>
-      )}
-
-      {/* Match reasons */}
-      {result.reasons.length > 0 && (
-        <div>
-          <div className="text-muted text-xs mb-1.5">Match reasons</div>
-          <ul className="flex flex-col gap-1">
-            {result.reasons.map((r, i) => (
-              <li key={i} className="flex items-start gap-1.5 text-xs text-ink/80">
-                <span className="text-gold mt-0.5 flex-shrink-0">›</span>
-                {r}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
     </div>
   );
 }
@@ -591,90 +622,87 @@ export default function Identify() {
             </form>
           </div>
 
-          {/* ── Middle: results list ── */}
-          <div className="flex-1 overflow-y-auto border-r border-border">
-            {error && (
-              <div className="m-6 px-4 py-3 rounded-lg bg-red-950/40 border border-red-800/50 text-red-300 text-sm">
-                {error}
-              </div>
-            )}
-
-            {!results && !loading && !error && (
-              <div className="h-full flex flex-col items-center justify-center gap-3 text-center px-8 py-16">
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" className="text-muted/30">
-                  <circle cx="11" cy="11" r="8" />
-                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                </svg>
-                <p className="text-muted text-sm">Upload a photo and/or fill in clues, then click <strong className="text-ink">Identify</strong>.</p>
-              </div>
-            )}
-
-            {loading && (
-              <div className="p-6 flex flex-col gap-3">
-                <div className="text-muted text-xs mb-2">
-                  {form.use_vision && imageFile
-                    ? 'Analyzing photo with AI vision — this may take 10-15 seconds…'
-                    : 'Searching catalog…'}
+          {/* ── Results area: list OR comparison view ── */}
+          {selected ? (
+            <div className="flex-1 min-w-0">
+              <ComparisonView
+                result={selected}
+                userImage={imagePreview}
+                onBack={() => setSelected(null)}
+              />
+            </div>
+          ) : (
+            <div className="flex-1 overflow-y-auto">
+              {error && (
+                <div className="m-6 px-4 py-3 rounded-lg bg-red-950/40 border border-red-800/50 text-red-300 text-sm">
+                  {error}
                 </div>
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <div key={i} className="skeleton h-20 rounded-xl" />
-                ))}
-              </div>
-            )}
+              )}
 
-            {results && !loading && results.results.length === 0 && (
-              <div className="h-full flex flex-col items-center justify-center gap-2 px-8 py-16">
-                <p className="text-muted text-sm">No matching models found. Try broadening your clues.</p>
-              </div>
-            )}
+              {!results && !loading && !error && (
+                <div className="h-full flex flex-col items-center justify-center gap-3 text-center px-8 py-16">
+                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" className="text-muted/30">
+                    <circle cx="11" cy="11" r="8" />
+                    <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                  </svg>
+                  <p className="text-muted text-sm">Upload a photo and/or fill in clues, then click <strong className="text-ink">Identify</strong>.</p>
+                </div>
+              )}
 
-            {results && !loading && results.results.length > 0 && (() => {
-              const visible = showAll ? results.results : results.results.slice(0, 5);
-              const hasMore = results.results.length > 5;
-              return (
-                <div className="p-4 flex flex-col gap-2">
-                  <div className="text-muted text-xs px-1 mb-1 flex items-center justify-between">
-                    <span>
-                      Top {visible.length} of {results.results.length} match{results.results.length !== 1 ? 'es' : ''}
-                    </span>
-                    <span>
-                      {results.families_eliminated} eliminated
-                      {results.vision_used && ' · vision used'}
-                    </span>
+              {loading && (
+                <div className="p-6 flex flex-col gap-3">
+                  <div className="text-muted text-xs mb-2">
+                    {form.use_vision && imageFile
+                      ? 'Analyzing photo with AI vision — this may take 10-15 seconds…'
+                      : 'Searching catalog…'}
                   </div>
-                  {visible.map(r => (
-                    <ResultCard
-                      key={r.id}
-                      result={r}
-                      selected={selected?.id === r.id}
-                      onClick={() => setSelected(r)}
-                    />
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <div key={i} className="skeleton h-20 rounded-xl" />
                   ))}
-                  {hasMore && !showAll && (
-                    <button
-                      onClick={() => setShowAll(true)}
-                      className="mt-1 py-2 px-4 rounded-lg border border-border text-muted text-xs hover:text-ink hover:border-border/70 transition-colors"
-                    >
-                      Show {results.results.length - 5} more results
-                    </button>
-                  )}
                 </div>
-              );
-            })()}
-          </div>
+              )}
 
-          {/* ── Right: detail pane ── */}
-          <div className="w-80 flex-shrink-0 overflow-y-auto">
-            {selected ? (
-              <div className="p-6">
-                <ResultDetail result={selected} userImage={imagePreview} />
-              </div>
-            ) : (
-              <div className="h-full flex items-center justify-center px-6 py-16">
-                <p className="text-muted text-xs text-center">Select a result to see details.</p>
-              </div>
-            )}
-          </div>
+              {results && !loading && results.results.length === 0 && (
+                <div className="h-full flex flex-col items-center justify-center gap-2 px-8 py-16">
+                  <p className="text-muted text-sm">No matching models found. Try broadening your clues.</p>
+                </div>
+              )}
+
+              {results && !loading && results.results.length > 0 && (() => {
+                const visible = showAll ? results.results : results.results.slice(0, 5);
+                const hasMore = results.results.length > 5;
+                return (
+                  <div className="p-4 flex flex-col gap-2">
+                    <div className="text-muted text-xs px-1 mb-1 flex items-center justify-between">
+                      <span>
+                        Top {visible.length} of {results.results.length} match{results.results.length !== 1 ? 'es' : ''}
+                      </span>
+                      <span>
+                        {results.families_eliminated} eliminated
+                        {results.vision_used && ' · vision used'}
+                      </span>
+                    </div>
+                    {visible.map(r => (
+                      <ResultCard
+                        key={r.id}
+                        result={r}
+                        selected={false}
+                        onClick={() => setSelected(r)}
+                      />
+                    ))}
+                    {hasMore && !showAll && (
+                      <button
+                        onClick={() => setShowAll(true)}
+                        className="mt-1 py-2 px-4 rounded-lg border border-border text-muted text-xs hover:text-ink hover:border-border/70 transition-colors"
+                      >
+                        Show {results.results.length - 5} more results
+                      </button>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+          )}
         </div>
       </main>
     </div>
