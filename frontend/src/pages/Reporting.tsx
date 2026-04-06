@@ -874,7 +874,8 @@ export default function Reporting() {
     }
   };
 
-  const [chatOpen, setChatOpen] = useState(true);
+  // Default to dashboard on mobile, chat on desktop
+  const [chatOpen, setChatOpen] = useState(() => window.innerWidth >= 768);
   const isEmpty = messages.length === 0;
   const marginClass = sidebarCollapsed ? 'md:ml-16' : 'md:ml-56';
 

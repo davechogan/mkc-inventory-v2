@@ -128,7 +128,7 @@ export function Sidebar() {
   const currentPath = window.location.pathname;
 
   const navItems: NavItem[] = [
-    { label: 'Collection', href: '/', icon: <IconGrid />, active: currentPath === '/' || currentPath === '' },
+    { label: 'Collection', href: '/collection', icon: <IconGrid />, active: currentPath === '/collection' },
     { label: 'Identify', href: '/identify', icon: <IconSearch />, active: currentPath === '/identify' },
     { label: 'Catalog', href: '/master', icon: <IconBook />, active: currentPath === '/master' },
     { label: 'Reporting', href: '/reporting', icon: <IconBarChart />, active: currentPath === '/reporting' },
