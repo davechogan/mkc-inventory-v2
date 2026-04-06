@@ -19,132 +19,152 @@ OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://192.168.50.196:11434").rstri
 
 # Normalized 0–100 coords; blade generally points right (tip high-x).
 SEED_POLYGONS: dict[str, tuple[str, str, list[list[int]]]] = {
+    # ── Blade-only side profiles ──
+    # Coordinates are 0-100 normalized. Blade points RIGHT.
+    # Left edge = guard/handle junction (vertical). Top = spine. Bottom = edge.
     "drop_point": (
-        "Drop point",
-        "Spine slopes toward tip; curved belly. Common on hunters and EDC fixed blades.",
+        "Drop Point",
+        "Spine curves gently down to tip; moderate belly curve on edge.",
         [
-            [8, 48], [8, 58], [22, 56], [28, 42], [32, 28], [55, 22], [82, 38], [92, 52],
-            [85, 68], [48, 74], [28, 68], [22, 58],
-        ],
-    ),
-    "clip_point": (
-        "Clip point",
-        "Forward clipped spine; aggressive tip. Often tactical or utility.",
-        [
-            [8, 50], [8, 58], [24, 55], [30, 40], [45, 25], [70, 22], [88, 42], [90, 55],
-            [78, 68], [40, 72], [26, 62],
+            # Guard top → spine → tip → edge → guard bottom
+            [5, 30], [15, 28], [30, 27], [50, 28], [70, 32], [85, 40], [95, 50],
+            [85, 60], [70, 66], [50, 70], [30, 72], [15, 72], [5, 70],
         ],
     ),
     "trailing_point": (
-        "Trailing / upswept",
-        "Spine and edge rise toward tip; belly stays low.",
+        "Trailing Point",
+        "Spine curves UPWARD toward tip; tip is above the spine line. Edge is relatively straight.",
         [
-            [8, 52], [8, 60], [26, 58], [35, 48], [48, 32], [72, 28], [90, 48], [88, 62],
-            [65, 70], [35, 68], [24, 62],
+            # Guard top → spine rises → tip high → edge → guard bottom
+            [5, 38], [15, 35], [30, 30], [50, 24], [70, 18], [85, 16], [95, 22],
+            [90, 35], [80, 48], [65, 58], [50, 64], [30, 68], [15, 68], [5, 68],
         ],
     ),
-    "skinner_belly": (
-        "Skinner (strong belly)",
-        "Wide belly, blunt-ish tip for skinning cuts.",
+    "clip_point": (
+        "Clip Point",
+        "Spine runs straight then clips concave down to tip. Strong fine point.",
         [
-            [8, 50], [10, 62], [28, 58], [40, 48], [52, 38], [75, 42], [88, 55], [82, 68],
-            [55, 76], [30, 72], [20, 60],
-        ],
-    ),
-    "fillet": (
-        "Fillet / narrow flex",
-        "Long slim profile, fine tip, gentle curve.",
-        [
-            [6, 50], [8, 55], [20, 52], [35, 45], [55, 38], [88, 42], [92, 50], [88, 58],
-            [60, 55], [35, 56], [18, 54],
+            # Guard top → straight spine → concave clip → tip → belly → guard bottom
+            [5, 28], [20, 27], [40, 27], [55, 27], [65, 28], [75, 32], [85, 40], [95, 50],
+            [85, 62], [70, 68], [50, 72], [30, 72], [15, 72], [5, 70],
         ],
     ),
     "sheepsfoot": (
         "Sheepsfoot",
-        "Straight edge, spine curves down to meet edge at blunt tip.",
+        "Straight cutting edge; spine curves down to meet it at a blunt tip.",
         [
-            [8, 48], [8, 58], [30, 58], [55, 58], [78, 52], [88, 45], [85, 38], [55, 35],
-            [30, 38], [18, 42],
-        ],
-    ),
-    "tanto": (
-        "Tanto / angular",
-        "Two-segment edge or strong secondary angle near tip.",
-        [
-            [8, 50], [8, 58], [28, 56], [40, 48], [55, 35], [72, 32], [88, 48], [85, 58],
-            [65, 62], [40, 58], [26, 56],
+            # Guard top → spine drops → rounded tip → straight edge → guard bottom
+            [5, 28], [20, 28], [40, 28], [55, 30], [70, 36], [82, 48], [90, 60], [92, 68],
+            [80, 70], [60, 70], [40, 70], [20, 70], [5, 70],
         ],
     ),
     "spear": (
-        "Spear / symmetric",
-        "Centerline tip; spine and edge mirror near the point.",
+        "Spear Point",
+        "Symmetric profile; spine and edge mirror each other toward a centerline tip.",
         [
-            [8, 50], [8, 58], [28, 56], [42, 45], [55, 32], [70, 32], [85, 48], [85, 58],
-            [70, 62], [42, 58], [28, 56],
-        ],
-    ),
-    "chef_rocker": (
-        "Chef / rocker",
-        "Tall heel, long belly curve for rocking cuts.",
-        [
-            [5, 55], [12, 75], [35, 78], [60, 72], [88, 58], [92, 48], [85, 38], [55, 35],
-            [30, 38], [15, 45],
-        ],
-    ),
-    "hatchet": (
-        "Hatchet / wedge",
-        "Short heavy wedge, often single-bevel appearance.",
-        [
-            [10, 40], [15, 70], [45, 78], [75, 72], [88, 55], [85, 38], [55, 32], [30, 35],
+            # Guard top → spine → tip center → edge → guard bottom
+            [5, 32], [15, 30], [30, 28], [50, 30], [70, 36], [85, 44], [95, 50],
+            [85, 56], [70, 64], [50, 70], [30, 72], [15, 70], [5, 68],
         ],
     ),
     "dagger": (
-        "Dagger / double-edge",
-        "Symmetric double-edged blade tapering to a centerline point.",
+        "Dagger",
+        "Double-edged, symmetric top and bottom, tapering to a fine point.",
         [
-            [8, 50], [20, 42], [40, 36], [60, 32], [80, 38], [92, 50],
-            [80, 62], [60, 68], [40, 64], [20, 58],
+            # Guard top → top edge → tip → bottom edge → guard bottom
+            [5, 35], [15, 32], [30, 30], [50, 32], [70, 38], [85, 44], [95, 50],
+            [85, 56], [70, 62], [50, 68], [30, 70], [15, 68], [5, 65],
         ],
     ),
     "hawkbill": (
-        "Hawkbill / recurve",
-        "Inward-curving blade like a talon; spine and edge both curve toward the point below the handle line.",
+        "Hawkbill",
+        "Both spine and edge curve inward/downward like a talon; tip points down.",
         [
-            [8, 42], [8, 52], [25, 50], [38, 45], [50, 42], [62, 48],
-            [78, 62], [88, 72], [90, 65], [82, 52], [68, 38], [50, 35],
-            [35, 38], [22, 42],
+            # Guard top → spine dips → tip curves down → edge recurves → guard bottom
+            [5, 30], [15, 28], [30, 30], [45, 35], [60, 42], [75, 55], [85, 68], [90, 78],
+            [85, 75], [75, 65], [60, 62], [45, 65], [30, 68], [15, 68], [5, 65],
+        ],
+    ),
+    "skinner_belly": (
+        "Skinner",
+        "Pronounced convex belly curve; blunt swept-up tip for skinning.",
+        [
+            # Guard top → flat spine → blunt tip → deep belly → guard bottom
+            [5, 28], [20, 27], [40, 27], [60, 28], [78, 32], [90, 40], [95, 48],
+            [90, 55], [78, 65], [60, 75], [40, 78], [25, 75], [15, 72], [5, 68],
+        ],
+    ),
+    "fillet": (
+        "Fillet",
+        "Long, thin, flexible blade with gentle upward curve to a fine tip.",
+        [
+            # Guard top → thin spine → fine tip → gentle belly → guard bottom
+            [5, 40], [15, 38], [30, 37], [50, 36], [70, 37], [85, 42], [95, 48],
+            [85, 54], [70, 57], [50, 60], [30, 62], [15, 62], [5, 60],
+        ],
+    ),
+    "chef_rocker": (
+        "Chef",
+        "Tall at heel, long rocker belly curve, spine tapers to tip.",
+        [
+            # Guard top → spine tapers → tip → big rocker belly → tall heel → guard bottom
+            [5, 20], [15, 22], [30, 25], [50, 30], [70, 38], [85, 45], [95, 50],
+            [88, 56], [75, 64], [60, 72], [45, 78], [30, 82], [15, 82], [5, 80],
         ],
     ),
     "santoku": (
         "Santoku",
-        "Flat spine dropping to a sheepsfoot-like tip; wide blade with gentle belly curve.",
+        "Wide blade, nearly flat edge, spine drops to sheepsfoot-like tip.",
         [
-            [5, 52], [10, 72], [30, 75], [55, 70], [78, 58], [88, 45],
-            [82, 38], [55, 35], [30, 38], [15, 42],
+            # Guard top → flat spine → drops to tip → nearly flat edge → guard bottom
+            [5, 22], [20, 22], [40, 22], [55, 24], [70, 32], [82, 45], [90, 58],
+            [88, 65], [75, 72], [55, 75], [35, 76], [20, 76], [5, 75],
         ],
     ),
     "petty": (
-        "Petty / utility",
-        "Small Japanese-style utility knife; narrow profile, slight belly, fine tip.",
+        "Petty",
+        "Small utility knife; narrow profile, slight belly curve, fine tip.",
         [
-            [6, 48], [8, 55], [22, 54], [40, 48], [60, 40], [82, 38],
-            [92, 46], [88, 54], [65, 56], [40, 56], [20, 54],
+            # Guard top → slim spine → fine tip → slight belly → guard bottom
+            [5, 38], [15, 36], [30, 35], [50, 35], [70, 38], [85, 44], [95, 50],
+            [85, 56], [70, 60], [50, 63], [30, 65], [15, 64], [5, 62],
         ],
     ),
     "paring": (
         "Paring",
-        "Short blade with gentle curve; designed for hand-held detail work.",
+        "Short blade with slight curve; compact for hand-held detail work.",
         [
-            [8, 48], [10, 58], [25, 56], [40, 50], [55, 42], [72, 38],
-            [88, 46], [85, 55], [65, 60], [40, 60], [22, 56],
+            # Guard top → spine → tip → gentle curve → guard bottom
+            [5, 35], [15, 33], [30, 32], [50, 34], [70, 40], [85, 46], [95, 52],
+            [85, 58], [70, 63], [50, 66], [30, 68], [15, 68], [5, 65],
         ],
     ),
     "cleaver": (
         "Cleaver",
         "Tall rectangular blade; straight edge, flat spine, squared-off tip.",
         [
-            [10, 25], [10, 78], [40, 80], [70, 78], [88, 72], [90, 28],
-            [70, 24], [40, 22],
+            # Rectangular: guard top → spine → squared tip → straight edge → guard bottom
+            [5, 18], [20, 18], [40, 18], [60, 18], [80, 18], [90, 20],
+            [92, 30], [92, 50], [92, 70], [90, 80],
+            [80, 82], [60, 82], [40, 82], [20, 82], [5, 82],
+        ],
+    ),
+    "hatchet": (
+        "Hatchet",
+        "Short heavy wedge; wide cutting edge, narrow poll/eye end.",
+        [
+            # Narrow poll → widens → wide edge → back up
+            [5, 35], [20, 30], [40, 25], [60, 22], [80, 20], [92, 25],
+            [92, 75], [80, 80], [60, 78], [40, 75], [20, 70], [5, 65],
+        ],
+    ),
+    "tanto": (
+        "Tanto",
+        "Flat spine; edge has angular transition (secondary bevel) near tip.",
+        [
+            # Guard top → flat spine → angled tip → angular edge → straight edge → guard bottom
+            [5, 28], [20, 27], [40, 27], [60, 27], [75, 28], [88, 35], [95, 45],
+            [88, 52], [78, 60], [65, 70], [50, 70], [30, 70], [15, 70], [5, 70],
         ],
     ),
 }
