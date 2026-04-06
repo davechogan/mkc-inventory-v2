@@ -574,8 +574,10 @@ CRITICAL RULE: If the user's knife blade shape does NOT match the candidate's bl
 
 Rate each: STRONG (blade shape matches silhouette AND photo looks similar), POSSIBLE (blade shape matches but uncertain on details), UNLIKELY (blade shape clearly different OR proportions clearly wrong).
 
+IMPORTANT: First, describe what you see in the user's knife (Image 1) — specifically the blade spine curvature near the tip, the tip position relative to the spine line, and the edge profile. This helps explain your shape classification.
+
 Return VALID JSON ONLY (no markdown):
-{"comparisons": [{"model": "<exact model name>", "match": "STRONG|POSSIBLE|UNLIKELY", "reason": "<one sentence explaining blade shape comparison>"}]}"""
+{"user_knife_analysis": {"spine_description": "<describe spine curvature near tip>", "tip_position": "<above spine line / on spine line / below spine line>", "edge_profile": "<straight / curved belly / deep belly / recurve>", "classified_shape": "<best matching shape name>"}, "comparisons": [{"model": "<exact model name>", "match": "STRONG|POSSIBLE|UNLIKELY", "reason": "<one sentence explaining blade shape comparison>"}]}"""
 
 
 def _load_form_silhouette_b64(form_name: str) -> Optional[str]:
