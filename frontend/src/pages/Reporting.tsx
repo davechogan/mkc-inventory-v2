@@ -725,7 +725,7 @@ export default function Reporting() {
   const [loading, setLoading] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // Listen to sidebar toggle
@@ -783,9 +783,12 @@ export default function Reporting() {
     }
   }, []);
 
-  // Scroll to bottom on new messages
+  // Scroll chat to bottom on new messages (use scrollTo on the container
+  // instead of scrollIntoView to avoid scrolling ancestor containers and
+  // pushing the page header off-screen)
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const el = chatScrollRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
   }, [messages]);
 
   const handleSend = useCallback(async (question: string) => {
@@ -945,7 +948,7 @@ export default function Reporting() {
               </div>
 
               {/* Messages */}
-              <div className="flex-1 overflow-y-auto px-4 py-4">
+              <div ref={chatScrollRef} className="flex-1 overflow-y-auto px-4 py-4">
                 {isEmpty ? (
                   <div className="flex flex-col items-center gap-4 pt-8">
                     <div className="w-12 h-12 rounded-full overflow-hidden ring-2 ring-gold/30 bg-surface">
@@ -979,7 +982,6 @@ export default function Reporting() {
                         />
                       )
                     ))}
-                    <div ref={messagesEndRef} />
                   </div>
                 )}
               </div>
