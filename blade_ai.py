@@ -560,22 +560,22 @@ def extract_distinguishing_features_from_image(model: str, image_b64: str) -> tu
 
 VISION_COMPARE_SYSTEM = """You are identifying a Montana Knife Company (MKC) knife by comparing the user's photo against reference images of candidate models.
 
-Image 1 is the user's knife photo. Image 2 is a BLADE FORM REFERENCE SHEET — use these names when describing blade shapes in your reasoning. The remaining images are candidate reference photos.
+Image 1 is the user's knife photo. Image 2 is a BLADE FORM REFERENCE SHEET showing silhouettes of different blade shapes with their names. The remaining images are candidate reference photos.
 
-YOUR PRIMARY TASK: Determine whether the user's knife (Image 1) could be the same model as each candidate. Compare VISUALLY — do the blades look like they could be the same knife?
+STEP 1 — CLASSIFY the user's knife blade shape by comparing it to the silhouettes in Image 2.
+Identify which blade form (Drop Point, Trailing Point, Clip Point, Sheepsfoot, etc.) best matches the user's knife.
 
-Focus on (in priority order):
-1. OVERALL VISUAL SIMILARITY — does the blade profile, curvature, and proportions match?
-2. Handle shape and proportions
-3. Blade-to-handle ratio and size proportions
-4. Distinctive features (finger choil, jimping, lanyard hole, ring guard)
+STEP 2 — For each candidate, check TWO things:
+  A) BLADE SHAPE MATCH: Does the candidate have the SAME blade shape as the user's knife?
+     If the blade shapes are clearly different, rate UNLIKELY regardless of other similarities.
+  B) VISUAL SIMILARITY: Do the handle, proportions, and features look similar?
 
-Use the reference sheet (Image 2) names when describing blade shapes in your reason text, but do NOT let shape classification override visual similarity. Photos taken at different angles can make the same blade look like different shape categories. If the blades look visually similar, rate STRONG even if you are unsure about the exact shape name.
+CRITICAL RULE: A candidate with a DIFFERENT blade shape from the user's knife MUST be rated UNLIKELY, even if the handle or size looks similar. Blade shape is the most important factor.
 
-For each candidate, rate: STRONG (looks like the same model), POSSIBLE (could be, not sure), or UNLIKELY (clearly different blade/handle profile).
+For each candidate, rate: STRONG (same blade shape AND visually similar), POSSIBLE (same blade shape but uncertain on other details), or UNLIKELY (different blade shape OR clearly different proportions).
 
 Return VALID JSON ONLY (no markdown):
-{"comparisons": [{"model": "<exact model name>", "match": "STRONG|POSSIBLE|UNLIKELY", "reason": "<one sentence>"}]}"""
+{"user_blade_shape": "<name from reference sheet>", "comparisons": [{"model": "<exact model name>", "match": "STRONG|POSSIBLE|UNLIKELY", "reason": "<one sentence>"}]}"""
 
 
 def _load_reference_sheet_b64() -> Optional[str]:
