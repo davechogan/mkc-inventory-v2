@@ -144,7 +144,7 @@ def _configure_logging() -> logging.Logger:
 
 
 _app_logger = _configure_logging()
-OLLAMA_VISION_MODEL = (os.environ.get("OLLAMA_VISION_MODEL") or "qwen3-vl:latest").strip() or "qwen3-vl:latest"
+OLLAMA_VISION_MODEL = (os.environ.get("OLLAMA_VISION_MODEL") or "gemma3:27B").strip() or "gemma3:27B"
 
 # Authoritative model list + research fields (record type, URLs, evidence, etc.)
 KNIFE_MASTER_CSV = BASE_DIR / "Knife Master.csv"  # Optional; moved to cleanup/ after catalog built
