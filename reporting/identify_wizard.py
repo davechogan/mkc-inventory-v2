@@ -509,6 +509,7 @@ QUESTIONS: list[WizardQuestion] = [
             'wood, micarta) are smooth or textured but not wrapped. Answer ONLY "yes" or "no".'
         ),
         vision_reliability=1.0,
+        auto_gate=True,
     ),
     WizardQuestion(
         key="kitchen_or_field",
@@ -743,8 +744,74 @@ def _format_question(q: WizardQuestion, suggestion: Optional[Any] = None) -> dic
     }
 
 
+def _rank_candidates_with_vision(
+    session: WizardSession,
+    candidates: list[dict],
+    conn: sqlite3.Connection,
+    vision_model: str,
+    vision_fn: Any,
+) -> list[dict]:
+    """Run vision comparison on final candidates and add match ranking."""
+    if not session.image_b64 or not vision_fn or not candidates:
+        return candidates
+
+    try:
+        from blade_ai import vision_compare_candidates, _remove_background
+
+        # Build candidate list for vision comparison (max 5)
+        vision_cands = []
+        for c in candidates[:5]:
+            cw_id = c.get("best_colorway_id")
+            if not cw_id:
+                continue
+            row = conn.execute(
+                "SELECT image_blob FROM model_colorways WHERE id = ? "
+                "AND image_blob IS NOT NULL", (cw_id,)
+            ).fetchone()
+            if not row:
+                continue
+            vision_cands.append({
+                "name": c["name"],
+                "form": c.get("form", ""),
+                "reference_image_b64": base64.b64encode(row["image_blob"]).decode("ascii"),
+            })
+
+        if not vision_cands:
+            return candidates
+
+        _log.info(f"Vision ranking {len(vision_cands)} final candidates")
+        results = vision_compare_candidates(
+            vision_model,
+            session.clean_image_b64 or session.image_b64,
+            vision_cands,
+        )
+
+        # Build lookup
+        vision_map = {vr.get("model", ""): vr for vr in (results or [])}
+
+        for c in candidates:
+            vr = vision_map.get(c["name"])
+            if vr:
+                c["vision_match"] = (vr.get("match") or "").upper()
+                c["vision_reason"] = vr.get("reason", "")
+
+    except Exception as e:
+        _log.warning(f"Vision ranking failed: {e}")
+
+    # Sort: STRONG first, then POSSIBLE, then others
+    rank_order = {"STRONG": 0, "POSSIBLE": 1, "UNLIKELY": 2}
+    candidates.sort(key=lambda c: (
+        rank_order.get(c.get("vision_match", ""), 3),
+        c.get("family") or "",
+        c["name"],
+    ))
+    return candidates
+
+
 def _format_candidates(session: WizardSession, conn: sqlite3.Connection,
-                       handle_color: Optional[str] = None) -> list[dict]:
+                       handle_color: Optional[str] = None,
+                       vision_model: str = "",
+                       vision_fn: Any = None) -> list[dict]:
     """Format remaining candidates for the final display."""
     candidates = []
     for m in session.all_models:
@@ -764,8 +831,15 @@ def _format_candidates(session: WizardSession, conn: sqlite3.Connection,
             "best_colorway_id": cw_id,
             "has_image": bool(m.get("has_image")),
         })
-    # Sort by family then name
-    candidates.sort(key=lambda c: (c.get("family") or "", c["name"]))
+
+    # Run vision ranking if we have an image
+    if session.image_b64 and vision_fn and vision_model:
+        candidates = _rank_candidates_with_vision(
+            session, candidates, conn, vision_model, vision_fn,
+        )
+    else:
+        candidates.sort(key=lambda c: (c.get("family") or "", c["name"]))
+
     return candidates
 
 
@@ -843,7 +917,8 @@ def start_session(
             "remaining_families": len(_remaining_families(session)),
             "auto_gates": session.auto_gates,
             "done": True,
-            "candidates": _format_candidates(session, conn),
+            "candidates": _format_candidates(session, conn,
+                                              vision_model=vision_model, vision_fn=vision_fn),
         }
 
     next_q = _pick_next_question(session)
@@ -908,7 +983,8 @@ def answer_question(
             "remaining_families": len(remaining_fams),
             "eliminated_this_step": eliminated if filter_fn else 0,
             "done": True,
-            "candidates": _format_candidates(session, conn, handle_color),
+            "candidates": _format_candidates(session, conn, handle_color,
+                                              vision_model=vision_model, vision_fn=vision_fn),
         }
 
     # Pick next question
@@ -919,7 +995,8 @@ def answer_question(
             "remaining_families": len(remaining_fams),
             "eliminated_this_step": eliminated if filter_fn else 0,
             "done": True,
-            "candidates": _format_candidates(session, conn, handle_color),
+            "candidates": _format_candidates(session, conn, handle_color,
+                                              vision_model=vision_model, vision_fn=vision_fn),
         }
 
     # Get vision suggestion for next question

@@ -25,6 +25,8 @@ interface WizardCandidate {
   msrp: number | null;
   best_colorway_id: number | null;
   has_image: boolean;
+  vision_match?: string;
+  vision_reason?: string;
 }
 
 interface AutoGate {
@@ -367,8 +369,24 @@ function CandidateGrid({
             <button
               key={c.model_id}
               onClick={() => onSelect(c)}
-              className="flex flex-col border border-border bg-card rounded-xl overflow-hidden hover:border-gold/50 hover:bg-gold/5 transition-colors text-left"
+              className={`flex flex-col border-2 bg-card rounded-xl overflow-hidden hover:bg-gold/5 transition-colors text-left ${
+                c.vision_match === 'STRONG'
+                  ? 'border-green-500/60 ring-1 ring-green-500/20'
+                  : c.vision_match === 'POSSIBLE'
+                    ? 'border-yellow-500/40'
+                    : 'border-border hover:border-gold/50'
+              }`}
             >
+              {c.vision_match === 'STRONG' && (
+                <div className="bg-green-900/30 text-green-300 text-xs font-semibold text-center py-1">
+                  AI Best Match
+                </div>
+              )}
+              {c.vision_match === 'POSSIBLE' && (
+                <div className="bg-yellow-900/20 text-yellow-300 text-xs font-medium text-center py-1">
+                  Possible Match
+                </div>
+              )}
               <div className="aspect-[4/3] bg-border/10 flex items-center justify-center overflow-hidden">
                 {imgSrc ? (
                   <img src={imgSrc} alt={c.name} className="w-full h-full object-cover" />
@@ -386,6 +404,9 @@ function CandidateGrid({
                   )}
                   {c.handle_type && <span className="text-xs text-muted">{c.handle_type}</span>}
                 </div>
+                {c.vision_reason && (
+                  <div className="text-[10px] text-muted/70 mt-1 line-clamp-2">{c.vision_reason}</div>
+                )}
               </div>
             </button>
           );
