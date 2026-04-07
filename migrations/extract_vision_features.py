@@ -78,7 +78,7 @@ def _ask_focused(image_b64: str, question: str) -> dict | None:
 
 # High-value features that must be asked individually (multi-question prompts give wrong answers)
 FOCUSED_QUESTIONS = [
-    ('What color is the BLADE (not the handle) of this knife? Answer JSON: {"blade_color_primary": "silver" or "black" or "red" or "coyote_tan" or "grey" or "two_tone" or "other"}',),
+    ('Is the blade of this knife red, silver, black, tan/coyote, grey, or another color? Look at the blade surface color, not the handle. Answer JSON: {"blade_color_primary": "silver" or "black" or "red" or "coyote_tan" or "grey" or "two_tone" or "other"}',),
     # finger_ring_presence is manually annotated — the model confuses lanyard holes with finger rings
 ]
 
