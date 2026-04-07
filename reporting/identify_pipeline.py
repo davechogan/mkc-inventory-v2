@@ -382,14 +382,18 @@ def _big_family_pass(
         if c.family not in seen and c.has_image:
             seen.add(c.family)
             representatives.append(c)
+            _log.info(f"  Big family representative: {c.name} (family={c.family}, score={c.score})")
 
     if not representatives or not inputs.image_b64:
         return candidates
 
     # Load colorway-matched images for each representative
+    # Use the highest-scoring model's own reference image (not a colorway match)
+    # because the highest scorer already matches the user's features best
     vision_cands = []
     for rep in representatives:
         img_b64 = _load_best_colorway_image(conn, rep.model_id, inputs.handle_color)
+        _log.info(f"  Big family rep: {rep.name} (score={rep.score}, family={rep.family})")
         if img_b64:
             vision_cands.append({
                 "name": rep.name,
