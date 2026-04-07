@@ -69,7 +69,7 @@ def bootstrap(conn: sqlite3.Connection):
         kt = r["knife_type"] or ""
         if kt == "Culinary":
             observable["knife_type_visual"] = "kitchen"
-        elif kt in ("Hunting", "Tactical", "Bushcraft & Camp", "Everyday Carry"):
+        elif kt in ("Hunting", "Hunting / Fishing", "Tactical", "Bushcraft & Camp", "Everyday Carry"):
             observable["knife_type_visual"] = "field"
         else:
             observable["knife_type_visual"] = "unknown"
