@@ -602,7 +602,6 @@ interface VisionDebugResponse {
 function VisionDebug() {
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
-  const [runVision, setRunVision] = useState(false);
   const [handleMaterial, setHandleMaterial] = useState('');
   const [handleColor] = useState('');
   const [isCulinary, setIsCulinary] = useState<string>('');
@@ -626,7 +625,6 @@ function VisionDebug() {
     try {
       const fd = new FormData();
       fd.append('image', file);
-      fd.append('run_vision', String(runVision));
       if (handleMaterial) fd.append('handle_material', handleMaterial);
       if (handleColor) fd.append('handle_color', handleColor);
       if (isCulinary === 'true') fd.append('is_culinary', 'true');
@@ -676,11 +674,6 @@ function VisionDebug() {
             <option value="false">No</option>
           </select>
         </div>
-        <label className="flex items-center gap-2 cursor-pointer select-none">
-          <input type="checkbox" checked={runVision} onChange={e => setRunVision(e.target.checked)}
-            className="w-4 h-4 rounded accent-gold" />
-          <span className="text-muted text-xs">Run vision model (slower)</span>
-        </label>
         <button onClick={handleSubmit} disabled={!file || loading}
           className="py-1.5 px-4 rounded-lg bg-gold text-black text-sm font-semibold hover:bg-gold-bright disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
           {loading ? 'Processing…' : 'Analyze'}

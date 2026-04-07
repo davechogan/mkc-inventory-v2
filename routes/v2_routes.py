@@ -2254,9 +2254,8 @@ def create_v2_router(
         is_culinary: Optional[bool] = Form(None),
         blade_forms: Optional[str] = Form(None),
         blade_length_bin: Optional[int] = Form(None),
-        run_vision: bool = Form(False),
     ):
-        """Debug endpoint: runs the same pipeline as identify/image and shows all inputs/outputs."""
+        """Debug endpoint: runs the same pipeline as identify/image, always runs vision, shows all inputs/outputs."""
         image_bytes = await image.read()
         image_b64 = base64.b64encode(image_bytes).decode("ascii")
 
@@ -2353,16 +2352,32 @@ def create_v2_router(
                         "has_image": bool(row["has_identifier_image"]),
                     })
 
+            # Add blade length scoring
+            if blade_length_bin and blade_length_bin in _LENGTH_BINS:
+                lo, hi = _LENGTH_BINS[blade_length_bin]
+                for r in results:
+                    bl = next((row["blade_length"] for row in rows if row["official_name"] == r["name"]), None)
+                    if bl is not None:
+                        if lo <= bl <= hi:
+                            r["score"] += 15
+                            r["reasons"].append(f"blade length {bl}\" in range")
+
             results.sort(key=lambda x: (-x["score"], x["name"].lower()))
 
-            # Stage 4: Pick top 5 candidates (one per family) — same as real pipeline
+            # Stage 4: Pick top 5 candidates (one per family, spread across blade forms)
             seen_families: set[str] = set()
+            seen_forms: set[str] = set()
             candidates = []
+
+            # First pass: prefer diversity of blade forms
             for r in results:
                 fam = r["family"] or r["name"]
+                form = r["form"] or "unknown"
                 if fam in seen_families:
                     continue
-                seen_families.add(fam)
+                if form not in seen_forms or len(candidates) < 5:
+                    seen_families.add(fam)
+                    seen_forms.add(form)
                 ref_row = conn.execute(
                     "SELECT image_blob FROM knife_model_images WHERE knife_model_id = ? AND image_blob IS NOT NULL",
                     (r["id"],),
@@ -2383,10 +2398,10 @@ def create_v2_router(
                 if len(candidates) >= 5:
                     break
 
-        # Optionally run vision
+        # Always run vision
         vision_raw = None
         vision_parsed = None
-        if run_vision and candidates:
+        if candidates:
             vision_cands = [
                 {"name": c["name"], "form": c["form"], "reference_image_b64": c["image_b64"]}
                 for c in candidates
