@@ -79,8 +79,11 @@ def _ask_focused(image_b64: str, question: str) -> dict | None:
 # High-value features that must be asked individually (multi-question prompts give wrong answers)
 FOCUSED_QUESTIONS = [
     ('What color is the BLADE (not the handle) of this knife? Answer JSON: {"blade_color_primary": "silver" or "black" or "red" or "coyote_tan" or "grey" or "two_tone" or "other"}',),
-    ('Is there a large finger ring, loop, or circular hole at the butt end of the handle? Not a small lanyard hole — a prominent ring a finger could fit through. Answer JSON: {"finger_ring_presence": true or false}',),
+    # finger_ring_presence is manually annotated — the model confuses lanyard holes with finger rings
 ]
+
+# Features that must NEVER be overwritten by extraction (manually annotated)
+MANUAL_ONLY_FEATURES = {"finger_ring_presence"}
 
 
 def extract_features(image_b64: str) -> dict | None:
@@ -102,9 +105,9 @@ def extract_features(image_b64: str) -> dict | None:
     )
     batch = try_parse_json_response(raw)
     if batch and isinstance(batch, dict):
-        # Merge batch results but don't overwrite focused results
+        # Merge batch results but don't overwrite focused results or manual-only features
         for k, v in batch.items():
-            if k not in result:
+            if k not in result and k not in MANUAL_ONLY_FEATURES:
                 result[k] = v
 
     return result if result else None
@@ -167,10 +170,12 @@ def main():
         answers = extract_features(image_b64)
 
         if answers and isinstance(answers, dict):
-            # Merge vision answers into existing profile (don't overwrite catalog-derived values)
+            # Merge vision answers into existing profile
+            # Don't overwrite: catalog-derived values (unless force), manual-only features (never)
             for key, val in answers.items():
+                if key in MANUAL_ONLY_FEATURES:
+                    continue  # Never overwrite manually annotated features
                 if key in existing_obs:
-                    # Only overwrite if currently unknown
                     if existing_obs[key] == "unknown" or force:
                         existing_obs[key] = val
                 else:
