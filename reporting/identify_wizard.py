@@ -86,6 +86,7 @@ def _load_models(conn: sqlite3.Connection) -> list[dict]:
                bs.name AS blade_steel, bf.name AS blade_finish,
                ks.name AS series_name, c.name AS collaborator_name,
                km.msrp,
+               bc.name AS blade_color,
                p.observable_profile_json,
                (CASE WHEN kmi.image_blob IS NOT NULL AND length(kmi.image_blob) > 0
                      THEN 1 ELSE 0 END) AS has_image
@@ -94,6 +95,7 @@ def _load_models(conn: sqlite3.Connection) -> list[dict]:
         LEFT JOIN knife_forms frm ON frm.id = km.form_id
         LEFT JOIN knife_types kt ON kt.id = km.type_id
         LEFT JOIN handle_types ht ON ht.id = km.handle_type_id
+        LEFT JOIN blade_colors bc ON bc.id = km.blade_color_id
         LEFT JOIN blade_steels bs ON bs.id = km.steel_id
         LEFT JOIN blade_finishes bf ON bf.id = km.blade_finish_id
         LEFT JOIN knife_series ks ON ks.id = km.series_id
@@ -257,13 +259,20 @@ def _filter_blade_color(candidate_ids: set[int], answer: str, models: list[dict]
     }
     db_color = color_map.get(answer, answer.lower())
 
-    # Map user's color choice to profile values
+    # Map user's color choice to model-level blade_color names and profile values
+    _answer_to_db: dict[str, set[str]] = {
+        "Silver": {"steel"},
+        "Black": {"black"},
+        "Red": {"red"},
+        "Coyote": {"coyote"},
+    }
     _answer_to_profile: dict[str, set[str]] = {
         "Silver": {"silver"},
         "Black": {"black"},
         "Red": {"red"},
         "Coyote": {"coyote_tan"},
     }
+    db_matches = _answer_to_db.get(answer, set())
     profile_matches = _answer_to_profile.get(answer, set())
 
     keep = set()
@@ -271,14 +280,14 @@ def _filter_blade_color(candidate_ids: set[int], answer: str, models: list[dict]
         if m["id"] not in candidate_ids:
             continue
 
-        # Check model vision profile (all 87 models have this)
-        profile_color = m.get("_profile", {}).get("blade_color_primary", "")
-        if profile_color in profile_matches:
+        # 1. Check model-level blade_color (most reliable — just backfilled)
+        model_bc = (m.get("blade_color") or "").lower()
+        if model_bc and model_bc in db_matches:
             keep.add(m["id"])
             continue
 
-        # Also check colorway blade colors (explicit matches only)
-        if conn:
+        # 2. For tactical models without model-level color, check colorways
+        if not model_bc and conn:
             row = conn.execute(
                 "SELECT COUNT(*) AS cnt FROM model_colorways mc "
                 "JOIN blade_colors bc ON bc.id = mc.blade_color_id "
@@ -287,6 +296,12 @@ def _filter_blade_color(candidate_ids: set[int], answer: str, models: list[dict]
             ).fetchone()
             if row and row["cnt"] > 0:
                 keep.add(m["id"])
+                continue
+
+        # 3. Fallback to vision profile
+        profile_color = m.get("_profile", {}).get("blade_color_primary", "")
+        if profile_color in profile_matches:
+            keep.add(m["id"])
 
     return keep
 
