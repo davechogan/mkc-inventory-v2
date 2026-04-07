@@ -257,20 +257,28 @@ def _filter_blade_color(candidate_ids: set[int], answer: str, models: list[dict]
     }
     db_color = color_map.get(answer, answer.lower())
 
-    # For distinctive colors (red, coyote), hard-filter
-    if answer in ("Red", "Coyote"):
-        keep = set()
-        for m in models:
-            if m["id"] not in candidate_ids:
-                continue
-            # Check model profile for blade color
-            profile_color = m.get("_profile", {}).get("blade_color_primary", "")
-            profile_map = {"red": "Red", "coyote_tan": "Coyote", "black": "Black",
-                           "silver": "Steel"}
-            if profile_color and profile_map.get(profile_color) == answer:
-                keep.add(m["id"])
-                continue
-            # Check colorway blade colors — only explicit matches, NOT NULLs
+    # Map user's color choice to profile values
+    _answer_to_profile: dict[str, set[str]] = {
+        "Silver": {"silver"},
+        "Black": {"black"},
+        "Red": {"red"},
+        "Coyote": {"coyote_tan"},
+    }
+    profile_matches = _answer_to_profile.get(answer, set())
+
+    keep = set()
+    for m in models:
+        if m["id"] not in candidate_ids:
+            continue
+
+        # Check model vision profile (all 87 models have this)
+        profile_color = m.get("_profile", {}).get("blade_color_primary", "")
+        if profile_color in profile_matches:
+            keep.add(m["id"])
+            continue
+
+        # Also check colorway blade colors (explicit matches only)
+        if conn:
             row = conn.execute(
                 "SELECT COUNT(*) AS cnt FROM model_colorways mc "
                 "JOIN blade_colors bc ON bc.id = mc.blade_color_id "
@@ -279,10 +287,8 @@ def _filter_blade_color(candidate_ids: set[int], answer: str, models: list[dict]
             ).fetchone()
             if row and row["cnt"] > 0:
                 keep.add(m["id"])
-        return keep
-    else:
-        # Silver/Black — too common, don't hard-filter (most have NULL blade_color)
-        return candidate_ids
+
+    return keep
 
 
 def _filter_handle_color(candidate_ids: set[int], answer: str, models: list[dict],
