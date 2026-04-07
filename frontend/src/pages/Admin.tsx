@@ -614,7 +614,8 @@ function VisionDebug() {
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [handleMaterial, setHandleMaterial] = useState('');
-  const [handleColor] = useState('');
+  const [handleColor, setHandleColor] = useState('');
+  const [bladeColor, setBladeColor] = useState('');
   const [isCulinary, setIsCulinary] = useState<string>('');
   const [result, setResult] = useState<VisionDebugResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -638,6 +639,7 @@ function VisionDebug() {
       fd.append('image', file);
       if (handleMaterial) fd.append('handle_material', handleMaterial);
       if (handleColor) fd.append('handle_color', handleColor);
+      if (bladeColor) fd.append('blade_color', bladeColor);
       if (isCulinary === 'true') fd.append('is_culinary', 'true');
       if (isCulinary === 'false') fd.append('is_culinary', 'false');
       const res = await fetch('/api/v2/identify/vision-debug', { method: 'POST', body: fd });
@@ -677,6 +679,37 @@ function VisionDebug() {
           </select>
         </div>
         <div>
+          <label className="block text-muted text-xs mb-1.5">Handle color <span className="text-red-400">*</span></label>
+          <select value={handleColor} onChange={e => setHandleColor(e.target.value)}
+            className="px-2 py-1.5 bg-card border border-border rounded-lg text-xs text-ink">
+            <option value="">Select…</option>
+            <option value="Black">Black</option>
+            <option value="Orange">Orange</option>
+            <option value="Orange/Black">Orange/Black</option>
+            <option value="OD Green">OD Green</option>
+            <option value="Coyote">Coyote</option>
+            <option value="Red">Red</option>
+            <option value="Grey">Grey</option>
+            <option value="Carbon Fiber">Carbon Fiber</option>
+            <option value="Desert Ironwood">Desert Ironwood</option>
+            <option value="Black/Red">Black/Red</option>
+            <option value="Green/Black">Green/Black</option>
+            <option value="Tan/Black">Tan/Black</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-muted text-xs mb-1.5">Blade color <span className="text-red-400">*</span></label>
+          <select value={bladeColor} onChange={e => setBladeColor(e.target.value)}
+            className="px-2 py-1.5 bg-card border border-border rounded-lg text-xs text-ink">
+            <option value="">Select…</option>
+            <option value="Steel">Silver/Satin</option>
+            <option value="Black">Black/Dark</option>
+            <option value="Red">Red</option>
+            <option value="Coyote">Coyote/Tan</option>
+            <option value="Distressed Gray">Grey</option>
+          </select>
+        </div>
+        <div>
           <label className="block text-muted text-xs mb-1.5">Culinary?</label>
           <select value={isCulinary} onChange={e => setIsCulinary(e.target.value)}
             className="px-2 py-1.5 bg-card border border-border rounded-lg text-xs text-ink">
@@ -685,7 +718,7 @@ function VisionDebug() {
             <option value="false">No</option>
           </select>
         </div>
-        <button onClick={handleSubmit} disabled={!file || loading}
+        <button onClick={handleSubmit} disabled={!file || !handleColor || !bladeColor || loading}
           className="py-1.5 px-4 rounded-lg bg-gold text-black text-sm font-semibold hover:bg-gold-bright disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
           {loading ? 'Processing…' : 'Analyze'}
         </button>
