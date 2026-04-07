@@ -214,26 +214,10 @@ def _filter_paracord(candidate_ids: set[int], answer: bool, models: list[dict],
                 and (m.get("handle_type") == "Paracord"
                      or m.get("_profile", {}).get("handle_type_visual") == "paracord")}
     else:
-        # Remove paracord-ONLY families (all models in family are paracord)
-        # But keep families where some models have non-paracord options
-        by_family: dict[str, list[dict]] = {}
-        for m in models:
-            if m["id"] in candidate_ids:
-                fam = m.get("family_name") or m["official_name"]
-                by_family.setdefault(fam, []).append(m)
-
-        keep = set()
-        for fam, members in by_family.items():
-            # Keep if at least one model in the family is NOT paracord
-            has_non_paracord = any(
-                m.get("handle_type") != "Paracord"
-                and m.get("_profile", {}).get("handle_type_visual") != "paracord"
-                for m in members
-            )
-            if has_non_paracord:
-                keep.update(m["id"] for m in members)
-            # If ALL are paracord, eliminate the whole family
-        return keep
+        # User does NOT have paracord — eliminate every paracord model
+        return {m["id"] for m in models if m["id"] in candidate_ids
+                and m.get("handle_type") != "Paracord"
+                and m.get("_profile", {}).get("handle_type_visual") != "paracord"}
 
 
 def _filter_kitchen(candidate_ids: set[int], answer: bool, models: list[dict],
@@ -705,18 +689,37 @@ def _remaining_families(session: WizardSession) -> set[str]:
 
 
 def _is_done(session: WizardSession) -> bool:
-    """Check if the wizard should stop and show candidates."""
+    """Check if the wizard should stop and show candidates.
+
+    We stop when:
+    - Only 1 candidate remains (perfect match)
+    - Max questions answered (fatigue limit)
+    - No remaining question can split the candidates further
+
+    We do NOT stop just because candidates ≤ 8 — if a question can still
+    meaningfully narrow the set, keep asking. The user experience of
+    answering one more question to go from 4 → 1 is better than showing 4.
+    """
     n_candidates = len(session.candidate_ids)
-    n_families = len(_remaining_families(session))
     n_answered = len(session.answers)
 
-    if n_candidates <= MAX_CANDIDATES_DONE:
-        return True
-    if n_families <= MAX_FAMILIES_DONE:
+    if n_candidates <= 1:
         return True
     if n_answered >= MAX_QUESTIONS:
         return True
-    return False
+
+    # Check if any unanswered question can split the remaining candidates
+    answered_keys = set(session.answers.keys())
+    for q in QUESTIONS:
+        if q.key in answered_keys:
+            continue
+        if q.auto_gate and session.image_b64:
+            continue
+        power = _compute_splitting_power(q, session.candidate_ids, session.all_models)
+        if power > 0.01:
+            return False  # At least one useful question remains
+
+    return True  # No useful questions left
 
 
 def _populate_dynamic_options(conn: sqlite3.Connection):

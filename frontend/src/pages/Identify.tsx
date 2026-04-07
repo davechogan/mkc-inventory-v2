@@ -600,7 +600,25 @@ function UploadStep({
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
+const SIDEBAR_KEY = 'mkc_sidebar_collapsed';
+
 export default function Identify() {
+  // Sidebar margin
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    () => localStorage.getItem(SIDEBAR_KEY) === 'true',
+  );
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const ce = e as CustomEvent;
+      setSidebarCollapsed(ce.detail.collapsed);
+    };
+    window.addEventListener('mkc-sidebar-toggle', handler);
+    return () => window.removeEventListener('mkc-sidebar-toggle', handler);
+  }, []);
+
+  const marginClass = sidebarCollapsed ? 'md:ml-16' : 'md:ml-56';
+
   // Wizard state
   const [phase, setPhase] = useState<'upload' | 'questions' | 'candidates' | 'detail'>('upload');
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -840,10 +858,10 @@ export default function Identify() {
   };
 
   return (
-    <div className="flex h-screen-safe bg-surface text-ink">
+    <div className="h-screen-safe bg-surface text-ink">
       <Sidebar />
 
-      <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
+      <main className={`${marginClass} transition-[margin] duration-200 flex flex-col h-screen-safe overflow-hidden`}>
         {/* Header */}
         <header className="flex items-center justify-between px-6 py-3 border-b border-border flex-shrink-0">
           <div className="flex items-center gap-3">
