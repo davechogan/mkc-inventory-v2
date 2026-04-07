@@ -96,8 +96,9 @@ def run_pipeline(
         user_profile = _extract_user_features(inputs.image_b64, extract_fn)
         _log.info(f"User profile extracted: {user_profile}")
 
-        # Hard gate on distinctive extracted features
-        eliminated = _gate_by_extracted_features(models, families, eliminated, user_profile)
+    # Hard gate on user-provided colors + extracted features (runs even without photo)
+    if user_profile or inputs.blade_color or inputs.handle_color:
+        eliminated = _gate_by_extracted_features(models, families, eliminated, user_profile or {}, inputs)
         _log.info(f"Stage 1b (feature gate): {len(eliminated)} families eliminated total")
 
     # ── Stage 2: Feature scoring ──
@@ -222,12 +223,24 @@ def _gate_by_extracted_features(
     families: dict[str, list[dict]],
     already_eliminated: set[str],
     user_profile: dict,
+    inputs: Optional[UserInputs] = None,
 ) -> set[str]:
     """Apply hard gates based on extracted features. Returns updated eliminated set."""
     eliminated = set(already_eliminated)
 
-    # If user's blade is a distinctive color, eliminate families that don't have it
-    user_blade_color = user_profile.get("blade_color_primary")
+    # Use user-provided blade color if available, fall back to extracted
+    user_blade_color = None
+    if inputs and inputs.blade_color:
+        # Map DB blade color names to profile feature values
+        _blade_color_map = {
+            "Black": "black", "Coyote": "coyote_tan", "Red": "red",
+            "Steel": "silver", "Distressed Gray": "grey",
+            "Damascus Wood Grain": "two_tone",
+        }
+        user_blade_color = _blade_color_map.get(inputs.blade_color, inputs.blade_color.lower())
+    elif user_profile:
+        user_blade_color = user_profile.get("blade_color_primary")
+
     if user_blade_color and user_blade_color in _DISTINCTIVE_BLADE_COLORS:
         for fam, members in families.items():
             if fam in eliminated:
@@ -243,6 +256,14 @@ def _gate_by_extracted_features(
             if not has_match:
                 eliminated.add(fam)
                 _log.info(f"  Feature gate: eliminated {fam} (no {user_blade_color} blade)")
+
+    # Handle color gate — eliminate families where no model has the specified handle color
+    # (This uses colorway data, not just the model-level handle type)
+    if inputs and inputs.handle_color:
+        # We need to check colorway data, but we don't have a DB connection here.
+        # This check is handled by colorway-matched image loading later.
+        # For now, blade color gating is the priority.
+        pass
 
     # If user has a finger ring, eliminate families that don't have it (and vice versa)
     user_finger_ring = user_profile.get("finger_ring_presence")

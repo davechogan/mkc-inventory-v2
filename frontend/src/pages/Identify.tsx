@@ -363,6 +363,7 @@ export default function Identify() {
     if (file && file.type.startsWith('image/')) handleImageChange(file);
   }, [handleImageChange]);
 
+  const hasRequiredColors = Boolean(form.handle_color) && Boolean(form.blade_color);
   const hasAnyInput = imageFile !== null ||
     form.handle_material || form.handle_color || form.blade_color ||
     form.is_culinary !== null || form.blade_length_bin !== null ||
@@ -370,7 +371,7 @@ export default function Identify() {
 
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!hasAnyInput) return;
+    if (!hasRequiredColors) return;
     setLoading(true);
     setError(null);
     setSelected(null);
@@ -502,7 +503,7 @@ export default function Identify() {
 
               {/* Handle color */}
               <div>
-                <label className="block text-muted text-xs mb-1.5">Handle color</label>
+                <label className="block text-muted text-xs mb-1.5">Handle color <span className="text-red-400">*</span></label>
                 <select
                   value={form.handle_color}
                   onChange={e => setForm(f => ({ ...f, handle_color: e.target.value }))}
@@ -517,7 +518,7 @@ export default function Identify() {
 
               {/* Blade color */}
               <div>
-                <label className="block text-muted text-xs mb-1.5">Blade color</label>
+                <label className="block text-muted text-xs mb-1.5">Blade color <span className="text-red-400">*</span></label>
                 <select
                   value={form.blade_color}
                   onChange={e => setForm(f => ({ ...f, blade_color: e.target.value }))}
@@ -608,10 +609,15 @@ export default function Identify() {
               )}
 
               {/* Actions */}
+              {/* Required fields hint */}
+              {!hasRequiredColors && (
+                <p className="text-red-400 text-xs">Handle color and blade color are required.</p>
+              )}
+
               <div className="flex gap-2 pt-1">
                 <button
                   type="submit"
-                  disabled={!hasAnyInput || loading}
+                  disabled={!hasRequiredColors || loading}
                   className="flex-1 py-2 px-4 rounded-lg bg-gold text-black text-sm font-semibold hover:bg-gold-bright disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
                   {loading ? (form.use_vision && imageFile ? 'Analyzing…' : 'Searching…') : 'Identify'}
