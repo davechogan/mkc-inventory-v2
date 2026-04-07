@@ -863,9 +863,9 @@ export default function Identify() {
 
       <main className={`${marginClass} transition-[margin] duration-200 flex flex-col h-screen-safe overflow-hidden`}>
         {/* Header */}
-        <header className="flex items-center justify-between px-6 py-3 border-b border-border flex-shrink-0">
-          <div className="flex items-center gap-3">
-            <h1 className="text-lg font-bold">Identify</h1>
+        <header className="flex items-center justify-between pl-14 md:pl-6 pr-6 py-3 border-b border-border flex-shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            <h1 className="text-lg font-bold truncate">Identify</h1>
           </div>
           <div className="flex items-center gap-2">
             {phase !== 'upload' && (
