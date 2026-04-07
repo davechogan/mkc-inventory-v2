@@ -587,16 +587,27 @@ interface VisionCandidate {
   silhouette_b64: string | null;
 }
 
+interface PipelineResult {
+  name: string;
+  family: string;
+  form: string | null;
+  score: number;
+  reasons: string[];
+  vision_match: string | null;
+  vision_reason: string | null;
+}
+
 interface VisionDebugResponse {
   original_image: string;
   clean_image: string;
   vision_model: string;
   filters: Record<string, unknown>;
+  user_profile: Record<string, unknown> | null;
   families_total: number;
   families_eliminated: number;
   candidates: VisionCandidate[];
-  vision_raw: string | null;
-  vision_parsed: unknown;
+  pipeline_results: PipelineResult[];
+  vision_used: boolean;
 }
 
 function VisionDebug() {
@@ -736,18 +747,63 @@ function VisionDebug() {
             </div>
           </div>
 
-          {/* Vision response */}
-          {result.vision_raw && (
+          {/* User photo feature extraction */}
+          {result.user_profile && (
             <div>
-              <div className="text-muted text-xs uppercase tracking-wider mb-2">Vision Model Raw Response</div>
-              <pre className="bg-card border border-border rounded-xl p-4 text-xs text-ink overflow-x-auto whitespace-pre-wrap">{result.vision_raw}</pre>
+              <div className="text-muted text-xs uppercase tracking-wider mb-2">Extracted Features (from user photo)</div>
+              <div className="grid grid-cols-4 gap-2">
+                {Object.entries(result.user_profile).map(([k, v]) => (
+                  <div key={k} className="bg-card border border-border rounded-lg px-3 py-2">
+                    <div className="text-muted text-[10px]">{k}</div>
+                    <div className="text-ink text-xs font-mono">{String(v)}</div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
-          {result.vision_parsed != null && (
+          {/* Pipeline results */}
+          {result.pipeline_results && result.pipeline_results.length > 0 && (
             <div>
-              <div className="text-muted text-xs uppercase tracking-wider mb-2">Parsed Response</div>
-              <pre className="bg-card border border-border rounded-xl p-4 text-xs text-gold overflow-x-auto whitespace-pre-wrap">{JSON.stringify(result.vision_parsed, null, 2)}</pre>
+              <div className="text-muted text-xs uppercase tracking-wider mb-2">
+                Pipeline Results {result.vision_used && <span className="text-gold">(vision used)</span>}
+              </div>
+              <div className="overflow-x-auto rounded-lg border border-border">
+                <table className="w-full text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-border/20 text-left">
+                      <th className="px-3 py-2 text-muted font-medium">#</th>
+                      <th className="px-3 py-2 text-muted font-medium">Model</th>
+                      <th className="px-3 py-2 text-muted font-medium">Family</th>
+                      <th className="px-3 py-2 text-muted font-medium">Form</th>
+                      <th className="px-3 py-2 text-muted font-medium text-right">Score</th>
+                      <th className="px-3 py-2 text-muted font-medium">Vision</th>
+                      <th className="px-3 py-2 text-muted font-medium">Reasons</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {result.pipeline_results.map((r: PipelineResult, i: number) => (
+                      <tr key={i} className="border-t border-border/50">
+                        <td className="px-3 py-2 text-muted">{i + 1}</td>
+                        <td className="px-3 py-2 text-ink font-medium">{r.name}</td>
+                        <td className="px-3 py-2 text-muted">{r.family}</td>
+                        <td className="px-3 py-2 text-muted">{r.form || '—'}</td>
+                        <td className="px-3 py-2 text-gold text-right font-mono">{r.score}</td>
+                        <td className="px-3 py-2">
+                          {r.vision_match && (
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                              r.vision_match === 'STRONG' ? 'bg-green-900/30 text-green-300' :
+                              r.vision_match === 'POSSIBLE' ? 'bg-yellow-900/30 text-yellow-300' :
+                              'bg-red-900/30 text-red-300'
+                            }`}>{r.vision_match}</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-muted text-[10px]">{r.reasons.join(', ')}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </div>

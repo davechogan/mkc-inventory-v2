@@ -2004,162 +2004,68 @@ def create_v2_router(
         blade_forms: Optional[str] = Form(None),
         blade_length_bin: Optional[int] = Form(None),
     ):
-        """Debug endpoint: runs the same pipeline as identify/image, always runs vision, shows all inputs/outputs."""
+        """Debug endpoint: runs the new pipeline and shows all intermediate results."""
+        from reporting.identify_pipeline import run_pipeline, UserInputs, _load_models, _group_by_family, _gate_families, _score_candidates, _extract_user_features, _load_best_colorway_image
+
         image_bytes = await image.read()
         image_b64 = base64.b64encode(image_bytes).decode("ascii")
+        clean_b64 = blade_ai._remove_background(image_b64)
 
-        # Parse blade forms
         selected_forms: set[str] = set()
         if blade_forms:
             selected_forms = {f.strip() for f in blade_forms.split(",") if f.strip()}
 
-        # Background removal
-        clean_b64 = blade_ai._remove_background(image_b64)
+        inputs = UserInputs(
+            image_b64=image_b64,
+            handle_material=handle_material or None,
+            handle_color=handle_color or None,
+            blade_color=blade_color or None,
+            is_culinary=is_culinary,
+            blade_forms=selected_forms,
+            blade_length_bin=blade_length_bin,
+        )
 
         with get_conn() as conn:
-            # ── Run the SAME pipeline as identify/image ──
-            rows = conn.execute(
-                """
-                SELECT km.id, km.official_name, km.blade_length, km.model_notes,
-                       bs.name AS blade_steel, bf.name AS blade_finish, ht.name AS handle_type,
-                       kt.name AS knife_type, fam.name AS family_name, frm.name AS form_name,
-                       ks.name AS series_name, c.name AS collaborator_name,
-                       km.family_id,
-                       (CASE WHEN kmi.image_blob IS NOT NULL AND length(kmi.image_blob) > 0 THEN 1 ELSE 0 END) AS has_identifier_image
-                FROM knife_models_v2 km
-                LEFT JOIN knife_types kt ON kt.id = km.type_id
-                LEFT JOIN knife_forms frm ON frm.id = km.form_id
-                LEFT JOIN knife_families fam ON fam.id = km.family_id
-                LEFT JOIN knife_series ks ON ks.id = km.series_id
-                LEFT JOIN collaborators c ON c.id = km.collaborator_id
-                LEFT JOIN blade_steels bs ON bs.id = km.steel_id
-                LEFT JOIN blade_finishes bf ON bf.id = km.blade_finish_id
-                LEFT JOIN handle_types ht ON ht.id = km.handle_type_id
-                LEFT JOIN knife_model_images kmi ON kmi.knife_model_id = km.id
-                ORDER BY fam.name, km.official_name
-                """
-            ).fetchall()
+            # Run stages individually so we can capture intermediate state
+            models = _load_models(conn)
+            families = _group_by_family(models)
+            eliminated = _gate_families(families, inputs)
 
-            # Group by family
-            family_models: dict[str, list] = {}
-            for row in rows:
-                fam = row["family_name"] or "(none)"
-                if fam not in family_models:
-                    family_models[fam] = []
-                family_models[fam].append(row)
+            # Extract user features
+            user_profile = _extract_user_features(image_b64, blade_ai.ollama_chat)
 
-            # Stage 2: Family elimination (same logic as identify/image)
-            eliminated_families: set[str] = set()
-            for fam, fam_rows in family_models.items():
-                if is_culinary is not None:
-                    fam_types = {r["knife_type"] for r in fam_rows}
-                    if is_culinary and "Culinary" not in fam_types:
-                        eliminated_families.add(fam)
-                        continue
-                    if not is_culinary and fam_types == {"Culinary"}:
-                        eliminated_families.add(fam)
-                        continue
-                if selected_forms:
-                    fam_forms = {r["form_name"] for r in fam_rows if r["form_name"]}
-                    if fam_forms and not fam_forms.intersection(selected_forms):
-                        eliminated_families.add(fam)
-                        continue
-                if handle_material:
-                    fam_handles = {r["handle_type"] for r in fam_rows if r["handle_type"]}
-                    if fam_handles and handle_material not in fam_handles:
-                        eliminated_families.add(fam)
-                        continue
+            # Score
+            candidates = _score_candidates(models, families, eliminated, inputs, user_profile)
 
-            # Stage 3: Score remaining models (simplified for debug — just enough to rank)
-            results = []
-            for fam, fam_rows in family_models.items():
-                if fam in eliminated_families:
+            # Build candidate display with colorway images (top 8, one per family)
+            seen: set[str] = set()
+            display_candidates = []
+            for c in candidates:
+                if c.family in seen:
                     continue
-                for row in fam_rows:
-                    score = 0
-                    reasons = []
-                    if handle_material and row["handle_type"]:
-                        if handle_material == row["handle_type"]:
-                            score += 20
-                            reasons.append(f"handle: {handle_material}")
-                        else:
-                            score -= 30
-                    if selected_forms and row["form_name"]:
-                        if row["form_name"] in selected_forms:
-                            score += 20
-                            reasons.append(f"form: {row['form_name']}")
-                        else:
-                            score -= 10
-                    results.append({
-                        "id": row["id"],
-                        "name": row["official_name"],
-                        "family": row["family_name"],
-                        "form": row["form_name"],
-                        "handle_type": row["handle_type"],
-                        "score": score,
-                        "reasons": reasons,
-                        "has_image": bool(row["has_identifier_image"]),
-                    })
-
-            # Add blade length scoring
-            if blade_length_bin and blade_length_bin in _LENGTH_BINS:
-                lo, hi = _LENGTH_BINS[blade_length_bin]
-                for r in results:
-                    bl = next((row["blade_length"] for row in rows if row["official_name"] == r["name"]), None)
-                    if bl is not None:
-                        if lo <= bl <= hi:
-                            r["score"] += 15
-                            r["reasons"].append(f"blade length {bl}\" in range")
-
-            results.sort(key=lambda x: (-x["score"], x["name"].lower()))
-
-            # Stage 4: Pick top 5 candidates (one per family, spread across blade forms)
-            seen_families: set[str] = set()
-            seen_forms: set[str] = set()
-            candidates = []
-
-            # First pass: prefer diversity of blade forms
-            for r in results:
-                fam = r["family"] or r["name"]
-                form = r["form"] or "unknown"
-                if fam in seen_families:
-                    continue
-                if form not in seen_forms or len(candidates) < 5:
-                    seen_families.add(fam)
-                    seen_forms.add(form)
-                ref_row = conn.execute(
-                    "SELECT image_blob FROM knife_model_images WHERE knife_model_id = ? AND image_blob IS NOT NULL",
-                    (r["id"],),
-                ).fetchone()
-                if ref_row:
-                    ref_b64 = base64.b64encode(ref_row["image_blob"]).decode("ascii")
-                    sil_b64 = blade_ai._load_form_silhouette_b64(r["form"])
-                    candidates.append({
-                        "name": r["name"],
-                        "family": fam,
-                        "form": r["form"],
-                        "handle_type": r["handle_type"],
-                        "score": r["score"],
-                        "reasons": r["reasons"],
-                        "image_b64": ref_b64,
-                        "silhouette_b64": sil_b64,
-                    })
-                if len(candidates) >= 5:
+                seen.add(c.family)
+                img_b64 = _load_best_colorway_image(conn, c.model_id, handle_color)
+                display_candidates.append({
+                    "name": c.name,
+                    "family": c.family,
+                    "form": c.form,
+                    "handle_type": c.handle_type,
+                    "score": round(c.score, 1),
+                    "reasons": c.reasons[:5],
+                    "image_b64": img_b64,
+                    "silhouette_b64": None,
+                })
+                if len(display_candidates) >= 8:
                     break
 
-        # Always run vision
-        vision_raw = None
-        vision_parsed = None
-        if candidates:
-            vision_cands = [
-                {"name": c["name"], "form": c["form"], "reference_image_b64": c["image_b64"]}
-                for c in candidates
-            ]
-            vision_results = blade_ai.vision_compare_candidates(
-                ollama_vision_model, image_b64, vision_cands,
+            # Run full pipeline for vision results
+            pipeline_result = run_pipeline(
+                conn=conn,
+                inputs=inputs,
+                vision_model=ollama_vision_model,
+                vision_fn=blade_ai.vision_compare_candidates,
+                extract_fn=blade_ai.ollama_chat,
             )
-            vision_raw = str(vision_results)
-            vision_parsed = vision_results
 
         return {
             "original_image": image_b64,
@@ -2173,23 +2079,12 @@ def create_v2_router(
                 "blade_forms": list(selected_forms) if selected_forms else None,
                 "blade_length_bin": blade_length_bin,
             },
-            "families_total": len(family_models),
-            "families_eliminated": len(eliminated_families),
-            "candidates": [
-                {
-                    "name": c["name"],
-                    "family": c["family"],
-                    "form": c["form"],
-                    "handle_type": c["handle_type"],
-                    "score": c["score"],
-                    "reasons": c["reasons"],
-                    "image_b64": c["image_b64"],
-                    "silhouette_b64": c["silhouette_b64"],
-                }
-                for c in candidates
-            ],
-            "vision_raw": vision_raw,
-            "vision_parsed": vision_parsed,
+            "user_profile": user_profile,
+            "families_total": len(families),
+            "families_eliminated": len(eliminated),
+            "candidates": display_candidates,
+            "pipeline_results": pipeline_result.get("results", [])[:10],
+            "vision_used": pipeline_result.get("vision_used", False),
         }
 
     @router.post("/api/v2/identify")
