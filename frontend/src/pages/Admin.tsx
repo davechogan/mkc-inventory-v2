@@ -610,6 +610,14 @@ interface VisionDebugResponse {
   vision_used: boolean;
 }
 
+interface OptionItem { id: number; name: string; }
+interface DebugOptions {
+  'handle-types': OptionItem[];
+  'handle-colors': OptionItem[];
+  'blade-colors': OptionItem[];
+  [key: string]: OptionItem[];
+}
+
 function VisionDebug() {
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
@@ -617,6 +625,11 @@ function VisionDebug() {
   const [handleColor, setHandleColor] = useState('');
   const [bladeColor, setBladeColor] = useState('');
   const [isCulinary, setIsCulinary] = useState<string>('');
+  const [options, setOptions] = useState<DebugOptions | null>(null);
+
+  useEffect(() => {
+    fetch('/api/v2/options').then(r => r.json()).then(setOptions).catch(() => {});
+  }, []);
   const [result, setResult] = useState<VisionDebugResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -671,11 +684,7 @@ function VisionDebug() {
           <select value={handleMaterial} onChange={e => setHandleMaterial(e.target.value)}
             className="px-2 py-1.5 bg-card border border-border rounded-lg text-xs text-ink">
             <option value="">Any</option>
-            <option value="G-10">G-10</option>
-            <option value="Paracord">Paracord</option>
-            <option value="Burled Carbon Fiber">Burled Carbon Fiber</option>
-            <option value="Desert Ironwood">Desert Ironwood</option>
-            <option value="Desert Ironwood Burl">Desert Ironwood Burl</option>
+            {options?.['handle-types']?.map(o => <option key={o.id} value={o.name}>{o.name}</option>)}
           </select>
         </div>
         <div>
@@ -683,18 +692,7 @@ function VisionDebug() {
           <select value={handleColor} onChange={e => setHandleColor(e.target.value)}
             className="px-2 py-1.5 bg-card border border-border rounded-lg text-xs text-ink">
             <option value="">Select…</option>
-            <option value="Black">Black</option>
-            <option value="Orange">Orange</option>
-            <option value="Orange/Black">Orange/Black</option>
-            <option value="OD Green">OD Green</option>
-            <option value="Coyote">Coyote</option>
-            <option value="Red">Red</option>
-            <option value="Grey">Grey</option>
-            <option value="Carbon Fiber">Carbon Fiber</option>
-            <option value="Desert Ironwood">Desert Ironwood</option>
-            <option value="Black/Red">Black/Red</option>
-            <option value="Green/Black">Green/Black</option>
-            <option value="Tan/Black">Tan/Black</option>
+            {options?.['handle-colors']?.map(o => <option key={o.id} value={o.name}>{o.name}</option>)}
           </select>
         </div>
         <div>
@@ -702,11 +700,7 @@ function VisionDebug() {
           <select value={bladeColor} onChange={e => setBladeColor(e.target.value)}
             className="px-2 py-1.5 bg-card border border-border rounded-lg text-xs text-ink">
             <option value="">Select…</option>
-            <option value="Steel">Silver/Satin</option>
-            <option value="Black">Black/Dark</option>
-            <option value="Red">Red</option>
-            <option value="Coyote">Coyote/Tan</option>
-            <option value="Distressed Gray">Grey</option>
+            {options?.['blade-colors']?.map(o => <option key={o.id} value={o.name}>{o.name}</option>)}
           </select>
         </div>
         <div>
