@@ -286,12 +286,11 @@ def _filter_blade_color(candidate_ids: set[int], answer: str, models: list[dict]
             if profile_color and profile_map.get(profile_color) == answer:
                 keep.add(m["id"])
                 continue
-            # Check colorway blade colors
+            # Check colorway blade colors — only explicit matches, NOT NULLs
             row = conn.execute(
                 "SELECT COUNT(*) AS cnt FROM model_colorways mc "
-                "LEFT JOIN blade_colors bc ON bc.id = mc.blade_color_id "
-                "WHERE mc.knife_model_id = ? "
-                "AND (bc.name IS NULL OR lower(bc.name) = lower(?))",
+                "JOIN blade_colors bc ON bc.id = mc.blade_color_id "
+                "WHERE mc.knife_model_id = ? AND lower(bc.name) = lower(?)",
                 (m["id"], answer),
             ).fetchone()
             if row and row["cnt"] > 0:
@@ -342,26 +341,50 @@ def _filter_handle_color(candidate_ids: set[int], answer: str, models: list[dict
 
 def _filter_handle_material(candidate_ids: set[int], answer: str, models: list[dict],
                             conn: Optional[sqlite3.Connection] = None) -> set[int]:
-    """Hard filter by handle material. If user says G-10, eliminate paracord-only families."""
+    """Filter by handle material.
+
+    Groups related materials (all Carbon Fiber variants together, all Ironwood together).
+    Then filters at model level for distinctive groups, family level for common ones.
+    """
     answer_lower = answer.lower()
 
-    by_family: dict[str, list[dict]] = {}
-    for m in models:
-        if m["id"] in candidate_ids:
-            fam = m.get("family_name") or m["official_name"]
-            by_family.setdefault(fam, []).append(m)
+    # Material groups — user picks a group, matches all variants
+    _MATERIAL_GROUPS: dict[str, set[str]] = {
+        "carbon fiber": {"carbon fiber", "burled carbon fiber", "black burl carbon fiber",
+                         "marbled carbon fiber"},
+        "desert ironwood": {"desert ironwood", "desert ironwood burl"},
+    }
 
-    keep = set()
-    for fam, members in by_family.items():
-        # Keep family if any model has matching handle type
-        has_match = any(
-            (m.get("handle_type") or "").lower() == answer_lower
-            for m in members
-        )
-        if has_match:
-            keep.update(m["id"] for m in members)
+    # Expand answer to a set of matching types
+    match_set = _MATERIAL_GROUPS.get(answer_lower, {answer_lower})
 
-    return keep
+    # Also check if any group contains the answer
+    for group_key, group_vals in _MATERIAL_GROUPS.items():
+        if answer_lower in group_vals:
+            match_set = group_vals
+            break
+
+    def _model_matches(m: dict) -> bool:
+        ht = (m.get("handle_type") or "").lower()
+        return ht in match_set
+
+    # If the match set is distinctive (not G-10, not Paracord), filter at model level
+    common_materials = {"g-10", "paracord"}
+    if not (match_set & common_materials):
+        return {m["id"] for m in models if m["id"] in candidate_ids and _model_matches(m)}
+    else:
+        # Common materials — filter at family level
+        by_family: dict[str, list[dict]] = {}
+        for m in models:
+            if m["id"] in candidate_ids:
+                fam = m.get("family_name") or m["official_name"]
+                by_family.setdefault(fam, []).append(m)
+
+        keep = set()
+        for fam, members in by_family.items():
+            if any(_model_matches(m) for m in members):
+                keep.update(m["id"] for m in members)
+        return keep
 
 
 def _filter_blade_length(candidate_ids: set[int], answer: int, models: list[dict],
@@ -542,7 +565,12 @@ QUESTIONS: list[WizardQuestion] = [
         question_type="single_choice",
         vision_prompt=None,
         vision_reliability=0.0,
-        options=None,  # Populated from DB at runtime
+        options=[
+            {"value": "G-10", "label": "G-10 (solid, textured scales)"},
+            {"value": "Paracord", "label": "Paracord (cord-wrapped)"},
+            {"value": "Carbon Fiber", "label": "Carbon Fiber (any pattern)"},
+            {"value": "Desert Ironwood", "label": "Desert Ironwood (wood)"},
+        ],
     ),
     WizardQuestion(
         key="blade_length_bin",
@@ -696,9 +724,7 @@ def _populate_dynamic_options(conn: sqlite3.Connection):
         if q.key == "handle_color" and q.options is None:
             rows = conn.execute("SELECT id, name FROM handle_colors ORDER BY name").fetchall()
             q.options = [{"value": r["name"], "label": r["name"]} for r in rows]
-        elif q.key == "handle_material" and q.options is None:
-            rows = conn.execute("SELECT id, name FROM handle_types ORDER BY name").fetchall()
-            q.options = [{"value": r["name"], "label": r["name"]} for r in rows]
+        # handle_material has hardcoded grouped options — don't overwrite
         elif q.key == "blade_form" and q.options is None:
             rows = conn.execute("SELECT id, name FROM knife_forms ORDER BY name").fetchall()
             q.options = [{"value": r["name"], "label": r["name"]} for r in rows]
@@ -852,20 +878,26 @@ def answer_question(
     # Save history for undo
     session.history.append((question_key, answer, set(session.candidate_ids)))
 
-    # Apply filter
-    filter_fn = _FILTER_FNS.get(question_key)
-    if filter_fn:
-        prev_count = len(session.candidate_ids)
-        session.candidate_ids = filter_fn(
-            session.candidate_ids, answer, session.all_models, conn
-        )
-        eliminated = prev_count - len(session.candidate_ids)
-        session.answers[question_key] = answer
-        _log.info(f"Answer {question_key}={answer}: {eliminated} eliminated, "
-                  f"{len(session.candidate_ids)} remaining")
+    # Skip if answer is None (user said "I don't know")
+    eliminated = 0
+    if answer is None:
+        session.answers[question_key] = None
+        _log.info(f"Answer {question_key}=SKIP (I don't know)")
     else:
-        session.answers[question_key] = answer
-        _log.warning(f"No filter function for question {question_key}")
+        # Apply filter
+        filter_fn = _FILTER_FNS.get(question_key)
+        if filter_fn:
+            prev_count = len(session.candidate_ids)
+            session.candidate_ids = filter_fn(
+                session.candidate_ids, answer, session.all_models, conn
+            )
+            eliminated = prev_count - len(session.candidate_ids)
+            session.answers[question_key] = answer
+            _log.info(f"Answer {question_key}={answer}: {eliminated} eliminated, "
+                      f"{len(session.candidate_ids)} remaining")
+        else:
+            session.answers[question_key] = answer
+            _log.warning(f"No filter function for question {question_key}")
 
     remaining_fams = _remaining_families(session)
     handle_color = session.answers.get("handle_color")

@@ -150,20 +150,34 @@ function AnsweredList({ answered }: { answered: AnsweredQuestion[] }) {
   );
 }
 
+function SkipButton({ onClick, loading }: { onClick: () => void; loading: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={loading}
+      className="text-xs text-muted/60 hover:text-muted transition-colors disabled:opacity-40 mt-1"
+    >
+      I don't know — skip this question
+    </button>
+  );
+}
+
 function BooleanQuestion({
   question,
   onAnswer,
+  onSkip,
   loading,
 }: {
   question: WizardQuestion;
   onAnswer: (answer: boolean) => void;
+  onSkip: () => void;
   loading: boolean;
 }) {
   const suggestion = question.vision_suggestion;
   const hasSuggestion = suggestion !== null && suggestion !== undefined;
 
   return (
-    <div className="flex flex-col items-center gap-6 py-8 px-6">
+    <div className="flex flex-col items-center gap-6 py-6 px-6">
       <h2 className="text-lg font-semibold text-ink text-center">{question.display_text}</h2>
       {hasSuggestion && question.vision_reliability >= 0.8 && (
         <div className="text-xs text-muted/70 flex items-center gap-1.5">
@@ -195,6 +209,7 @@ function BooleanQuestion({
           No
         </button>
       </div>
+      <SkipButton onClick={onSkip} loading={loading} />
     </div>
   );
 }
@@ -202,17 +217,19 @@ function BooleanQuestion({
 function ChoiceQuestion({
   question,
   onAnswer,
+  onSkip,
   loading,
 }: {
   question: WizardQuestion;
   onAnswer: (answer: any) => void;
+  onSkip: () => void;
   loading: boolean;
 }) {
   const options = question.options || [];
   const isColorQuestion = question.key === 'blade_color' || question.key === 'handle_color';
 
   return (
-    <div className="flex flex-col items-center gap-6 py-8 px-6">
+    <div className="flex flex-col items-center gap-6 py-6 px-6">
       <h2 className="text-lg font-semibold text-ink text-center">{question.display_text}</h2>
       {isColorQuestion ? (
         <div className="flex flex-wrap justify-center gap-3">
@@ -247,6 +264,7 @@ function ChoiceQuestion({
           ))}
         </div>
       )}
+      <SkipButton onClick={onSkip} loading={loading} />
     </div>
   );
 }
@@ -255,11 +273,13 @@ function BladeFormQuestion({
   question,
   silhouettes,
   onAnswer,
+  onSkip,
   loading,
 }: {
   question: WizardQuestion;
   silhouettes: BladeFormSilhouette[];
   onAnswer: (answer: string[]) => void;
+  onSkip: () => void;
   loading: boolean;
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -312,6 +332,7 @@ function BladeFormQuestion({
       >
         Continue with {selected.size} selected
       </button>
+      <SkipButton onClick={onSkip} loading={loading} />
     </div>
   );
 }
@@ -707,6 +728,48 @@ export default function Identify() {
     }`;
   }, [selectedCandidate]);
 
+  // Handle skip (I don't know)
+  const handleSkip = useCallback(() => {
+    handleAnswer(null);
+  }, [handleAnswer]);
+
+  // Render the question component
+  const renderQuestion = () => {
+    if (!currentQuestion) return null;
+
+    if (currentQuestion.type === 'boolean') {
+      return (
+        <BooleanQuestion
+          question={currentQuestion}
+          onAnswer={handleAnswer}
+          onSkip={handleSkip}
+          loading={loading}
+        />
+      );
+    }
+
+    if (currentQuestion.key === 'blade_form' && currentQuestion.visual_aid === 'blade_form_silhouettes') {
+      return (
+        <BladeFormQuestion
+          question={currentQuestion}
+          silhouettes={silhouettes}
+          onAnswer={handleAnswer}
+          onSkip={handleSkip}
+          loading={loading}
+        />
+      );
+    }
+
+    return (
+      <ChoiceQuestion
+        question={currentQuestion}
+        onAnswer={handleAnswer}
+        onSkip={handleSkip}
+        loading={loading}
+      />
+    );
+  };
+
   // Render current step
   const renderContent = () => {
     if (phase === 'upload') {
@@ -733,36 +796,25 @@ export default function Identify() {
       );
     }
 
-    // Questions phase
-    if (!currentQuestion) return null;
-
-    if (currentQuestion.type === 'boolean') {
-      return (
-        <BooleanQuestion
-          question={currentQuestion}
-          onAnswer={handleAnswer}
-          loading={loading}
-        />
-      );
-    }
-
-    if (currentQuestion.key === 'blade_form' && currentQuestion.visual_aid === 'blade_form_silhouettes') {
-      return (
-        <BladeFormQuestion
-          question={currentQuestion}
-          silhouettes={silhouettes}
-          onAnswer={handleAnswer}
-          loading={loading}
-        />
-      );
-    }
-
+    // Questions phase — show image alongside question
     return (
-      <ChoiceQuestion
-        question={currentQuestion}
-        onAnswer={handleAnswer}
-        loading={loading}
-      />
+      <div className="flex flex-col md:flex-row gap-4 p-4 max-w-4xl mx-auto w-full">
+        {/* Persistent uploaded image */}
+        {imagePreview && (
+          <div className="md:w-1/3 flex-shrink-0">
+            <div className="sticky top-4">
+              <span className="text-xs text-muted font-medium mb-1 block">Your knife</span>
+              <div className="rounded-xl overflow-hidden border border-border bg-card">
+                <img src={imagePreview} alt="Your knife" className="w-full object-contain max-h-64 md:max-h-80" />
+              </div>
+            </div>
+          </div>
+        )}
+        {/* Question area */}
+        <div className={imagePreview ? 'md:flex-1' : 'w-full'}>
+          {renderQuestion()}
+        </div>
+      </div>
     );
   };
 
