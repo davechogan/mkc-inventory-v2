@@ -1132,7 +1132,7 @@ export default function Catalog() {
                         {ALL_COLUMNS.filter(c => visibleColumns.has(c.key)).map(col => {
                           if (col.key === 'image') {
                             const px = IMAGE_SIZES[imageSize];
-                            const imgUrl = model.has_identifier_image ? `/api/v2/models/${model.id}/image` : null;
+                            const imgUrl = model.colorway_image_url ?? (model.has_identifier_image ? `/api/v2/models/${model.id}/image` : null);
                             return (
                               <td key={col.key} className="px-2 py-1">
                                 {imgUrl ? (
