@@ -243,7 +243,7 @@ def _gate_by_colorway(
         model_ids = [m["id"] for m in members]
         placeholders = ",".join("?" * len(model_ids))
 
-        # Build query conditions
+        # Build query conditions — only filter on colors that have data in colorways
         conditions = ["mc.knife_model_id IN (" + placeholders + ")"]
         params: list = list(model_ids)
 
@@ -252,7 +252,9 @@ def _gate_by_colorway(
             params.append(inputs.handle_color)
 
         if inputs.blade_color:
-            conditions.append("lower(bc.name) = lower(?)")
+            # Only filter on blade_color if the colorways actually have blade colors set
+            # (many colorways have NULL blade_color — don't exclude them)
+            conditions.append("(bc.name IS NULL OR lower(bc.name) = lower(?))")
             params.append(inputs.blade_color)
 
         sql = f"""
