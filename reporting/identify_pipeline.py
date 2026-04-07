@@ -90,12 +90,17 @@ def run_pipeline(
     eliminated = _gate_families(families, inputs)
     _log.info(f"Stage 1 (gate): {len(eliminated)} families eliminated, {len(families) - len(eliminated)} remaining")
 
-    # ── Stage 2: Feature scoring ──
+    # ── Stage 1b: Extract user features and apply hard feature gates ──
     user_profile = None
     if inputs.image_b64 and extract_fn:
         user_profile = _extract_user_features(inputs.image_b64, extract_fn)
         _log.info(f"User profile extracted: {user_profile}")
 
+        # Hard gate on distinctive extracted features
+        eliminated = _gate_by_extracted_features(models, families, eliminated, user_profile)
+        _log.info(f"Stage 1b (feature gate): {len(eliminated)} families eliminated total")
+
+    # ── Stage 2: Feature scoring ──
     candidates = _score_candidates(models, families, eliminated, inputs, user_profile)
     _log.info(f"Stage 2 (score): {len(candidates)} candidates scored")
 
@@ -202,6 +207,58 @@ def _gate_families(families: dict[str, list[dict]], inputs: UserInputs) -> set[s
             if lengths and not any(lo <= bl <= hi for bl in lengths):
                 eliminated.add(fam)
                 continue
+
+    return eliminated
+
+
+# ── Stage 1b: Feature-based hard gating ──
+
+# Distinctive blade colors that should hard-eliminate non-matching families
+_DISTINCTIVE_BLADE_COLORS = {"red", "coyote_tan"}
+
+
+def _gate_by_extracted_features(
+    models: list[dict],
+    families: dict[str, list[dict]],
+    already_eliminated: set[str],
+    user_profile: dict,
+) -> set[str]:
+    """Apply hard gates based on extracted features. Returns updated eliminated set."""
+    eliminated = set(already_eliminated)
+
+    # If user's blade is a distinctive color, eliminate families that don't have it
+    user_blade_color = user_profile.get("blade_color_primary")
+    if user_blade_color and user_blade_color in _DISTINCTIVE_BLADE_COLORS:
+        for fam, members in families.items():
+            if fam in eliminated:
+                continue
+            # Check if ANY model in this family has the matching blade color
+            has_match = False
+            for m in members:
+                if m.get("observable_profile_json"):
+                    profile = json.loads(m["observable_profile_json"])
+                    if profile.get("blade_color_primary") == user_blade_color:
+                        has_match = True
+                        break
+            if not has_match:
+                eliminated.add(fam)
+                _log.info(f"  Feature gate: eliminated {fam} (no {user_blade_color} blade)")
+
+    # If user has a finger ring, eliminate families that don't have it (and vice versa)
+    user_finger_ring = user_profile.get("finger_ring_presence")
+    if user_finger_ring is True:
+        for fam, members in families.items():
+            if fam in eliminated:
+                continue
+            has_ring = False
+            for m in members:
+                if m.get("observable_profile_json"):
+                    profile = json.loads(m["observable_profile_json"])
+                    if profile.get("finger_ring_presence") is True:
+                        has_ring = True
+                        break
+            if not has_ring:
+                eliminated.add(fam)
 
     return eliminated
 
