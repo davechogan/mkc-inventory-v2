@@ -106,9 +106,15 @@ def run_pipeline(
     _log.info(f"Stage 2 (score): {len(candidates)} candidates scored")
 
     # ── Stage 3a: Big family elimination pass ──
-    if inputs.image_b64 and vision_fn:
+    # Only run if there are enough candidates to justify it (>15 surviving)
+    # If hard gates already narrowed the field, skip straight to final vision
+    surviving_families = {c.family for c in candidates}
+    big_families_present = surviving_families & _BIG_FAMILIES
+    if inputs.image_b64 and vision_fn and len(surviving_families) > 10 and big_families_present:
         candidates = _big_family_pass(conn, candidates, inputs, vision_model, vision_fn)
         _log.info(f"Stage 3a (big family): {len(candidates)} candidates remaining")
+    else:
+        _log.info(f"Stage 3a (big family): SKIPPED — only {len(surviving_families)} families remaining")
 
     # ── Stage 3b: Final vision comparison ──
     vision_used = False
