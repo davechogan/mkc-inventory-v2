@@ -315,10 +315,9 @@ def _filter_handle_color(candidate_ids: set[int], answer: str, models: list[dict
                 keep.add(m["id"])
                 break
         else:
-            # No matching colorway — but don't eliminate if few colorways
-            # (some models might just not have the color photographed)
-            if len(rows) <= 1:
-                keep.add(m["id"])
+            # No matching colorway — eliminate.
+            # If the model has colorways and none match, it's not this color.
+            pass
 
     return keep
 

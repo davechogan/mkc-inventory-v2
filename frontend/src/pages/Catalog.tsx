@@ -1138,7 +1138,7 @@ export default function Catalog() {
                                 {imgUrl ? (
                                   <img src={imgUrl} alt={model.official_name} loading="lazy"
                                     style={{ width: px, height: px }}
-                                    className="object-contain rounded" />
+                                    className="object-contain rounded bg-surface" />
                                 ) : (
                                   <div style={{ width: px, height: px }} className="flex items-center justify-center text-muted/20 text-xs">—</div>
                                 )}
