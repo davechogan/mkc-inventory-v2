@@ -135,6 +135,30 @@ Answer + rows
 
 ---
 
+## Architecture: knife identification pipeline
+
+The identification pipeline uses a vision LLM to match a user's knife photo against catalog reference images. **This pipeline is under active redesign** — see `artifacts/plans/FEATURE_DECISION_TREE.md` and `artifacts/plans/VISION_PIPELINE_REDESIGN.md` for current plans.
+
+**Vision model:** `gemma3:27B` on Ollama at `192.168.50.196:11434` (switched from `qwen3-vl` on 2026-04-06 after testing showed gemma3 is far more reliable at image comparison).
+
+**Current pipeline (5 stages):**
+1. **User filters** — handle material, handle/blade color, culinary toggle, blade length, blade form multi-select
+2. **Family elimination** — rule out families by culinary type, blade form, handle material, blade length
+3. **Attribute scoring** — weighted match/mismatch scoring per model
+4. **Vision LLM comparison** — sends user photo + top 5 candidate reference images to gemma3:27B
+5. **Combined ranking** — merges attribute scores with vision confidence
+
+**Key files:**
+- `blade_ai.py` — vision model integration, background removal (rembg), silhouette loading
+- `routes/v2_routes.py` — `POST /api/v2/identify/image` (main endpoint), `POST /api/v2/identify/vision-debug` (debug endpoint)
+- `frontend/src/pages/Identify.tsx` — identification UI
+- `static/blade-outlines/` — blade form silhouettes generated from catalog photos
+- `scripts/generate_blade_outlines_from_photos.py` — silhouette generation script
+
+**Known limitation:** The vision model can reliably match catalog-to-catalog images but struggles with user photos taken at different angles/lighting. The planned redesign uses feature-based questions (paracord?, hatchet?, kitchen/field?, blade color?) to narrow candidates before vision comparison.
+
+---
+
 ## DB safety
 
 ### NEVER overwrite the production DB on Mac Studio
@@ -160,7 +184,8 @@ The test suite always uses a temp copy of the seed DB — never the live DB. `MK
 
 | File | Purpose |
 |---|---|
-| `app.py` | FastAPI app, DB init, all routes |
+| `app.py` | FastAPI app, DB init, all routes, `OLLAMA_VISION_MODEL` setting |
+| `blade_ai.py` | Vision model integration, background removal, silhouette loading |
 | `reporting/domain.py` | Reporting pipeline orchestration |
 | `reporting/planner.py` | LLM planner + query rewriter |
 | `reporting/plan_models.py` | Canonical plan types and validation |
@@ -168,6 +193,9 @@ The test suite always uses a temp copy of the seed DB — never the live DB. `MK
 | `reporting/retrieval.py` | Chroma retrieval |
 | `reporting/constants.py` | Model names, allowed sources, groupable dimensions |
 | `reporting/corpus_docs/` | Grounding artifacts indexed by Chroma |
+| `routes/v2_routes.py` | All v2 API routes (identify, catalog, inventory) |
+| `frontend/src/pages/Identify.tsx` | Image-based knife identification UI |
+| `frontend/src/pages/Admin.tsx` | Admin page with Vision Debug tab |
 | `tests/conftest.py` | Test DB setup (copies seed from artifacts/) |
 | `scripts/commit.sh` | Synchronized commit wrapper — use this |
 | `scripts/ci_local.sh` | Local CI gate |
