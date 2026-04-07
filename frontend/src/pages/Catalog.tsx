@@ -783,6 +783,7 @@ export default function Catalog() {
 
   // Column configuration for table view
   const ALL_COLUMNS = [
+    { key: 'image', label: 'Image', default: true },
     { key: 'official_name', label: 'Name', default: true },
     { key: 'knife_type', label: 'Type', default: true },
     { key: 'family_name', label: 'Family', default: true },
@@ -799,6 +800,9 @@ export default function Catalog() {
 
   type ColumnKey = typeof ALL_COLUMNS[number]['key'];
 
+  const IMAGE_SIZES = { small: 40, medium: 80, large: 160 } as const;
+  type ImageSize = keyof typeof IMAGE_SIZES;
+
   const [visibleColumns, setVisibleColumns] = useState<Set<ColumnKey>>(() => {
     const saved = localStorage.getItem('mkc_catalog_columns');
     if (saved) {
@@ -806,6 +810,14 @@ export default function Catalog() {
     }
     return new Set(ALL_COLUMNS.filter(c => c.default).map(c => c.key));
   });
+
+  const [imageSize, setImageSize] = useState<ImageSize>(() => {
+    return (localStorage.getItem('mkc_catalog_img_size') as ImageSize) || 'small';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('mkc_catalog_img_size', imageSize);
+  }, [imageSize]);
 
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
   const [showColumnPicker, setShowColumnPicker] = useState(false);
@@ -980,19 +992,31 @@ export default function Catalog() {
             )}
           </div>
 
-          {/* Column picker toggle (table view only) */}
+          {/* Column picker + image size (table view only) */}
           {catalogView === 'table' && (
-            <button
-              onClick={() => setShowColumnPicker(p => !p)}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs transition-colors ${
-                showColumnPicker ? 'border-gold/40 text-gold bg-gold/5' : 'border-border text-muted hover:text-ink'
-              }`}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" />
-              </svg>
-              Columns
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowColumnPicker(p => !p)}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs transition-colors ${
+                  showColumnPicker ? 'border-gold/40 text-gold bg-gold/5' : 'border-border text-muted hover:text-ink'
+                }`}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" />
+                </svg>
+                Columns
+              </button>
+              {visibleColumns.has('image') && (
+                <div className="flex items-center rounded-lg border border-border overflow-hidden">
+                  {(Object.keys(IMAGE_SIZES) as ImageSize[]).map(s => (
+                    <button key={s} onClick={() => setImageSize(s)}
+                      className={`px-2 py-1 text-[10px] transition-colors ${
+                        imageSize === s ? 'bg-gold/20 text-gold' : 'text-muted hover:text-ink'
+                      }`}>{s[0]!.toUpperCase() + s.slice(1)}</button>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
 
           {/* Clear column filters */}
@@ -1106,6 +1130,22 @@ export default function Catalog() {
                           selected?.id === model.id ? 'bg-gold/5' : 'hover:bg-border/10'
                         }`}>
                         {ALL_COLUMNS.filter(c => visibleColumns.has(c.key)).map(col => {
+                          if (col.key === 'image') {
+                            const px = IMAGE_SIZES[imageSize];
+                            const imgUrl = model.has_identifier_image ? `/api/v2/models/${model.id}/image` : null;
+                            return (
+                              <td key={col.key} className="px-2 py-1">
+                                {imgUrl ? (
+                                  <img src={imgUrl} alt={model.official_name} loading="lazy"
+                                    style={{ width: px, height: px }}
+                                    className="object-contain rounded" />
+                                ) : (
+                                  <div style={{ width: px, height: px }} className="flex items-center justify-center text-muted/20 text-xs">—</div>
+                                )}
+                              </td>
+                            );
+                          }
+
                           const val = (model as unknown as Record<string, unknown>)[col.key];
                           const isName = col.key === 'official_name';
                           const isMsrp = col.key === 'msrp';
