@@ -372,14 +372,17 @@ def _filter_handle_material(candidate_ids: set[int], answer: str, models: list[d
 
 def _filter_blade_length(candidate_ids: set[int], answer: int, models: list[dict],
                          conn: Optional[sqlite3.Connection] = None) -> set[int]:
-    """Filter by blade length bin."""
+    """Filter by blade length bin with 0.5" margin of error at boundaries."""
     bin_range = LENGTH_BINS.get(answer)
     if not bin_range:
         return candidate_ids
     lo, hi = bin_range
+    margin = 0.5
+    lo_adj = max(0.0, lo - margin)
+    hi_adj = hi + margin
     return {m["id"] for m in models if m["id"] in candidate_ids
             and m.get("blade_length") is not None
-            and lo <= m["blade_length"] < hi}
+            and lo_adj <= m["blade_length"] < hi_adj}
 
 
 def _filter_blade_form(candidate_ids: set[int], answer: list[str], models: list[dict],
