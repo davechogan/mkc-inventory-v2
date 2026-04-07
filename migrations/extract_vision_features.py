@@ -77,7 +77,8 @@ def extract_features(image_b64: str) -> dict | None:
 
 
 def main():
-    db = sys.argv[1] if len(sys.argv) > 1 else str(DB_PATH)
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    db = args[0] if args else str(DB_PATH)
     force = "--force" in sys.argv
     print(f"Database: {db}")
     print(f"Vision model: {VISION_MODEL}")
