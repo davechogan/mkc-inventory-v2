@@ -3,317 +3,555 @@ import { Sidebar } from '../components/Sidebar';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-interface IdentifyResult {
-  id: number;
+interface WizardQuestion {
+  key: string;
+  display_text: string;
+  type: 'boolean' | 'single_choice' | 'multi_choice';
+  options: { value: any; label: string; color?: string }[] | null;
+  visual_aid: string | null;
+  vision_suggestion: any;
+  vision_reliability: number;
+}
+
+interface WizardCandidate {
+  model_id: number;
   name: string;
   family: string | null;
-  category: string | null;
   form: string | null;
-  catalog_line: string | null;
   handle_type: string | null;
-  has_identifier_image: boolean;
+  blade_length: number | null;
+  blade_steel: string | null;
+  blade_finish: string | null;
+  msrp: number | null;
   best_colorway_id: number | null;
-  default_blade_length: number | null;
-  default_steel: string | null;
-  default_blade_finish: string | null;
-  is_collab: boolean;
-  collaboration_name: string | null;
-  score: number;
-  reasons: string[];
-  vision_match?: string;
-  vision_reason?: string;
+  has_image: boolean;
 }
 
-interface IdentifyResponse {
-  results: IdentifyResult[];
-  families_eliminated: number;
-  families_remaining: number;
-  vision_used: boolean;
+interface AutoGate {
+  question: string;
+  display_text: string;
+  vision_answer: boolean;
+  eliminated: number;
 }
 
-interface OptionItem {
+interface AnsweredQuestion {
+  key: string;
+  display_text: string;
+  answer: any;
+  answerLabel: string;
+}
+
+interface BladeFormSilhouette {
   id: number;
   name: string;
+  slug: string;
+  has_silhouette: boolean;
+  image_url: string | null;
 }
 
-interface Options {
-  'handle-types': OptionItem[];
-  'handle-colors': OptionItem[];
-  'blade-colors': OptionItem[];
-  'blade-families': OptionItem[];
-  [key: string]: OptionItem[];
+// ── API helpers ───────────────────────────────────────────────────────────────
+
+async function wizardStart(imageFile: File | null): Promise<any> {
+  const fd = new FormData();
+  if (imageFile) fd.append('image', imageFile);
+  const res = await fetch('/api/v2/identify/wizard/start', { method: 'POST', body: fd });
+  if (!res.ok) throw new Error(`Start failed: ${res.status}`);
+  return res.json();
 }
 
-interface FormState {
-  handle_material: string;
-  handle_color: string;
-  blade_color: string;
-  is_culinary: boolean | null;
-  blade_length_bin: number | null;
-  blade_forms: string[];  // multi-select
-  use_vision: boolean;
+async function wizardAnswer(sessionId: string, questionKey: string, answer: any): Promise<any> {
+  const res = await fetch('/api/v2/identify/wizard/answer', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_id: sessionId, question_key: questionKey, answer }),
+  });
+  if (!res.ok) throw new Error(`Answer failed: ${res.status}`);
+  return res.json();
+}
+
+async function wizardBack(sessionId: string): Promise<any> {
+  const res = await fetch('/api/v2/identify/wizard/back', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_id: sessionId }),
+  });
+  if (!res.ok) throw new Error(`Back failed: ${res.status}`);
+  return res.json();
+}
+
+async function fetchBladeFormSilhouettes(): Promise<BladeFormSilhouette[]> {
+  const res = await fetch('/api/v2/blade-forms/silhouettes');
+  if (!res.ok) return [];
+  return res.json();
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const BLADE_LENGTH_BINS = [
-  { value: 1, label: 'Shorter than an index finger', range: '< 3"' },
-  { value: 2, label: 'About one index finger', range: '3"–4.5"' },
-  { value: 3, label: 'About two index fingers', range: '4.5"–7"' },
-  { value: 4, label: 'Longer than two index fingers', range: '> 7"' },
-];
-
-const SIDEBAR_KEY = 'mkc_sidebar_collapsed';
-
-const emptyForm: FormState = {
-  handle_material: '',
-  handle_color: '',
-  blade_color: '',
-  is_culinary: null,
-  blade_length_bin: null,
-  blade_forms: [],
-  use_vision: true,
-};
-
-// ── API helpers ───────────────────────────────────────────────────────────────
-
-async function fetchOptions(): Promise<Options> {
-  const res = await fetch('/api/v2/options');
-  if (!res.ok) throw new Error(`Failed to load options: ${res.status}`);
-  return res.json();
-}
-
-async function fetchForms(): Promise<string[]> {
-  // Get distinct form names from all models
-  const searchRes = await fetch('/api/v2/models/search?limit=200');
-  if (!searchRes.ok) return [];
-  const models = await searchRes.json() as { form_name: string | null }[];
-  const forms = new Set<string>();
-  for (const m of models) {
-    if (m.form_name) forms.add(m.form_name);
-  }
-  return [...forms].sort();
-}
-
-async function identifyByImage(
-  imageFile: File | null,
-  form: FormState,
-): Promise<IdentifyResponse> {
-  const fd = new FormData();
-  if (imageFile) fd.append('image', imageFile);
-  if (form.handle_material) fd.append('handle_material', form.handle_material);
-  if (form.handle_color) fd.append('handle_color', form.handle_color);
-  if (form.blade_color) fd.append('blade_color', form.blade_color);
-  if (form.is_culinary !== null) fd.append('is_culinary', String(form.is_culinary));
-  if (form.blade_length_bin !== null) fd.append('blade_length_bin', String(form.blade_length_bin));
-  if (form.blade_forms.length > 0) fd.append('blade_forms', form.blade_forms.join(','));
-  fd.append('use_vision', String(form.use_vision && imageFile !== null));
-
-  const res = await fetch('/api/v2/identify/image', { method: 'POST', body: fd });
-  if (!res.ok) throw new Error(`Identify failed: ${res.status}`);
-  return res.json();
-}
-
 // ── Sub-components ────────────────────────────────────────────────────────────
 
-function ScoreBadge({ score }: { score: number }) {
-  const color =
-    score >= 60 ? 'bg-gold/20 text-gold border-gold/30' :
-    score >= 30 ? 'bg-blue-900/30 text-blue-300 border-blue-700/40' :
-    'bg-border/40 text-muted border-border';
-  return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border ${color}`}>
-      {score} pts
-    </span>
-  );
-}
-
-function VisionBadge({ match }: { match: string }) {
-  const color =
-    match === 'STRONG' ? 'bg-green-900/30 text-green-300 border-green-700/40' :
-    match === 'POSSIBLE' ? 'bg-yellow-900/30 text-yellow-300 border-yellow-700/40' :
-    'bg-red-900/30 text-red-300 border-red-700/40';
-  return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border ${color}`}>
-      {match}
-    </span>
-  );
-}
-
-function ResultCard({
-  result,
-  selected,
-  onClick,
+function ProgressBar({
+  totalModels,
+  remainingModels,
+  remainingFamilies,
 }: {
-  result: IdentifyResult;
-  selected: boolean;
-  onClick: () => void;
+  totalModels: number;
+  remainingModels: number;
+  remainingFamilies: number;
 }) {
-  const imgSrc = result.best_colorway_id
-    ? `/api/v2/colorways/${result.best_colorway_id}/image`
-    : result.has_identifier_image
-      ? `/api/v2/models/${result.id}/image`
+  const pct = totalModels > 0 ? Math.max(2, (remainingModels / totalModels) * 100) : 100;
+  return (
+    <div className="px-6 py-3 border-b border-border bg-surface/50">
+      <div className="flex items-center justify-between text-xs text-muted mb-1.5">
+        <span>{remainingModels} models remaining</span>
+        <span>{remainingFamilies} families</span>
+      </div>
+      <div className="h-1.5 bg-border/30 rounded-full overflow-hidden">
+        <div
+          className="h-full bg-gold rounded-full transition-all duration-500"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function AutoGateChips({ gates }: { gates: AutoGate[] }) {
+  if (gates.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-2 px-6 py-2">
+      {gates.map((g) => (
+        <span
+          key={g.question}
+          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs bg-border/20 text-muted"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+          {g.vision_answer ? g.display_text.replace('?', '') : `Not: ${g.display_text.replace('?', '').replace('Is this a ', '').replace('Is the ', '')}`}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function AnsweredList({ answered }: { answered: AnsweredQuestion[] }) {
+  if (answered.length === 0) return null;
+  return (
+    <div className="px-6 py-2 border-b border-border/50">
+      <div className="flex flex-wrap gap-x-4 gap-y-1">
+        {answered.map((a) => (
+          <span key={a.key} className="text-xs text-muted">
+            <span className="text-ink/60">{a.display_text.split('?')[0].replace('Is the handle wrapped in paracord or cord', 'Paracord').replace('Is this a kitchen/culinary knife or a field/hunting knife', 'Type').replace('Is there a finger ring at the front of the handle', 'Finger ring').replace('What color is the blade', 'Blade').replace('What is the primary handle color', 'Handle color').replace('What is the handle material', 'Material').replace('Approximately how long is the blade', 'Length').replace('Which blade shape(s) match your knife', 'Form')}:</span>{' '}
+            <span className="text-gold">{a.answerLabel}</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BooleanQuestion({
+  question,
+  onAnswer,
+  loading,
+}: {
+  question: WizardQuestion;
+  onAnswer: (answer: boolean) => void;
+  loading: boolean;
+}) {
+  const suggestion = question.vision_suggestion;
+  const hasSuggestion = suggestion !== null && suggestion !== undefined;
+
+  return (
+    <div className="flex flex-col items-center gap-6 py-8 px-6">
+      <h2 className="text-lg font-semibold text-ink text-center">{question.display_text}</h2>
+      {hasSuggestion && question.vision_reliability >= 0.8 && (
+        <div className="text-xs text-muted/70 flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full bg-gold/60" />
+          AI suggests: <span className="text-gold font-medium">{suggestion ? 'Yes' : 'No'}</span>
+        </div>
+      )}
+      <div className="flex gap-4">
+        <button
+          onClick={() => onAnswer(true)}
+          disabled={loading}
+          className={`px-8 py-4 rounded-xl text-base font-semibold transition-colors border-2 ${
+            hasSuggestion && suggestion === true
+              ? 'border-gold bg-gold/10 text-gold hover:bg-gold/20'
+              : 'border-border bg-card text-ink hover:border-border/70 hover:bg-border/10'
+          } disabled:opacity-40`}
+        >
+          Yes
+        </button>
+        <button
+          onClick={() => onAnswer(false)}
+          disabled={loading}
+          className={`px-8 py-4 rounded-xl text-base font-semibold transition-colors border-2 ${
+            hasSuggestion && suggestion === false
+              ? 'border-gold bg-gold/10 text-gold hover:bg-gold/20'
+              : 'border-border bg-card text-ink hover:border-border/70 hover:bg-border/10'
+          } disabled:opacity-40`}
+        >
+          No
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ChoiceQuestion({
+  question,
+  onAnswer,
+  loading,
+}: {
+  question: WizardQuestion;
+  onAnswer: (answer: any) => void;
+  loading: boolean;
+}) {
+  const options = question.options || [];
+  const isColorQuestion = question.key === 'blade_color' || question.key === 'handle_color';
+
+  return (
+    <div className="flex flex-col items-center gap-6 py-8 px-6">
+      <h2 className="text-lg font-semibold text-ink text-center">{question.display_text}</h2>
+      {isColorQuestion ? (
+        <div className="flex flex-wrap justify-center gap-3">
+          {options.map((opt) => (
+            <button
+              key={String(opt.value)}
+              onClick={() => onAnswer(opt.value)}
+              disabled={loading}
+              className="flex flex-col items-center gap-1.5 px-3 py-2 rounded-xl border border-border bg-card hover:border-gold/50 hover:bg-gold/5 transition-colors disabled:opacity-40"
+            >
+              {opt.color && (
+                <div
+                  className="w-8 h-8 rounded-full border border-border/50"
+                  style={{ backgroundColor: opt.color }}
+                />
+              )}
+              <span className="text-xs text-ink font-medium">{opt.label}</span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2 w-full max-w-sm">
+          {options.map((opt) => (
+            <button
+              key={String(opt.value)}
+              onClick={() => onAnswer(opt.value)}
+              disabled={loading}
+              className="w-full px-4 py-3 rounded-xl border border-border bg-card text-left text-sm text-ink font-medium hover:border-gold/50 hover:bg-gold/5 transition-colors disabled:opacity-40"
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BladeFormQuestion({
+  question,
+  silhouettes,
+  onAnswer,
+  loading,
+}: {
+  question: WizardQuestion;
+  silhouettes: BladeFormSilhouette[];
+  onAnswer: (answer: string[]) => void;
+  loading: boolean;
+}) {
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  const toggle = (name: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  };
+
+  const formsWithImages = silhouettes.filter((s) => s.has_silhouette);
+
+  return (
+    <div className="flex flex-col items-center gap-4 py-6 px-6">
+      <h2 className="text-lg font-semibold text-ink text-center">{question.display_text}</h2>
+      <p className="text-xs text-muted">Select one or more shapes that look like your knife</p>
+
+      <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 w-full max-w-2xl">
+        {formsWithImages.map((s) => (
+          <button
+            key={s.slug}
+            onClick={() => toggle(s.name)}
+            className={`flex flex-col items-center gap-1 p-2 rounded-xl border-2 transition-colors ${
+              selected.has(s.name)
+                ? 'border-gold bg-gold/10'
+                : 'border-border bg-card hover:border-border/70'
+            }`}
+          >
+            <div className="w-16 h-12 flex items-center justify-center">
+              <img
+                src={s.image_url!}
+                alt={s.name}
+                className="max-w-full max-h-full object-contain invert opacity-80"
+              />
+            </div>
+            <span className="text-[10px] text-ink font-medium leading-tight text-center">
+              {s.name}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      <button
+        onClick={() => onAnswer([...selected])}
+        disabled={loading || selected.size === 0}
+        className="mt-2 px-6 py-2.5 rounded-lg bg-gold text-black font-semibold text-sm hover:bg-gold/90 disabled:opacity-40 transition-colors"
+      >
+        Continue with {selected.size} selected
+      </button>
+    </div>
+  );
+}
+
+function CandidateGrid({
+  candidates,
+  onSelect,
+}: {
+  candidates: WizardCandidate[];
+  onSelect: (candidate: WizardCandidate) => void;
+}) {
+  return (
+    <div className="py-6 px-6">
+      <h2 className="text-lg font-semibold text-ink text-center mb-1">
+        {candidates.length === 1 ? 'We found your knife!' : `${candidates.length} candidates remain`}
+      </h2>
+      <p className="text-xs text-muted text-center mb-6">
+        {candidates.length === 1
+          ? 'Is this the right one?'
+          : 'Select the knife that matches yours'}
+      </p>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 max-w-4xl mx-auto">
+        {candidates.map((c) => {
+          const imgSrc = c.best_colorway_id
+            ? `/api/v2/colorways/${c.best_colorway_id}/image`
+            : c.has_image
+              ? `/api/v2/models/${c.model_id}/image`
+              : null;
+
+          return (
+            <button
+              key={c.model_id}
+              onClick={() => onSelect(c)}
+              className="flex flex-col border border-border bg-card rounded-xl overflow-hidden hover:border-gold/50 hover:bg-gold/5 transition-colors text-left"
+            >
+              <div className="aspect-[4/3] bg-border/10 flex items-center justify-center overflow-hidden">
+                {imgSrc ? (
+                  <img src={imgSrc} alt={c.name} className="w-full h-full object-cover" />
+                ) : (
+                  <div className="text-muted/30 text-2xl">?</div>
+                )}
+              </div>
+              <div className="px-3 py-2.5">
+                <div className="text-sm font-semibold text-ink leading-tight">{c.name}</div>
+                <div className="flex flex-wrap gap-x-2 gap-y-0.5 mt-1">
+                  {c.family && <span className="text-xs text-muted">{c.family}</span>}
+                  {c.form && <span className="text-xs text-muted">{c.form}</span>}
+                  {c.blade_length && (
+                    <span className="text-xs text-muted">{c.blade_length}&Prime;</span>
+                  )}
+                  {c.handle_type && <span className="text-xs text-muted">{c.handle_type}</span>}
+                </div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function CandidateDetail({
+  candidate,
+  userImage,
+  onBack,
+  onConfirm,
+}: {
+  candidate: WizardCandidate;
+  userImage: string | null;
+  onBack: () => void;
+  onConfirm: () => void;
+}) {
+  const imgSrc = candidate.best_colorway_id
+    ? `/api/v2/colorways/${candidate.best_colorway_id}/image`
+    : candidate.has_image
+      ? `/api/v2/models/${candidate.model_id}/image`
       : null;
 
   return (
-    <button
-      onClick={onClick}
-      className={`w-full text-left flex items-start gap-3 px-4 py-3 rounded-xl border transition-colors ${
-        selected
-          ? 'border-gold/50 bg-gold/5'
-          : 'border-border bg-card hover:border-border/70 hover:bg-border/10'
-      }`}
-    >
-      <div className="w-14 h-14 flex-shrink-0 rounded-lg overflow-hidden bg-border/20 flex items-center justify-center">
-        {imgSrc ? (
-          <img src={imgSrc} alt={result.name} className="w-full h-full object-cover" />
-        ) : (
-          <div className="w-6 h-6 text-muted/30">?</div>
-        )}
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-start justify-between gap-2">
-          <span className="text-ink text-sm font-semibold leading-tight line-clamp-2">{result.name}</span>
-          <div className="flex gap-1.5 flex-shrink-0">
-            {result.vision_match && <VisionBadge match={result.vision_match} />}
-            <ScoreBadge score={result.score} />
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
-          {result.family && <span className="text-muted text-xs">{result.family}</span>}
-          {result.handle_type && <span className="text-muted text-xs">{result.handle_type}</span>}
-          {result.default_blade_length && (
-            <span className="text-muted text-xs">{result.default_blade_length}&Prime;</span>
-          )}
-        </div>
-        {result.reasons.length > 0 && (
-          <div className="mt-1 text-xs text-gold/70 truncate">{result.reasons[0]}</div>
-        )}
-      </div>
-    </button>
-  );
-}
-
-function ComparisonView({
-  result,
-  userImage,
-  onBack,
-}: {
-  result: IdentifyResult;
-  userImage: string | null;
-  onBack: () => void;
-}) {
-  const imgSrc = result.best_colorway_id
-    ? `/api/v2/colorways/${result.best_colorway_id}/image`
-    : result.has_identifier_image
-      ? `/api/v2/models/${result.id}/image`
-    : null;
-
-  return (
     <div className="flex flex-col h-full overflow-y-auto">
-      {/* Back button + title bar */}
       <div className="flex items-center gap-3 px-6 py-3 border-b border-border flex-shrink-0">
         <button
           onClick={onBack}
-          className="p-1.5 rounded-lg border border-border text-muted hover:text-ink hover:border-border/70 transition-colors"
+          className="p-1.5 rounded-lg border border-border text-muted hover:text-ink transition-colors"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="15 18 9 12 15 6" />
           </svg>
         </button>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <h3 className="text-ink text-base font-bold leading-tight truncate">{result.name}</h3>
-            <div className="flex gap-1.5 flex-shrink-0">
-              {result.vision_match && <VisionBadge match={result.vision_match} />}
-              <ScoreBadge score={result.score} />
+        <h3 className="text-ink text-base font-bold truncate flex-1">{candidate.name}</h3>
+      </div>
+
+      <div className="flex-1 p-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-3xl mx-auto">
+          {userImage && (
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-muted font-medium">Your Knife</span>
+              <div className="aspect-[4/3] bg-border/10 rounded-xl overflow-hidden">
+                <img src={userImage} alt="Your knife" className="w-full h-full object-contain" />
+              </div>
+            </div>
+          )}
+          <div className="flex flex-col gap-1">
+            <span className="text-xs text-muted font-medium">Reference</span>
+            <div className="aspect-[4/3] bg-border/10 rounded-xl overflow-hidden">
+              {imgSrc ? (
+                <img src={imgSrc} alt={candidate.name} className="w-full h-full object-contain" />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center text-muted/30">No image</div>
+              )}
             </div>
           </div>
-          {result.is_collab && result.collaboration_name && (
-            <div className="text-gold text-xs">Collab: {result.collaboration_name}</div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3 max-w-3xl mx-auto">
+          {candidate.family && (
+            <div className="text-xs"><span className="text-muted">Family:</span> <span className="text-ink">{candidate.family}</span></div>
+          )}
+          {candidate.form && (
+            <div className="text-xs"><span className="text-muted">Form:</span> <span className="text-ink">{candidate.form}</span></div>
+          )}
+          {candidate.handle_type && (
+            <div className="text-xs"><span className="text-muted">Handle:</span> <span className="text-ink">{candidate.handle_type}</span></div>
+          )}
+          {candidate.blade_length && (
+            <div className="text-xs"><span className="text-muted">Length:</span> <span className="text-ink">{candidate.blade_length}&Prime;</span></div>
+          )}
+          {candidate.blade_steel && (
+            <div className="text-xs"><span className="text-muted">Steel:</span> <span className="text-ink">{candidate.blade_steel}</span></div>
+          )}
+          {candidate.blade_finish && (
+            <div className="text-xs"><span className="text-muted">Finish:</span> <span className="text-ink">{candidate.blade_finish}</span></div>
+          )}
+          {candidate.msrp && (
+            <div className="text-xs"><span className="text-muted">MSRP:</span> <span className="text-ink">${candidate.msrp}</span></div>
           )}
         </div>
-      </div>
 
-      {/* Large side-by-side images */}
-      <div className="flex-1 min-h-0 p-4">
-        {userImage && imgSrc ? (
-          <div className="grid grid-cols-2 gap-4 h-full">
-            <div className="flex flex-col min-h-0">
-              <div className="text-muted text-[10px] uppercase tracking-wider mb-1.5">Your knife</div>
-              <div className="flex-1 min-h-0 rounded-xl overflow-hidden bg-border/20 flex items-center justify-center">
-                <img src={userImage} alt="Your knife" className="max-w-full max-h-full object-contain" />
-              </div>
-            </div>
-            <div className="flex flex-col min-h-0">
-              <div className="text-muted text-[10px] uppercase tracking-wider mb-1.5">{result.name}</div>
-              <div className="flex-1 min-h-0 rounded-xl overflow-hidden bg-border/20 flex items-center justify-center">
-                <img src={imgSrc} alt={result.name} className="max-w-full max-h-full object-contain" />
-              </div>
-            </div>
-          </div>
-        ) : imgSrc ? (
-          <div className="h-full flex flex-col min-h-0">
-            <div className="text-muted text-[10px] uppercase tracking-wider mb-1.5">{result.name}</div>
-            <div className="flex-1 min-h-0 rounded-xl overflow-hidden bg-border/20 flex items-center justify-center">
-              <img src={imgSrc} alt={result.name} className="max-w-full max-h-full object-contain" />
-            </div>
-          </div>
-        ) : userImage ? (
-          <div className="h-full flex flex-col min-h-0">
-            <div className="text-muted text-[10px] uppercase tracking-wider mb-1.5">Your knife</div>
-            <div className="flex-1 min-h-0 rounded-xl overflow-hidden bg-border/20 flex items-center justify-center">
-              <img src={userImage} alt="Your knife" className="max-w-full max-h-full object-contain" />
-            </div>
-          </div>
-        ) : null}
-      </div>
-
-      {/* Details strip */}
-      <div className="flex-shrink-0 px-6 pb-4 flex flex-col gap-3">
-        <div className="grid grid-cols-4 gap-x-4 gap-y-2 text-sm">
-          {[
-            ['Family', result.family],
-            ['Type', result.category],
-            ['Form', result.form],
-            ['Series', result.catalog_line],
-            ['Handle', result.handle_type],
-            ['Steel', result.default_steel],
-            ['Finish', result.default_blade_finish],
-            ['Blade', result.default_blade_length ? `${result.default_blade_length}"` : null],
-          ]
-            .filter(([, v]) => v)
-            .map(([label, value]) => (
-              <div key={label as string}>
-                <div className="text-muted text-xs">{label}</div>
-                <div className="text-ink text-sm">{value}</div>
-              </div>
-            ))}
+        <div className="flex justify-center gap-3 mt-6">
+          <button
+            onClick={onBack}
+            className="px-4 py-2.5 rounded-lg border border-border text-sm text-muted hover:text-ink transition-colors"
+          >
+            Not this one
+          </button>
+          <button
+            onClick={onConfirm}
+            className="px-6 py-2.5 rounded-lg bg-gold text-black font-semibold text-sm hover:bg-gold/90 transition-colors"
+          >
+            This is my knife — Add to Collection
+          </button>
         </div>
-
-        {/* Vision reasoning */}
-        {result.vision_reason && (
-          <div className="border-t border-border pt-3">
-            <div className="text-muted text-xs mb-1">Vision analysis</div>
-            <p className="text-xs text-ink/80">{result.vision_reason}</p>
-          </div>
-        )}
-
-        {/* Match reasons */}
-        {result.reasons.length > 0 && (
-          <div className="border-t border-border pt-3">
-            <div className="text-muted text-xs mb-1.5">Match reasons</div>
-            <ul className="flex flex-wrap gap-x-4 gap-y-1">
-              {result.reasons.map((r, i) => (
-                <li key={i} className="flex items-start gap-1.5 text-xs text-ink/80">
-                  <span className="text-gold mt-0.5 flex-shrink-0">›</span>
-                  {r}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
       </div>
+    </div>
+  );
+}
+
+// ── Upload Step ──────────────────────────────────────────────────────────────
+
+function UploadStep({
+  onStart,
+  loading,
+}: {
+  onStart: (file: File | null) => void;
+  loading: boolean;
+}) {
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFile = useCallback((file: File) => {
+    setImageFile(file);
+    const reader = new FileReader();
+    reader.onload = () => setImagePreview(reader.result as string);
+    reader.readAsDataURL(file);
+  }, []);
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      const file = e.dataTransfer.files[0];
+      if (file?.type.startsWith('image/')) handleFile(file);
+    },
+    [handleFile],
+  );
+
+  return (
+    <div className="flex flex-col items-center gap-6 py-8 px-6 max-w-lg mx-auto">
+      <h2 className="text-xl font-bold text-ink">Identify Your Knife</h2>
+      <p className="text-sm text-muted text-center">
+        Upload a photo of your MKC knife and we'll walk you through a few questions to identify it.
+      </p>
+
+      <div
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={handleDrop}
+        onClick={() => fileInputRef.current?.click()}
+        className={`w-full aspect-[4/3] rounded-xl border-2 border-dashed cursor-pointer transition-colors flex items-center justify-center overflow-hidden ${
+          imagePreview
+            ? 'border-gold/40 bg-gold/5'
+            : 'border-border hover:border-border/70 bg-card'
+        }`}
+      >
+        {imagePreview ? (
+          <img src={imagePreview} alt="Preview" className="w-full h-full object-contain" />
+        ) : (
+          <div className="flex flex-col items-center gap-2 text-muted">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="opacity-40">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+              <circle cx="8.5" cy="8.5" r="1.5" />
+              <polyline points="21 15 16 10 5 21" />
+            </svg>
+            <span className="text-sm">Drop a photo here or click to browse</span>
+          </div>
+        )}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
+        />
+      </div>
+
+      <div className="flex gap-3">
+        <button
+          onClick={() => onStart(imageFile)}
+          disabled={loading}
+          className="px-6 py-2.5 rounded-lg bg-gold text-black font-semibold text-sm hover:bg-gold/90 disabled:opacity-40 transition-colors"
+        >
+          {loading ? 'Analyzing...' : imageFile ? 'Start Identification' : 'Start Without Photo'}
+        </button>
+      </div>
+
+      {!imageFile && (
+        <p className="text-xs text-muted/60 text-center">
+          A photo helps the AI suggest answers, but you can identify by answering questions alone.
+        </p>
+      )}
     </div>
   );
 }
@@ -321,399 +559,275 @@ function ComparisonView({
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function Identify() {
-  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(
-    () => localStorage.getItem(SIDEBAR_KEY) === 'true'
-  );
-  const [form, setForm] = useState<FormState>(emptyForm);
-  const [options, setOptions] = useState<Options | null>(null);
-  const [forms, setForms] = useState<string[]>([]);
-  const [imageFile, setImageFile] = useState<File | null>(null);
+  // Wizard state
+  const [phase, setPhase] = useState<'upload' | 'questions' | 'candidates' | 'detail'>('upload');
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const [results, setResults] = useState<IdentifyResponse | null>(null);
+  const [totalModels, setTotalModels] = useState(87);
+  const [remainingModels, setRemainingModels] = useState(87);
+  const [remainingFamilies, setRemainingFamilies] = useState(42);
+  const [autoGates, setAutoGates] = useState<AutoGate[]>([]);
+  const [currentQuestion, setCurrentQuestion] = useState<WizardQuestion | null>(null);
+  const [answeredQuestions, setAnsweredQuestions] = useState<AnsweredQuestion[]>([]);
+  const [candidates, setCandidates] = useState<WizardCandidate[]>([]);
+  const [selectedCandidate, setSelectedCandidate] = useState<WizardCandidate | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<IdentifyResult | null>(null);
-  const [showAll, setShowAll] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [silhouettes, setSilhouettes] = useState<BladeFormSilhouette[]>([]);
 
+  // Load silhouettes once
   useEffect(() => {
-    fetchOptions().then(setOptions).catch(() => {});
-    fetchForms().then(setForms).catch(() => {});
+    fetchBladeFormSilhouettes().then(setSilhouettes).catch(() => {});
   }, []);
 
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const ce = e as CustomEvent<{ collapsed: boolean }>;
-      setSidebarCollapsed(ce.detail.collapsed);
-    };
-    window.addEventListener('mkc-sidebar-toggle', handler);
-    return () => window.removeEventListener('mkc-sidebar-toggle', handler);
-  }, []);
-
-  const handleImageChange = useCallback((file: File) => {
-    setImageFile(file);
-    const reader = new FileReader();
-    reader.onload = () => setImagePreview(reader.result as string);
-    reader.readAsDataURL(file);
-  }, []);
-
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    const file = e.dataTransfer.files[0];
-    if (file && file.type.startsWith('image/')) handleImageChange(file);
-  }, [handleImageChange]);
-
-  const hasRequiredColors = Boolean(form.handle_color) && Boolean(form.blade_color);
-  const hasAnyInput = imageFile !== null ||
-    form.handle_material || form.handle_color || form.blade_color ||
-    form.is_culinary !== null || form.blade_length_bin !== null ||
-    form.blade_forms.length > 0;
-
-  const handleSubmit = useCallback(async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!hasRequiredColors) return;
+  // Start wizard
+  const handleStart = useCallback(async (imageFile: File | null) => {
     setLoading(true);
     setError(null);
-    setSelected(null);
-    setShowAll(false);
     try {
-      const res = await identifyByImage(imageFile, form);
-      setResults(res);
-      if (res.results.length > 0) setSelected(res.results[0]);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      // Save preview for later
+      if (imageFile) {
+        const reader = new FileReader();
+        reader.onload = () => setImagePreview(reader.result as string);
+        reader.readAsDataURL(imageFile);
+      }
+
+      const result = await wizardStart(imageFile);
+      setSessionId(result.session_id);
+      setTotalModels(result.total_models);
+      setRemainingModels(result.remaining_models);
+      setRemainingFamilies(result.remaining_families);
+      setAutoGates(result.auto_gates || []);
+
+      if (result.done) {
+        setCandidates(result.candidates || []);
+        setPhase('candidates');
+      } else {
+        setCurrentQuestion(result.next_question);
+        setPhase('questions');
+      }
+    } catch (err: any) {
+      setError(err.message);
     } finally {
       setLoading(false);
     }
-  }, [form, imageFile, hasAnyInput]);
+  }, []);
 
-  const handleReset = () => {
-    setForm(emptyForm);
-    setImageFile(null);
-    setImagePreview(null);
-    setResults(null);
-    setSelected(null);
+  // Answer a question
+  const handleAnswer = useCallback(async (answer: any) => {
+    if (!sessionId || !currentQuestion) return;
+    setLoading(true);
     setError(null);
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  };
+    try {
+      // Build display label
+      let answerLabel = String(answer);
+      if (currentQuestion.type === 'boolean') {
+        answerLabel = answer ? 'Yes' : 'No';
+      } else if (currentQuestion.options) {
+        const opt = currentQuestion.options.find((o) => o.value === answer);
+        if (opt) answerLabel = opt.label;
+      } else if (Array.isArray(answer)) {
+        answerLabel = answer.join(', ');
+      }
 
-  const toggleForm = (formName: string) => {
-    setForm(f => ({
-      ...f,
-      blade_forms: f.blade_forms.includes(formName)
-        ? f.blade_forms.filter(n => n !== formName)
-        : [...f.blade_forms, formName],
-    }));
-  };
+      setAnsweredQuestions((prev) => [
+        ...prev,
+        {
+          key: currentQuestion.key,
+          display_text: currentQuestion.display_text,
+          answer,
+          answerLabel,
+        },
+      ]);
 
-  const marginClass = sidebarCollapsed ? 'md:ml-16' : 'md:ml-56';
+      const result = await wizardAnswer(sessionId, currentQuestion.key, answer);
+      setRemainingModels(result.remaining_models);
+      setRemainingFamilies(result.remaining_families);
+
+      if (result.done) {
+        setCandidates(result.candidates || []);
+        setCurrentQuestion(null);
+        setPhase('candidates');
+      } else {
+        setCurrentQuestion(result.next_question);
+      }
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [sessionId, currentQuestion]);
+
+  // Go back
+  const handleBack = useCallback(async () => {
+    if (!sessionId) return;
+    setLoading(true);
+    try {
+      const result = await wizardBack(sessionId);
+      setRemainingModels(result.remaining_models);
+      setRemainingFamilies(result.remaining_families);
+      setCurrentQuestion(result.next_question);
+      setAnsweredQuestions((prev) => prev.slice(0, -1));
+      if (phase === 'candidates') setPhase('questions');
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [sessionId, phase]);
+
+  // Reset
+  const handleReset = useCallback(() => {
+    setPhase('upload');
+    setSessionId(null);
+    setImagePreview(null);
+    setAutoGates([]);
+    setCurrentQuestion(null);
+    setAnsweredQuestions([]);
+    setCandidates([]);
+    setSelectedCandidate(null);
+    setError(null);
+    setRemainingModels(87);
+    setRemainingFamilies(42);
+  }, []);
+
+  // Select candidate
+  const handleSelectCandidate = useCallback((c: WizardCandidate) => {
+    setSelectedCandidate(c);
+    setPhase('detail');
+  }, []);
+
+  // Confirm selection (add to inventory)
+  const handleConfirm = useCallback(() => {
+    if (!selectedCandidate) return;
+    // Navigate to collection page with pre-selected model
+    // For now, open the inventory add page
+    window.location.href = `/collection?add=${selectedCandidate.model_id}${
+      selectedCandidate.best_colorway_id ? `&colorway=${selectedCandidate.best_colorway_id}` : ''
+    }`;
+  }, [selectedCandidate]);
+
+  // Render current step
+  const renderContent = () => {
+    if (phase === 'upload') {
+      return <UploadStep onStart={handleStart} loading={loading} />;
+    }
+
+    if (phase === 'detail' && selectedCandidate) {
+      return (
+        <CandidateDetail
+          candidate={selectedCandidate}
+          userImage={imagePreview}
+          onBack={() => { setSelectedCandidate(null); setPhase('candidates'); }}
+          onConfirm={handleConfirm}
+        />
+      );
+    }
+
+    if (phase === 'candidates') {
+      return (
+        <CandidateGrid
+          candidates={candidates}
+          onSelect={handleSelectCandidate}
+        />
+      );
+    }
+
+    // Questions phase
+    if (!currentQuestion) return null;
+
+    if (currentQuestion.type === 'boolean') {
+      return (
+        <BooleanQuestion
+          question={currentQuestion}
+          onAnswer={handleAnswer}
+          loading={loading}
+        />
+      );
+    }
+
+    if (currentQuestion.key === 'blade_form' && currentQuestion.visual_aid === 'blade_form_silhouettes') {
+      return (
+        <BladeFormQuestion
+          question={currentQuestion}
+          silhouettes={silhouettes}
+          onAnswer={handleAnswer}
+          loading={loading}
+        />
+      );
+    }
+
+    return (
+      <ChoiceQuestion
+        question={currentQuestion}
+        onAnswer={handleAnswer}
+        loading={loading}
+      />
+    );
+  };
 
   return (
-    <div className="min-h-screen bg-surface">
+    <div className="flex h-screen-safe bg-surface text-ink">
       <Sidebar />
 
-      <main className={`${marginClass} transition-[margin] duration-200 flex flex-col min-h-screen`}>
-        <div className="flex items-center justify-between px-8 py-4 border-b border-border flex-shrink-0">
-          <h1 className="text-ink text-xl font-bold">Identify a Knife</h1>
-        </div>
-
-        <div className="flex flex-1 overflow-hidden">
-          {/* ── Left: form ── */}
-          <div className="w-80 flex-shrink-0 border-r border-border overflow-y-auto">
-            <form onSubmit={handleSubmit} className="p-6 flex flex-col gap-5">
-
-              {/* Image upload */}
-              <div>
-                <label className="block text-muted text-xs mb-1.5">Photo of your knife</label>
-                <div
-                  onDragOver={e => e.preventDefault()}
-                  onDrop={handleDrop}
-                  onClick={() => fileInputRef.current?.click()}
-                  className={`relative w-full rounded-xl border-2 border-dashed transition-colors cursor-pointer flex items-center justify-center ${
-                    imagePreview
-                      ? 'border-gold/40 bg-card'
-                      : 'border-border hover:border-gold/30 bg-card/50'
-                  }`}
-                  style={{ aspectRatio: '4/3' }}
-                >
-                  {imagePreview ? (
-                    <img src={imagePreview} alt="Preview" className="w-full h-full object-contain rounded-xl" />
-                  ) : (
-                    <div className="text-center px-4">
-                      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="mx-auto text-muted/40 mb-2">
-                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
-                        <polyline points="17 8 12 3 7 8" />
-                        <line x1="12" y1="3" x2="12" y2="15" />
-                      </svg>
-                      <p className="text-muted text-xs">Drop a photo here or click to upload</p>
-                    </div>
-                  )}
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={e => {
-                      const f = e.target.files?.[0];
-                      if (f) handleImageChange(f);
-                    }}
-                  />
-                </div>
-              </div>
-
-              {/* Culinary toggle */}
-              <div>
-                <label className="block text-muted text-xs mb-1.5">Is this a kitchen knife?</label>
-                <div className="flex rounded-lg border border-border overflow-hidden text-xs">
-                  {([
-                    { label: 'Any', value: null },
-                    { label: 'Yes', value: true },
-                    { label: 'No', value: false },
-                  ] as { label: string; value: boolean | null }[]).map(o => (
-                    <button
-                      key={String(o.value)}
-                      type="button"
-                      onClick={() => setForm(f => ({ ...f, is_culinary: o.value }))}
-                      className={`flex-1 px-3 py-1.5 transition-colors ${
-                        form.is_culinary === o.value
-                          ? 'bg-gold/20 text-gold'
-                          : 'text-muted hover:text-ink hover:bg-border/30'
-                      }`}
-                    >
-                      {o.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Handle material */}
-              <div>
-                <label className="block text-muted text-xs mb-1.5">Handle material</label>
-                <select
-                  value={form.handle_material}
-                  onChange={e => setForm(f => ({ ...f, handle_material: e.target.value }))}
-                  className="w-full px-3 py-2 bg-card border border-border rounded-lg text-sm text-ink focus:outline-none focus:border-gold/60 transition-colors"
-                >
-                  <option value="">Any</option>
-                  {options?.['handle-types'].map(o => (
-                    <option key={o.id} value={o.name}>{o.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Handle color */}
-              <div>
-                <label className="block text-muted text-xs mb-1.5">Handle color <span className="text-red-400">*</span></label>
-                <select
-                  value={form.handle_color}
-                  onChange={e => setForm(f => ({ ...f, handle_color: e.target.value }))}
-                  className="w-full px-3 py-2 bg-card border border-border rounded-lg text-sm text-ink focus:outline-none focus:border-gold/60 transition-colors"
-                >
-                  <option value="">Any</option>
-                  {options?.['handle-colors'].map(o => (
-                    <option key={o.id} value={o.name}>{o.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Blade color */}
-              <div>
-                <label className="block text-muted text-xs mb-1.5">Blade color <span className="text-red-400">*</span></label>
-                <select
-                  value={form.blade_color}
-                  onChange={e => setForm(f => ({ ...f, blade_color: e.target.value }))}
-                  className="w-full px-3 py-2 bg-card border border-border rounded-lg text-sm text-ink focus:outline-none focus:border-gold/60 transition-colors"
-                >
-                  <option value="">Any</option>
-                  {options?.['blade-colors'].map(o => (
-                    <option key={o.id} value={o.name}>{o.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Blade length */}
-              <div>
-                <div className="flex items-center gap-1.5 mb-1.5">
-                  <label className="text-muted text-xs">Blade length (estimate)</label>
-                  <div className="relative group">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-muted/50 cursor-help">
-                      <circle cx="12" cy="12" r="10" />
-                      <path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3" />
-                      <line x1="12" y1="17" x2="12.01" y2="17" />
-                    </svg>
-                    <div className="absolute left-0 bottom-full mb-2 w-48 p-2.5 rounded-lg bg-card border border-border shadow-lg text-xs text-muted opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-10">
-                      <p className="font-semibold text-ink mb-1">Blade length scale</p>
-                      <p>Use your index finger as a ruler:</p>
-                      <ul className="mt-1 space-y-0.5">
-                        <li>1 finger ≈ 3–4.5 inches</li>
-                        <li>2 fingers ≈ 4.5–7 inches</li>
-                      </ul>
-                      <p className="mt-1">Measure the blade only, not the handle.</p>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex flex-col gap-1">
-                  {BLADE_LENGTH_BINS.map(bin => (
-                    <button
-                      key={bin.value}
-                      type="button"
-                      onClick={() => setForm(f => ({
-                        ...f,
-                        blade_length_bin: f.blade_length_bin === bin.value ? null : bin.value,
-                      }))}
-                      className={`text-left px-3 py-1.5 rounded-lg border text-xs transition-colors ${
-                        form.blade_length_bin === bin.value
-                          ? 'border-gold/50 bg-gold/10 text-gold'
-                          : 'border-border text-muted hover:text-ink hover:border-border/70'
-                      }`}
-                    >
-                      <span>{bin.label}</span>
-                      <span className="text-muted/60 ml-1.5">({bin.range})</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Blade shape multi-select */}
-              <div>
-                <label className="block text-muted text-xs mb-1.5">Blade shape (select all that look similar)</label>
-                <div className="flex flex-wrap gap-1.5">
-                  {forms.map(f => (
-                    <button
-                      key={f}
-                      type="button"
-                      onClick={() => toggleForm(f)}
-                      className={`px-2.5 py-1 rounded-lg border text-xs transition-colors ${
-                        form.blade_forms.includes(f)
-                          ? 'border-gold/50 bg-gold/10 text-gold'
-                          : 'border-border text-muted hover:text-ink hover:border-border/70'
-                      }`}
-                    >
-                      {f}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Vision toggle */}
-              {imageFile && (
-                <label className="flex items-center gap-2.5 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={form.use_vision}
-                    onChange={e => setForm(f => ({ ...f, use_vision: e.target.checked }))}
-                    className="w-4 h-4 rounded accent-gold"
-                  />
-                  <span className="text-muted text-xs">Use AI vision to compare shapes (slower)</span>
-                </label>
-              )}
-
-              {/* Actions */}
-              {/* Required fields hint */}
-              {!hasRequiredColors && (
-                <p className="text-red-400 text-xs">Handle color and blade color are required.</p>
-              )}
-
-              <div className="flex gap-2 pt-1">
-                <button
-                  type="submit"
-                  disabled={!hasRequiredColors || loading}
-                  className="flex-1 py-2 px-4 rounded-lg bg-gold text-black text-sm font-semibold hover:bg-gold-bright disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                >
-                  {loading ? (form.use_vision && imageFile ? 'Analyzing…' : 'Searching…') : 'Identify'}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleReset}
-                  className="py-2 px-3 rounded-lg border border-border text-muted text-sm hover:text-ink hover:border-border/70 transition-colors"
-                >
-                  Reset
-                </button>
-              </div>
-            </form>
+      <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        {/* Header */}
+        <header className="flex items-center justify-between px-6 py-3 border-b border-border flex-shrink-0">
+          <div className="flex items-center gap-3">
+            <h1 className="text-lg font-bold">Identify</h1>
           </div>
+          <div className="flex items-center gap-2">
+            {phase !== 'upload' && (
+              <>
+                {answeredQuestions.length > 0 && phase === 'questions' && (
+                  <button
+                    onClick={handleBack}
+                    disabled={loading}
+                    className="px-3 py-1.5 rounded-lg border border-border text-xs text-muted hover:text-ink transition-colors disabled:opacity-40"
+                  >
+                    Back
+                  </button>
+                )}
+                <button
+                  onClick={handleReset}
+                  className="px-3 py-1.5 rounded-lg border border-border text-xs text-muted hover:text-ink transition-colors"
+                >
+                  Start Over
+                </button>
+              </>
+            )}
+          </div>
+        </header>
 
-          {/* ── Results area: list OR comparison view ── */}
-          {selected ? (
-            <div className="flex-1 min-w-0">
-              <ComparisonView
-                result={selected}
-                userImage={imagePreview}
-                onBack={() => setSelected(null)}
-              />
-            </div>
-          ) : (
-            <div className="flex-1 overflow-y-auto">
-              {error && (
-                <div className="m-6 px-4 py-3 rounded-lg bg-red-950/40 border border-red-800/50 text-red-300 text-sm">
-                  {error}
-                </div>
-              )}
+        {/* Progress bar */}
+        {phase !== 'upload' && (
+          <ProgressBar
+            totalModels={totalModels}
+            remainingModels={remainingModels}
+            remainingFamilies={remainingFamilies}
+          />
+        )}
 
-              {!results && !loading && !error && (
-                <div className="h-full flex flex-col items-center justify-center gap-3 text-center px-8 py-16">
-                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" className="text-muted/30">
-                    <circle cx="11" cy="11" r="8" />
-                    <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                  </svg>
-                  <p className="text-muted text-sm">Upload a photo and/or fill in clues, then click <strong className="text-ink">Identify</strong>.</p>
-                </div>
-              )}
+        {/* Auto-gate chips */}
+        {autoGates.length > 0 && phase === 'questions' && (
+          <AutoGateChips gates={autoGates} />
+        )}
 
-              {loading && (
-                <div className="p-6 flex flex-col gap-3">
-                  <div className="text-muted text-xs mb-2">
-                    {form.use_vision && imageFile
-                      ? 'Analyzing photo with AI vision — this may take 10-15 seconds…'
-                      : 'Searching catalog…'}
-                  </div>
-                  {Array.from({ length: 5 }).map((_, i) => (
-                    <div key={i} className="skeleton h-20 rounded-xl" />
-                  ))}
-                </div>
-              )}
+        {/* Answered summary */}
+        {answeredQuestions.length > 0 && phase === 'questions' && (
+          <AnsweredList answered={answeredQuestions} />
+        )}
 
-              {results && !loading && results.results.length === 0 && (
-                <div className="h-full flex flex-col items-center justify-center gap-2 px-8 py-16">
-                  <p className="text-muted text-sm">No matching models found. Try broadening your clues.</p>
-                </div>
-              )}
+        {/* Error */}
+        {error && (
+          <div className="mx-6 mt-2 px-4 py-2 rounded-lg bg-red-900/20 border border-red-800/30 text-red-300 text-sm">
+            {error}
+          </div>
+        )}
 
-              {results && !loading && results.results.length > 0 && (() => {
-                const visible = showAll ? results.results : results.results.slice(0, 5);
-                const hasMore = results.results.length > 5;
-                return (
-                  <div className="p-4 flex flex-col gap-2">
-                    <div className="text-muted text-xs px-1 mb-1 flex items-center justify-between">
-                      <span>
-                        Top {visible.length} of {results.results.length} match{results.results.length !== 1 ? 'es' : ''}
-                      </span>
-                      <span>
-                        {results.families_eliminated} eliminated
-                        {results.vision_used && ' · vision used'}
-                      </span>
-                    </div>
-                    {visible.map(r => (
-                      <ResultCard
-                        key={r.id}
-                        result={r}
-                        selected={false}
-                        onClick={() => setSelected(r)}
-                      />
-                    ))}
-                    {hasMore && !showAll && (
-                      <button
-                        onClick={() => setShowAll(true)}
-                        className="mt-1 py-2 px-4 rounded-lg border border-border text-muted text-xs hover:text-ink hover:border-border/70 transition-colors"
-                      >
-                        Show {results.results.length - 5} more results
-                      </button>
-                    )}
-                  </div>
-                );
-              })()}
-            </div>
-          )}
+        {/* Main content area */}
+        <div className="flex-1 overflow-y-auto">
+          {renderContent()}
         </div>
       </main>
     </div>

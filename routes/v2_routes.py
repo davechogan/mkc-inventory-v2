@@ -2091,6 +2091,100 @@ def create_v2_router(
             "vision_used": pipeline_result.get("vision_used", False),
         }
 
+    # ── Wizard endpoints ──
+
+    @router.post("/api/v2/identify/wizard/start")
+    async def v2_wizard_start(image: Optional[UploadFile] = File(None)):
+        """Start an interactive identification wizard session."""
+        from reporting.identify_wizard import start_session
+
+        image_b64: str | None = None
+        if image:
+            image_bytes = await image.read()
+            image_b64 = base64.b64encode(image_bytes).decode("ascii")
+
+        with get_conn() as conn:
+            return start_session(
+                conn=conn,
+                image_b64=image_b64,
+                vision_model=ollama_vision_model,
+                vision_fn=blade_ai.ollama_chat if image_b64 else None,
+            )
+
+    @router.post("/api/v2/identify/wizard/answer")
+    async def v2_wizard_answer(payload: dict):
+        """Answer a wizard question and get the next one."""
+        from reporting.identify_wizard import answer_question
+
+        session_id = payload.get("session_id")
+        question_key = payload.get("question_key")
+        answer = payload.get("answer")
+
+        if not session_id or not question_key:
+            raise HTTPException(400, "session_id and question_key are required")
+
+        with get_conn() as conn:
+            result = answer_question(
+                conn=conn,
+                session_id=session_id,
+                question_key=question_key,
+                answer=answer,
+                vision_model=ollama_vision_model,
+                vision_fn=blade_ai.ollama_chat,
+            )
+        if "error" in result:
+            raise HTTPException(404, result["error"])
+        return result
+
+    @router.post("/api/v2/identify/wizard/back")
+    async def v2_wizard_back(payload: dict):
+        """Undo the last wizard answer."""
+        from reporting.identify_wizard import go_back
+
+        session_id = payload.get("session_id")
+        if not session_id:
+            raise HTTPException(400, "session_id is required")
+
+        with get_conn() as conn:
+            result = go_back(conn, session_id)
+        if "error" in result:
+            raise HTTPException(404, result["error"])
+        return result
+
+    @router.get("/api/v2/identify/wizard/session/{session_id}")
+    def v2_wizard_session(session_id: str):
+        """Get current wizard session state (for debugging)."""
+        from reporting.identify_wizard import get_session_state
+
+        result = get_session_state(session_id)
+        if "error" in result:
+            raise HTTPException(404, result["error"])
+        return result
+
+    @router.get("/api/v2/blade-forms/silhouettes")
+    def v2_blade_form_silhouettes():
+        """Return blade form silhouette metadata for the wizard UI."""
+        from pathlib import Path
+        outlines_dir = Path(__file__).parent.parent / "static" / "blade-outlines"
+
+        with get_conn() as conn:
+            forms = conn.execute(
+                "SELECT id, name FROM knife_forms ORDER BY name"
+            ).fetchall()
+
+        results = []
+        for f in forms:
+            slug = f["name"].lower().replace(" ", "_").replace("/", "_")
+            sil_path = outlines_dir / f"{slug}.png"
+            results.append({
+                "id": f["id"],
+                "name": f["name"],
+                "slug": slug,
+                "has_silhouette": sil_path.exists(),
+                "image_url": f"/static/blade-outlines/{slug}.png" if sil_path.exists() else None,
+            })
+        return results
+
     @router.post("/api/v2/identify")
     def v2_identify_knives(payload: identifier_query_model):
         """Rank v2 catalog models only and return canonical v2 model IDs."""
