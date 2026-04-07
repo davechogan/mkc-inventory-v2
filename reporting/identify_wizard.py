@@ -622,9 +622,14 @@ def _compute_splitting_power(q: WizardQuestion, candidate_ids: set[int],
     elif q.key == "blade_length_bin":
         return _splitting_power_categorical(q.key, candidate_ids, models,
                                            catalog_field="blade_length")
-    elif q.key in ("blade_color", "handle_color", "handle_material"):
-        # User-input questions — always high priority since they're free (no vision call)
-        return 0.8
+    elif q.key == "handle_material":
+        return _splitting_power_categorical(q.key, candidate_ids, models,
+                                           catalog_field="handle_type")
+    elif q.key == "handle_color":
+        # Can't easily compute from catalog — treat as moderate priority
+        return 0.5 if len(candidate_ids) > 1 else 0.0
+    elif q.key == "blade_color":
+        return 0.5 if len(candidate_ids) > 1 else 0.0
     return 0.0
 
 
@@ -701,11 +706,13 @@ def _is_done(session: WizardSession) -> bool:
     answering one more question to go from 4 → 1 is better than showing 4.
     """
     n_candidates = len(session.candidate_ids)
-    n_answered = len(session.answers)
+    # Count only user-answered questions, not auto-gates
+    auto_gate_keys = {g["question"] for g in session.auto_gates}
+    n_user_answered = sum(1 for k in session.answers if k not in auto_gate_keys)
 
     if n_candidates <= 1:
         return True
-    if n_answered >= MAX_QUESTIONS:
+    if n_user_answered >= MAX_QUESTIONS:
         return True
 
     # Check if any unanswered question can split the remaining candidates
