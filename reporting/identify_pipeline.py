@@ -59,6 +59,7 @@ class Candidate:
     vision_reason: Optional[str] = None
     has_image: bool = False
     colorway_image_b64: Optional[str] = None
+    best_colorway_id: Optional[int] = None
 
 
 def run_pipeline(
@@ -109,6 +110,11 @@ def run_pipeline(
         candidates = _final_vision_compare(conn, candidates, inputs, vision_model, vision_fn)
         vision_used = True
         _log.info(f"Stage 3b (vision): final ranking complete")
+
+    # ── Attach best colorway IDs ──
+    with conn:
+        for c in candidates:
+            c.best_colorway_id = _find_best_colorway_id(conn, c.model_id, inputs.handle_color)
 
     # ── Format results ──
     results = _format_results(candidates)
@@ -483,6 +489,22 @@ def _final_vision_compare(
 
 # ── Colorway image loading ──
 
+def _find_best_colorway_id(conn: sqlite3.Connection, model_id: int, handle_color: Optional[str]) -> Optional[int]:
+    """Find the best-matching colorway ID. Priority: matching color > Orange/Black > Black > any."""
+    queries = []
+    if handle_color:
+        queries.append(("SELECT mc.id FROM model_colorways mc LEFT JOIN handle_colors hc ON hc.id = mc.handle_color_id WHERE mc.knife_model_id = ? AND lower(hc.name) = lower(?) AND mc.image_blob IS NOT NULL AND length(mc.image_blob) > 0 LIMIT 1", (model_id, handle_color)))
+    queries.append(("SELECT mc.id FROM model_colorways mc LEFT JOIN handle_colors hc ON hc.id = mc.handle_color_id WHERE mc.knife_model_id = ? AND lower(hc.name) = 'orange/black' AND mc.image_blob IS NOT NULL AND length(mc.image_blob) > 0 LIMIT 1", (model_id,)))
+    queries.append(("SELECT mc.id FROM model_colorways mc LEFT JOIN handle_colors hc ON hc.id = mc.handle_color_id WHERE mc.knife_model_id = ? AND lower(hc.name) = 'black' AND mc.image_blob IS NOT NULL AND length(mc.image_blob) > 0 LIMIT 1", (model_id,)))
+    queries.append(("SELECT mc.id FROM model_colorways mc WHERE mc.knife_model_id = ? AND mc.image_blob IS NOT NULL AND length(mc.image_blob) > 0 LIMIT 1", (model_id,)))
+
+    for sql, params in queries:
+        row = conn.execute(sql, params).fetchone()
+        if row:
+            return row["id"]
+    return None
+
+
 def _load_best_colorway_image(conn: sqlite3.Connection, model_id: int, handle_color: Optional[str]) -> Optional[str]:
     """Load the best-matching colorway image as base64. Priority: matching color > Orange/Black > Black > any."""
 
@@ -558,6 +580,7 @@ def _format_results(candidates: list[Candidate]) -> list[dict]:
             "vision_match": c.vision_match,
             "vision_reason": c.vision_reason,
             "has_identifier_image": c.has_image,
+            "best_colorway_id": c.best_colorway_id,
             "category": None,
             "catalog_line": None,
             "default_steel": None,

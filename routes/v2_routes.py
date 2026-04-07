@@ -982,6 +982,27 @@ def create_v2_router(
             )
 
 
+    @router.get("/api/v2/colorways/{colorway_id}/image")
+    def v2_get_colorway_image(colorway_id: int):
+        """Serve a colorway image by colorway ID."""
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT image_blob, updated_at FROM model_colorways WHERE id = ? AND image_blob IS NOT NULL",
+                (colorway_id,),
+            ).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="No image for this colorway.")
+            import hashlib
+            etag = hashlib.md5(f"cw:{colorway_id}:{row['updated_at']}".encode()).hexdigest()
+            return Response(
+                content=row["image_blob"],
+                media_type="image/png",
+                headers={
+                    "Cache-Control": "public, max-age=604800",
+                    "ETag": f'"{etag}"',
+                },
+            )
+
     @router.post("/api/v2/models/{model_id}/image")
     async def v2_upload_model_image(
         model_id: int,

@@ -12,6 +12,7 @@ interface IdentifyResult {
   catalog_line: string | null;
   handle_type: string | null;
   has_identifier_image: boolean;
+  best_colorway_id: number | null;
   default_blade_length: number | null;
   default_steel: string | null;
   default_blade_finish: string | null;
@@ -148,9 +149,11 @@ function ResultCard({
   selected: boolean;
   onClick: () => void;
 }) {
-  const imgSrc = result.has_identifier_image
-    ? `/api/v2/models/${result.id}/image`
-    : null;
+  const imgSrc = result.best_colorway_id
+    ? `/api/v2/colorways/${result.best_colorway_id}/image`
+    : result.has_identifier_image
+      ? `/api/v2/models/${result.id}/image`
+      : null;
 
   return (
     <button
@@ -200,8 +203,10 @@ function ComparisonView({
   userImage: string | null;
   onBack: () => void;
 }) {
-  const imgSrc = result.has_identifier_image
-    ? `/api/v2/models/${result.id}/image`
+  const imgSrc = result.best_colorway_id
+    ? `/api/v2/colorways/${result.best_colorway_id}/image`
+    : result.has_identifier_image
+      ? `/api/v2/models/${result.id}/image`
     : null;
 
   return (
