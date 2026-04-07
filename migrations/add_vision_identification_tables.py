@@ -212,6 +212,14 @@ def seed_feature_definitions(conn: sqlite3.Connection):
          json.dumps(["black", "orange", "green", "tan", "brown", "red", "grey", "coyote", "wood_grain", "camo", "other", "unknown"]),
          "ranking_signal", 0.85, 0.75, 0.3, 7),
 
+        ("blade_color_primary", "Blade Primary Color", "observable", "enum",
+         json.dumps(["silver", "black", "red", "coyote_tan", "grey", "two_tone", "other", "unknown"]),
+         "hard_exclusion", 0.90, 0.85, 0.6, 8),
+
+        ("finger_ring_presence", "Finger Ring/Hole at Handle Butt", "observable", "boolean",
+         json.dumps([True, False]),
+         "hard_exclusion", 0.90, 0.85, 0.4, 9),
+
         # Not yet validated (reliability_score = 0.5 until tested)
         ("lanyard_hole_presence", "Lanyard Hole Visible", "observable", "boolean",
          json.dumps([True, False]),

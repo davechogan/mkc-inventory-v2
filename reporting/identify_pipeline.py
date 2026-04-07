@@ -299,9 +299,14 @@ def _match_profiles(user: dict, catalog: dict) -> tuple[float, list[str]]:
     reasons: list[str] = []
 
     # High-value feature comparisons
+    # (feature_key, match_points, mismatch_points, display_label)
     comparisons = [
+        # Hard exclusion features (high penalty for mismatch)
+        ("blade_color_primary", 20, -40, "blade color"),         # Red blade = Blood Brothers only
+        ("finger_ring_presence", 15, -30, "finger ring"),        # Ring = Wargoat family only
         ("handle_type_visual", 15, -20, "handle type"),
         ("knife_type_visual", 10, -15, "knife type"),
+        # Medium features
         ("blade_finish_visual", 8, -5, "blade finish"),
         ("handle_color_primary", 8, -3, "handle color"),
         ("blade_to_handle_ratio_bucket", 10, -8, "blade/handle ratio"),

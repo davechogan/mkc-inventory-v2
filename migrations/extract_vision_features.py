@@ -33,22 +33,24 @@ HANDLE:
 5. lanyard_hole_shape: If lanyard hole exists, what shape? Answer one: "round", "oval", "slot", "irregular", "none"
 6. handle_profile_primary: What is the overall handle shape? Answer one: "mostly_straight", "tapered", "center_swell", "palm_swell", "curved", "mixed"
 7. handle_butt_shape: What shape is the butt end of the handle? Answer one: "rounded", "squared", "tapered", "flared"
+8. finger_ring_presence: Is there a large finger ring or finger hole at the bottom/butt end of the handle? Answer: true or false
 
 BLADE-HANDLE JUNCTION:
-8. choil_presence: Is there a choil (notch/cutout) where the blade meets the handle on the edge side? Answer: true or false
-9. choil_depth: If choil exists, how deep? Answer one: "none", "shallow", "medium", "deep"
-10. guard_prominence: How prominent is the guard/bolster between handle and blade? Answer one: "none", "low", "medium", "high"
-11. jimping_presence: Is there jimping (textured notches) on the spine near the handle? Answer: true or false
-12. jimping_location: If jimping exists, where? Answer one: "spine_near_handle", "spine_mid", "underside", "multiple", "none"
+9. choil_presence: Is there a choil (notch/cutout) where the blade meets the handle on the edge side? Answer: true or false
+10. choil_depth: If choil exists, how deep? Answer one: "none", "shallow", "medium", "deep"
+11. guard_prominence: How prominent is the guard/bolster between handle and blade? Answer one: "none", "low", "medium", "high"
+12. jimping_presence: Is there jimping (textured notches) on the spine near the handle? Answer: true or false
+13. jimping_location: If jimping exists, where? Answer one: "spine_near_handle", "spine_mid", "underside", "multiple", "none"
 
 BLADE:
-13. spine_profile_primary: Looking at the top edge (spine) of the blade, does it: Answer one: "mostly_straight", "gentle_drop", "strong_drop", "hump_then_drop", "rising", "mixed"
-14. edge_profile_primary: Looking at the cutting edge, is it: Answer one: "mostly_straight", "gentle_belly", "pronounced_belly", "recurve", "mixed"
-15. tip_acuteness: How pointed/sharp is the tip? Answer one: "fine", "medium", "stout"
-16. tip_drop_relative_to_spine: Is the blade tip BELOW the spine line, NEAR the spine line, or ABOVE it? Answer one: "below", "near", "above"
+14. blade_color_primary: What is the PRIMARY color of the blade itself? Answer one: "silver", "black", "red", "coyote_tan", "grey", "two_tone", "other"
+15. spine_profile_primary: Looking at the top edge (spine) of the blade, does it: Answer one: "mostly_straight", "gentle_drop", "strong_drop", "hump_then_drop", "rising", "mixed"
+16. edge_profile_primary: Looking at the cutting edge, is it: Answer one: "mostly_straight", "gentle_belly", "pronounced_belly", "recurve", "mixed"
+17. tip_acuteness: How pointed/sharp is the tip? Answer one: "fine", "medium", "stout"
+18. tip_drop_relative_to_spine: Is the blade tip BELOW the spine line, NEAR the spine line, or ABOVE it? Answer one: "below", "near", "above"
 
 Return VALID JSON ONLY (no markdown):
-{"handle_color_primary": "...", "handle_texture_visual": "...", "handle_fastener_count_visible": 0, "lanyard_hole_presence": true, "lanyard_hole_shape": "...", "handle_profile_primary": "...", "handle_butt_shape": "...", "choil_presence": true, "choil_depth": "...", "guard_prominence": "...", "jimping_presence": true, "jimping_location": "...", "spine_profile_primary": "...", "edge_profile_primary": "...", "tip_acuteness": "...", "tip_drop_relative_to_spine": "..."}"""
+{"handle_color_primary": "...", "handle_texture_visual": "...", "handle_fastener_count_visible": 0, "lanyard_hole_presence": true, "lanyard_hole_shape": "...", "handle_profile_primary": "...", "handle_butt_shape": "...", "finger_ring_presence": false, "choil_presence": true, "choil_depth": "...", "guard_prominence": "...", "jimping_presence": true, "jimping_location": "...", "blade_color_primary": "...", "spine_profile_primary": "...", "edge_profile_primary": "...", "tip_acuteness": "...", "tip_drop_relative_to_spine": "..."}"""
 
 
 def needs_extraction(profile_json: str) -> bool:
@@ -57,9 +59,9 @@ def needs_extraction(profile_json: str) -> bool:
     vision_keys = [
         "lanyard_hole_presence", "choil_presence", "jimping_presence",
         "handle_profile_primary", "spine_profile_primary", "edge_profile_primary",
-        "handle_color_primary",
+        "handle_color_primary", "blade_color_primary", "finger_ring_presence",
     ]
-    return any(obs.get(k) == "unknown" for k in vision_keys)
+    return any(obs.get(k) in ("unknown", None) or k not in obs for k in vision_keys)
 
 
 def extract_features(image_b64: str) -> dict | None:
