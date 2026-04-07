@@ -352,7 +352,7 @@ def _filter_handle_material(candidate_ids: set[int], answer: str, models: list[d
     _MATERIAL_GROUPS: dict[str, set[str]] = {
         "carbon fiber": {"carbon fiber", "burled carbon fiber", "black burl carbon fiber",
                          "marbled carbon fiber"},
-        "desert ironwood": {"desert ironwood", "desert ironwood burl"},
+        "wood": {"desert ironwood", "desert ironwood burl"},
     }
 
     # Expand answer to a set of matching types
@@ -569,7 +569,7 @@ QUESTIONS: list[WizardQuestion] = [
             {"value": "G-10", "label": "G-10 (solid, textured scales)"},
             {"value": "Paracord", "label": "Paracord (cord-wrapped)"},
             {"value": "Carbon Fiber", "label": "Carbon Fiber (any pattern)"},
-            {"value": "Desert Ironwood", "label": "Desert Ironwood (wood)"},
+            {"value": "Wood", "label": "Wood (natural grain)"},
         ],
     ),
     WizardQuestion(
