@@ -993,7 +993,7 @@ def answer_question(
         return {
             "remaining_models": len(session.candidate_ids),
             "remaining_families": len(remaining_fams),
-            "eliminated_this_step": eliminated if filter_fn else 0,
+            "eliminated_this_step": eliminated,
             "done": True,
             "candidates": _format_candidates(session, conn, handle_color,
                                               vision_model=vision_model, vision_fn=vision_fn),
@@ -1005,7 +1005,7 @@ def answer_question(
         return {
             "remaining_models": len(session.candidate_ids),
             "remaining_families": len(remaining_fams),
-            "eliminated_this_step": eliminated if filter_fn else 0,
+            "eliminated_this_step": eliminated,
             "done": True,
             "candidates": _format_candidates(session, conn, handle_color,
                                               vision_model=vision_model, vision_fn=vision_fn),
@@ -1019,7 +1019,7 @@ def answer_question(
     return {
         "remaining_models": len(session.candidate_ids),
         "remaining_families": len(remaining_fams),
-        "eliminated_this_step": eliminated if filter_fn else 0,
+        "eliminated_this_step": eliminated,
         "done": False,
         "next_question": _format_question(next_q, suggestion),
     }

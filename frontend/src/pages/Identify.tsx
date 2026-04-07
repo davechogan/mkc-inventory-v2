@@ -285,6 +285,7 @@ function BladeFormQuestion({
   loading: boolean;
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [zoomed, setZoomed] = useState<string | null>(null);
 
   const toggle = (name: string) => {
     setSelected((prev) => {
@@ -300,27 +301,63 @@ function BladeFormQuestion({
   return (
     <div className="flex flex-col items-center gap-4 py-6 px-6">
       <h2 className="text-lg font-semibold text-ink text-center">{question.display_text}</h2>
-      <p className="text-xs text-muted">Select one or more shapes that look like your knife</p>
+      <p className="text-xs text-muted">Tap a shape to select it. Long-press or right-click to zoom in.</p>
+
+      {/* Zoom overlay */}
+      {zoomed && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-8"
+          onClick={() => setZoomed(null)}
+        >
+          <div className="bg-card rounded-2xl p-6 max-w-sm w-full flex flex-col items-center gap-3">
+            <img
+              src={formsWithImages.find(s => s.name === zoomed)?.image_url || ''}
+              alt={zoomed}
+              className="w-full max-h-64 object-contain invert opacity-90"
+            />
+            <span className="text-ink font-semibold">{zoomed}</span>
+            <div className="flex gap-3 mt-2">
+              <button
+                onClick={(e) => { e.stopPropagation(); toggle(zoomed); setZoomed(null); }}
+                className={`px-4 py-2 rounded-lg text-sm font-semibold ${
+                  selected.has(zoomed)
+                    ? 'bg-border/30 text-muted'
+                    : 'bg-gold text-black'
+                }`}
+              >
+                {selected.has(zoomed) ? 'Deselect' : 'Select this shape'}
+              </button>
+              <button
+                onClick={() => setZoomed(null)}
+                className="px-4 py-2 rounded-lg text-sm text-muted border border-border"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 w-full max-w-2xl">
         {formsWithImages.map((s) => (
           <button
             key={s.slug}
             onClick={() => toggle(s.name)}
-            className={`flex flex-col items-center gap-1 p-2 rounded-xl border-2 transition-colors ${
+            onContextMenu={(e) => { e.preventDefault(); setZoomed(s.name); }}
+            className={`flex flex-col items-center gap-1.5 p-3 rounded-xl border-2 transition-colors ${
               selected.has(s.name)
                 ? 'border-gold bg-gold/10'
                 : 'border-border bg-card hover:border-border/70'
             }`}
           >
-            <div className="w-16 h-12 flex items-center justify-center">
+            <div className="w-24 h-16 flex items-center justify-center">
               <img
                 src={s.image_url!}
                 alt={s.name}
                 className="max-w-full max-h-full object-contain invert opacity-80"
               />
             </div>
-            <span className="text-[10px] text-ink font-medium leading-tight text-center">
+            <span className="text-xs text-ink font-medium leading-tight text-center">
               {s.name}
             </span>
           </button>
