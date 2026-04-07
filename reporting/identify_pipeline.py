@@ -129,7 +129,9 @@ def run_pipeline(
         "results": results[:15],
         "families_eliminated": len(eliminated),
         "families_remaining": len(families) - len(eliminated),
+        "families_total": len(families),
         "vision_used": vision_used,
+        "user_profile": user_profile,
     }
 
 

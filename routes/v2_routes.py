@@ -2025,8 +2025,8 @@ def create_v2_router(
         blade_forms: Optional[str] = Form(None),
         blade_length_bin: Optional[int] = Form(None),
     ):
-        """Debug endpoint: runs the new pipeline and shows all intermediate results."""
-        from reporting.identify_pipeline import run_pipeline, UserInputs, _load_models, _group_by_family, _gate_families, _score_candidates, _extract_user_features, _load_best_colorway_image
+        """Debug endpoint: runs the SAME pipeline as identify/image, returns extra debug info."""
+        from reporting.identify_pipeline import run_pipeline, UserInputs, _load_best_colorway_image
 
         image_bytes = await image.read()
         image_b64 = base64.b64encode(image_bytes).decode("ascii")
@@ -2046,40 +2046,8 @@ def create_v2_router(
             blade_length_bin=blade_length_bin,
         )
 
+        # Run the SAME pipeline as identify/image — single source of truth
         with get_conn() as conn:
-            # Run stages individually so we can capture intermediate state
-            models = _load_models(conn)
-            families = _group_by_family(models)
-            eliminated = _gate_families(families, inputs)
-
-            # Extract user features
-            user_profile = _extract_user_features(image_b64, blade_ai.ollama_chat)
-
-            # Score
-            candidates = _score_candidates(models, families, eliminated, inputs, user_profile)
-
-            # Build candidate display with colorway images (top 8, one per family)
-            seen: set[str] = set()
-            display_candidates = []
-            for c in candidates:
-                if c.family in seen:
-                    continue
-                seen.add(c.family)
-                img_b64 = _load_best_colorway_image(conn, c.model_id, handle_color)
-                display_candidates.append({
-                    "name": c.name,
-                    "family": c.family,
-                    "form": c.form,
-                    "handle_type": c.handle_type,
-                    "score": round(c.score, 1),
-                    "reasons": c.reasons[:5],
-                    "image_b64": img_b64,
-                    "silhouette_b64": None,
-                })
-                if len(display_candidates) >= 8:
-                    break
-
-            # Run full pipeline for vision results
             pipeline_result = run_pipeline(
                 conn=conn,
                 inputs=inputs,
@@ -2087,6 +2055,21 @@ def create_v2_router(
                 vision_fn=blade_ai.vision_compare_candidates,
                 extract_fn=blade_ai.ollama_chat,
             )
+
+            # Build candidate display images from the pipeline results (top 8)
+            display_candidates = []
+            for r in pipeline_result.get("results", [])[:8]:
+                img_b64 = _load_best_colorway_image(conn, r["id"], handle_color)
+                display_candidates.append({
+                    "name": r["name"],
+                    "family": r["family"],
+                    "form": r["form"],
+                    "handle_type": r["handle_type"],
+                    "score": r["score"],
+                    "reasons": r["reasons"],
+                    "image_b64": img_b64,
+                    "silhouette_b64": None,
+                })
 
         return {
             "original_image": image_b64,
@@ -2100,9 +2083,9 @@ def create_v2_router(
                 "blade_forms": list(selected_forms) if selected_forms else None,
                 "blade_length_bin": blade_length_bin,
             },
-            "user_profile": user_profile,
-            "families_total": len(families),
-            "families_eliminated": len(eliminated),
+            "user_profile": pipeline_result.get("user_profile"),
+            "families_total": pipeline_result.get("families_total", 0),
+            "families_eliminated": pipeline_result.get("families_eliminated", 0),
             "candidates": display_candidates,
             "pipeline_results": pipeline_result.get("results", [])[:10],
             "vision_used": pipeline_result.get("vision_used", False),
