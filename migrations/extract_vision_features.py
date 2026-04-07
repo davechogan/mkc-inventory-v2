@@ -23,34 +23,34 @@ DB_PATH = Path(__file__).resolve().parent.parent / "data" / "mkc_inventory.db"
 
 VISION_MODEL = "gemma3:27B"
 
-EXTRACTION_PROMPT = """Look at this knife photo carefully and answer each question based on what you see.
+EXTRACTION_PROMPT = """Examine this knife photo carefully. For each question below, LOOK at the specific area described before answering. Do NOT guess — answer based on what you actually see.
 
-HANDLE:
-1. handle_color_primary: What is the PRIMARY color of the handle? Answer one: "black", "orange", "green", "tan", "brown", "red", "grey", "coyote", "wood_grain", "camo", "other"
-2. handle_texture_visual: What is the handle surface texture? Answer one: "smooth", "textured", "woven", "scaled", "wood_grain", "carbon_fiber_pattern", "unknown"
-3. handle_fastener_count_visible: How many visible screws/rivets/fasteners on the handle? Answer a number (0-5).
-4. lanyard_hole_presence: Is there a hole at the end of the handle (lanyard hole)? Answer: true or false
-5. lanyard_hole_shape: If lanyard hole exists, what shape? Answer one: "round", "oval", "slot", "irregular", "none"
-6. handle_profile_primary: What is the overall handle shape? Answer one: "mostly_straight", "tapered", "center_swell", "palm_swell", "curved", "mixed"
-7. handle_butt_shape: What shape is the butt end of the handle? Answer one: "rounded", "squared", "tapered", "flared"
-8. finger_ring_presence: Is there a large finger ring or finger hole at the bottom/butt end of the handle? Answer: true or false
+STEP 1 — BLADE (look at the blade first):
+- blade_color_primary: What color is the BLADE METAL (not the handle)? Look at the flat of the blade. Answer: "silver", "black", "red", "coyote_tan", "grey", "two_tone", "other"
+- spine_profile_primary: Look at the TOP edge (spine) of the blade from handle to tip. Answer: "mostly_straight", "gentle_drop", "strong_drop", "hump_then_drop", "rising", "mixed"
+- edge_profile_primary: Look at the BOTTOM edge (cutting edge). Answer: "mostly_straight", "gentle_belly", "pronounced_belly", "recurve", "mixed"
+- tip_acuteness: How pointed is the tip? Answer: "fine", "medium", "stout"
+- tip_drop_relative_to_spine: Is the tip BELOW the spine line, NEAR it, or ABOVE it? Answer: "below", "near", "above"
 
-BLADE-HANDLE JUNCTION:
-9. choil_presence: Is there a choil (notch/cutout) where the blade meets the handle on the edge side? Answer: true or false
-10. choil_depth: If choil exists, how deep? Answer one: "none", "shallow", "medium", "deep"
-11. guard_prominence: How prominent is the guard/bolster between handle and blade? Answer one: "none", "low", "medium", "high"
-12. jimping_presence: Is there jimping (textured notches) on the spine near the handle? Answer: true or false
-13. jimping_location: If jimping exists, where? Answer one: "spine_near_handle", "spine_mid", "underside", "multiple", "none"
+STEP 2 — HANDLE (now look at the handle):
+- handle_color_primary: What is the PRIMARY color of the handle? Answer: "black", "orange", "green", "tan", "brown", "red", "grey", "coyote", "wood_grain", "camo", "other"
+- handle_texture_visual: What is the surface texture? Answer: "smooth", "textured", "woven", "scaled", "wood_grain", "carbon_fiber_pattern", "unknown"
+- handle_fastener_count_visible: Count the visible screws/rivets/pins. Answer: a number 0-5
+- handle_profile_primary: Overall handle shape? Answer: "mostly_straight", "tapered", "center_swell", "palm_swell", "curved", "mixed"
+- handle_butt_shape: Shape of the butt end? Answer: "rounded", "squared", "tapered", "flared"
+- finger_ring_presence: Is there a LARGE ring, loop, or circular hole at the butt end of the handle that a finger could go through? This is NOT a small lanyard hole — it is a prominent circular opening. Answer: true or false
+- lanyard_hole_presence: Is there a small hole near the end of the handle (lanyard hole)? Answer: true or false
+- lanyard_hole_shape: If lanyard hole exists, shape? Answer: "round", "oval", "slot", "irregular", "none"
 
-BLADE:
-14. blade_color_primary: What is the PRIMARY color of the blade itself? Answer one: "silver", "black", "red", "coyote_tan", "grey", "two_tone", "other"
-15. spine_profile_primary: Looking at the top edge (spine) of the blade, does it: Answer one: "mostly_straight", "gentle_drop", "strong_drop", "hump_then_drop", "rising", "mixed"
-16. edge_profile_primary: Looking at the cutting edge, is it: Answer one: "mostly_straight", "gentle_belly", "pronounced_belly", "recurve", "mixed"
-17. tip_acuteness: How pointed/sharp is the tip? Answer one: "fine", "medium", "stout"
-18. tip_drop_relative_to_spine: Is the blade tip BELOW the spine line, NEAR the spine line, or ABOVE it? Answer one: "below", "near", "above"
+STEP 3 — BLADE-HANDLE JUNCTION (look where blade meets handle):
+- choil_presence: Is there a choil (notch/cutout) on the edge side where blade meets handle? Answer: true or false
+- choil_depth: If choil exists, how deep? Answer: "none", "shallow", "medium", "deep"
+- guard_prominence: How prominent is the guard/bolster? Answer: "none", "low", "medium", "high"
+- jimping_presence: Is there jimping (textured notches) on the spine near the handle? Answer: true or false
+- jimping_location: If jimping exists, where? Answer: "spine_near_handle", "spine_mid", "underside", "multiple", "none"
 
 Return VALID JSON ONLY (no markdown):
-{"handle_color_primary": "...", "handle_texture_visual": "...", "handle_fastener_count_visible": 0, "lanyard_hole_presence": true, "lanyard_hole_shape": "...", "handle_profile_primary": "...", "handle_butt_shape": "...", "finger_ring_presence": false, "choil_presence": true, "choil_depth": "...", "guard_prominence": "...", "jimping_presence": true, "jimping_location": "...", "blade_color_primary": "...", "spine_profile_primary": "...", "edge_profile_primary": "...", "tip_acuteness": "...", "tip_drop_relative_to_spine": "..."}"""
+{"blade_color_primary": "...", "spine_profile_primary": "...", "edge_profile_primary": "...", "tip_acuteness": "...", "tip_drop_relative_to_spine": "...", "handle_color_primary": "...", "handle_texture_visual": "...", "handle_fastener_count_visible": 0, "handle_profile_primary": "...", "handle_butt_shape": "...", "finger_ring_presence": false, "lanyard_hole_presence": true, "lanyard_hole_shape": "...", "choil_presence": true, "choil_depth": "...", "guard_prominence": "...", "jimping_presence": true, "jimping_location": "..."}"""
 
 
 def needs_extraction(profile_json: str) -> bool:
@@ -64,8 +64,35 @@ def needs_extraction(profile_json: str) -> bool:
     return any(obs.get(k) in ("unknown", None) or k not in obs for k in vision_keys)
 
 
+def _ask_focused(image_b64: str, question: str) -> dict | None:
+    """Ask a single focused question. Returns parsed JSON or None."""
+    raw = ollama_chat(
+        VISION_MODEL,
+        "Answer with ONLY valid JSON. No markdown.",
+        question,
+        images_b64=[image_b64],
+        timeout=30.0,
+    )
+    return try_parse_json_response(raw)
+
+
+# High-value features that must be asked individually (multi-question prompts give wrong answers)
+FOCUSED_QUESTIONS = [
+    ('What color is the BLADE (not the handle) of this knife? Answer JSON: {"blade_color_primary": "silver" or "black" or "red" or "coyote_tan" or "grey" or "two_tone" or "other"}',),
+    ('Is there a large finger ring, loop, or circular hole at the butt end of the handle? Not a small lanyard hole — a prominent ring a finger could fit through. Answer JSON: {"finger_ring_presence": true or false}',),
+]
+
+
 def extract_features(image_b64: str) -> dict | None:
-    """Ask gemma3:27B the feature questions about a single image."""
+    """Extract features using focused individual calls for high-value features + batch for the rest."""
+    # Step 1: Focused calls for features that fail in multi-question prompts
+    result = {}
+    for (question,) in FOCUSED_QUESTIONS:
+        parsed = _ask_focused(image_b64, question)
+        if parsed and isinstance(parsed, dict):
+            result.update(parsed)
+
+    # Step 2: Batch call for remaining features
     raw = ollama_chat(
         VISION_MODEL,
         "You are analyzing a knife photo. Answer each question precisely based on what you see.",
@@ -73,7 +100,14 @@ def extract_features(image_b64: str) -> dict | None:
         images_b64=[image_b64],
         timeout=120.0,
     )
-    return try_parse_json_response(raw)
+    batch = try_parse_json_response(raw)
+    if batch and isinstance(batch, dict):
+        # Merge batch results but don't overwrite focused results
+        for k, v in batch.items():
+            if k not in result:
+                result[k] = v
+
+    return result if result else None
 
 
 def main():
