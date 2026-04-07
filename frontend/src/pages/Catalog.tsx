@@ -778,8 +778,68 @@ export default function Catalog() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<CatalogModel | null>(null);
   const [addingNew, setAddingNew] = useState(false);
-  const [catalogView, setCatalogView] = useState<'cards' | 'table'>('cards');
+  const [catalogView, setCatalogView] = useState<'cards' | 'table'>('table');
   const [refreshKey, setRefreshKey] = useState(0);
+
+  // Column configuration for table view
+  const ALL_COLUMNS = [
+    { key: 'official_name', label: 'Name', default: true },
+    { key: 'knife_type', label: 'Type', default: true },
+    { key: 'family_name', label: 'Family', default: true },
+    { key: 'form_name', label: 'Form', default: true },
+    { key: 'handle_type', label: 'Handle', default: true },
+    { key: 'blade_steel', label: 'Steel', default: true },
+    { key: 'blade_finish', label: 'Finish', default: true },
+    { key: 'blade_length', label: 'Length', default: true },
+    { key: 'series_name', label: 'Series', default: false },
+    { key: 'collaborator_name', label: 'Collab', default: false },
+    { key: 'msrp', label: 'MSRP', default: false },
+    { key: 'in_inventory_count', label: 'Owned', default: false },
+  ] as const;
+
+  type ColumnKey = typeof ALL_COLUMNS[number]['key'];
+
+  const [visibleColumns, setVisibleColumns] = useState<Set<ColumnKey>>(() => {
+    const saved = localStorage.getItem('mkc_catalog_columns');
+    if (saved) {
+      try { return new Set(JSON.parse(saved) as ColumnKey[]); } catch { /* fall through */ }
+    }
+    return new Set(ALL_COLUMNS.filter(c => c.default).map(c => c.key));
+  });
+
+  const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
+  const [showColumnPicker, setShowColumnPicker] = useState(false);
+
+  // Persist column choices
+  useEffect(() => {
+    localStorage.setItem('mkc_catalog_columns', JSON.stringify([...visibleColumns]));
+  }, [visibleColumns]);
+
+  const toggleColumn = (key: ColumnKey) => {
+    setVisibleColumns(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+
+  const setColumnFilter = (key: string, value: string) => {
+    setColumnFilters(prev => ({ ...prev, [key]: value }));
+  };
+
+  // Client-side column filtering
+  const filteredModels = useMemo(() => {
+    return models.filter(m => {
+      for (const [key, filterVal] of Object.entries(columnFilters)) {
+        if (!filterVal) continue;
+        const cellVal = String((m as unknown as Record<string, unknown>)[key] ?? '').toLowerCase();
+        if (!cellVal.includes(filterVal.toLowerCase())) return false;
+      }
+      return true;
+    });
+  }, [models, columnFilters]);
+
+  const activeColumnFilterCount = Object.values(columnFilters).filter(Boolean).length;
   const refreshCatalog = useCallback(() => setRefreshKey(k => k + 1), []);
 
   // Debounce search
@@ -920,13 +980,57 @@ export default function Catalog() {
             )}
           </div>
 
+          {/* Column picker toggle (table view only) */}
+          {catalogView === 'table' && (
+            <button
+              onClick={() => setShowColumnPicker(p => !p)}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs transition-colors ${
+                showColumnPicker ? 'border-gold/40 text-gold bg-gold/5' : 'border-border text-muted hover:text-ink'
+              }`}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" />
+              </svg>
+              Columns
+            </button>
+          )}
+
+          {/* Clear column filters */}
+          {activeColumnFilterCount > 0 && (
+            <button
+              onClick={() => setColumnFilters({})}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs text-gold border border-gold/30 hover:bg-gold/5 transition-colors"
+            >
+              Clear {activeColumnFilterCount} column filter{activeColumnFilterCount !== 1 ? 's' : ''}
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          )}
+
           {/* Count */}
           {!loading && (
             <span className="text-muted text-xs flex-shrink-0">
-              {models.length.toLocaleString()} model{models.length !== 1 ? 's' : ''}
+              {filteredModels.length !== models.length
+                ? `${filteredModels.length} of ${models.length} models`
+                : `${models.length} model${models.length !== 1 ? 's' : ''}`}
             </span>
           )}
         </div>
+
+        {/* Column picker popover */}
+        {showColumnPicker && catalogView === 'table' && (
+          <div className="px-6 pb-2 flex flex-wrap gap-2">
+            {ALL_COLUMNS.map(col => (
+              <label key={col.key} className="flex items-center gap-1.5 cursor-pointer select-none">
+                <input type="checkbox" checked={visibleColumns.has(col.key)}
+                  onChange={() => toggleColumn(col.key)}
+                  className="w-3.5 h-3.5 rounded accent-gold" />
+                <span className="text-xs text-muted">{col.label}</span>
+              </label>
+            ))}
+          </div>
+        )}
 
         {/* Body */}
         <div className="flex flex-1 overflow-hidden">
@@ -973,29 +1077,59 @@ export default function Catalog() {
                 <table className="w-full text-sm border-collapse">
                   <thead>
                     <tr className="bg-border/20 text-left">
-                      <th className="px-4 py-2.5 text-muted font-medium text-xs uppercase tracking-wider">Name</th>
-                      <th className="px-4 py-2.5 text-muted font-medium text-xs uppercase tracking-wider">Type</th>
-                      <th className="px-4 py-2.5 text-muted font-medium text-xs uppercase tracking-wider">Family</th>
-                      <th className="px-4 py-2.5 text-muted font-medium text-xs uppercase tracking-wider">Steel</th>
-                      <th className="px-4 py-2.5 text-muted font-medium text-xs uppercase tracking-wider">Finish</th>
-                      <th className="px-4 py-2.5 text-muted font-medium text-xs uppercase tracking-wider text-right">MSRP</th>
-                      <th className="px-4 py-2.5 text-muted font-medium text-xs uppercase tracking-wider text-center">Owned</th>
+                      {ALL_COLUMNS.filter(c => visibleColumns.has(c.key)).map(col => (
+                        <th key={col.key} className={`px-3 py-2 text-muted font-medium text-xs uppercase tracking-wider ${
+                          col.key === 'msrp' ? 'text-right' : col.key === 'in_inventory_count' ? 'text-center' : ''
+                        }`}>{col.label}</th>
+                      ))}
+                    </tr>
+                    {/* Filter row */}
+                    <tr className="bg-border/10">
+                      {ALL_COLUMNS.filter(c => visibleColumns.has(c.key)).map(col => (
+                        <th key={col.key} className="px-2 py-1.5">
+                          <input
+                            type="text"
+                            value={columnFilters[col.key] ?? ''}
+                            onChange={e => setColumnFilter(col.key, e.target.value)}
+                            placeholder="filter…"
+                            className="w-full px-2 py-1 bg-card border border-border rounded text-xs text-ink placeholder:text-muted/40 focus:outline-none focus:border-gold/60"
+                          />
+                        </th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {models.map((model) => (
+                    {filteredModels.map((model) => (
                       <tr key={model.id}
                         onClick={() => setSelected((prev) => prev?.id === model.id ? null : model)}
                         className={`border-t border-border/50 cursor-pointer transition-colors ${
                           selected?.id === model.id ? 'bg-gold/5' : 'hover:bg-border/10'
                         }`}>
-                        <td className="px-4 py-2.5 text-ink font-medium">{model.official_name}</td>
-                        <td className="px-4 py-2.5 text-muted">{model.knife_type ?? '—'}</td>
-                        <td className="px-4 py-2.5 text-muted">{model.family_name ?? '—'}</td>
-                        <td className="px-4 py-2.5 text-muted">{model.blade_steel ?? '—'}</td>
-                        <td className="px-4 py-2.5 text-muted">{model.blade_finish ?? '—'}</td>
-                        <td className="px-4 py-2.5 text-gold text-right">{model.msrp != null ? `$${model.msrp}` : '—'}</td>
-                        <td className="px-4 py-2.5 text-center">{model.in_inventory_count > 0 ? <span className="text-gold font-bold">{model.in_inventory_count}</span> : <span className="text-muted/30">—</span>}</td>
+                        {ALL_COLUMNS.filter(c => visibleColumns.has(c.key)).map(col => {
+                          const val = (model as unknown as Record<string, unknown>)[col.key];
+                          const isName = col.key === 'official_name';
+                          const isMsrp = col.key === 'msrp';
+                          const isOwned = col.key === 'in_inventory_count';
+                          const isLength = col.key === 'blade_length';
+
+                          let display: React.ReactNode;
+                          if (isMsrp) {
+                            display = val != null ? `$${val}` : '—';
+                          } else if (isOwned) {
+                            const count = val as number;
+                            display = count > 0 ? <span className="text-gold font-bold">{count}</span> : <span className="text-muted/30">—</span>;
+                          } else if (isLength) {
+                            display = val != null ? `${val}"` : '—';
+                          } else {
+                            display = (val as string) ?? '—';
+                          }
+
+                          return (
+                            <td key={col.key} className={`px-3 py-2 ${
+                              isName ? 'text-ink font-medium' : isMsrp ? 'text-gold text-right' : isOwned ? 'text-center' : 'text-muted'
+                            }`}>{display}</td>
+                          );
+                        })}
                       </tr>
                     ))}
                   </tbody>
