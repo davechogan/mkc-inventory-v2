@@ -96,10 +96,15 @@ def run_pipeline(
         user_profile = _extract_user_features(inputs.image_b64, extract_fn)
         _log.info(f"User profile extracted: {user_profile}")
 
-    # Hard gate on user-provided colors + extracted features (runs even without photo)
-    if user_profile or inputs.blade_color or inputs.handle_color:
-        eliminated = _gate_by_extracted_features(models, families, eliminated, user_profile or {}, inputs)
-        _log.info(f"Stage 1b (feature gate): {len(eliminated)} families eliminated total")
+    # ── Stage 1b: Hard gate on user-provided colors (against colorway DB) ──
+    if inputs.blade_color or inputs.handle_color:
+        eliminated = _gate_by_colorway(conn, families, eliminated, inputs)
+        _log.info(f"Stage 1b (colorway gate): {len(eliminated)} families eliminated total")
+
+    # ── Stage 1c: Hard gate on extracted features (vision-derived) ──
+    if user_profile:
+        eliminated = _gate_by_extracted_features(models, families, eliminated, user_profile, inputs)
+        _log.info(f"Stage 1c (feature gate): {len(eliminated)} families eliminated total")
 
     # ── Stage 2: Feature scoring ──
     candidates = _score_candidates(models, families, eliminated, inputs, user_profile)
@@ -220,7 +225,52 @@ def _gate_families(families: dict[str, list[dict]], inputs: UserInputs) -> set[s
     return eliminated
 
 
-# ── Stage 1b: Feature-based hard gating ──
+# ── Stage 1b: Colorway-based hard gating ──
+
+def _gate_by_colorway(
+    conn: sqlite3.Connection,
+    families: dict[str, list[dict]],
+    already_eliminated: set[str],
+    inputs: UserInputs,
+) -> set[str]:
+    """Eliminate families where NO model has a colorway matching user-specified colors."""
+    eliminated = set(already_eliminated)
+
+    for fam, members in families.items():
+        if fam in eliminated:
+            continue
+
+        model_ids = [m["id"] for m in members]
+        placeholders = ",".join("?" * len(model_ids))
+
+        # Build query conditions
+        conditions = ["mc.knife_model_id IN (" + placeholders + ")"]
+        params: list = list(model_ids)
+
+        if inputs.handle_color:
+            conditions.append("lower(hc.name) = lower(?)")
+            params.append(inputs.handle_color)
+
+        if inputs.blade_color:
+            conditions.append("lower(bc.name) = lower(?)")
+            params.append(inputs.blade_color)
+
+        sql = f"""
+            SELECT COUNT(*) FROM model_colorways mc
+            LEFT JOIN handle_colors hc ON hc.id = mc.handle_color_id
+            LEFT JOIN blade_colors bc ON bc.id = mc.blade_color_id
+            WHERE {' AND '.join(conditions)}
+        """
+        count = conn.execute(sql, params).fetchone()[0]
+
+        if count == 0:
+            eliminated.add(fam)
+            _log.info(f"  Colorway gate: eliminated {fam} (no colorway matches handle={inputs.handle_color}, blade={inputs.blade_color})")
+
+    return eliminated
+
+
+# ── Stage 1c: Feature-based hard gating ──
 
 # Distinctive blade colors that should hard-eliminate non-matching families
 _DISTINCTIVE_BLADE_COLORS = {"red", "coyote_tan"}
