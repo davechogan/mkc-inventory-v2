@@ -209,10 +209,30 @@ def _gate_families(families: dict[str, list[dict]], inputs: UserInputs) -> set[s
 # ── Feature extraction from user image ──
 
 def _extract_user_features(image_b64: str, extract_fn: Any) -> dict:
-    """Ask the vision model the feature questions about the user's uploaded photo."""
-    from migrations.extract_vision_features import EXTRACTION_PROMPT
+    """Ask the vision model the feature questions about the user's uploaded photo.
+
+    Uses focused single-question calls for high-value features (blade color, finger ring)
+    plus a batch call for the remaining features.
+    """
+    from migrations.extract_vision_features import EXTRACTION_PROMPT, FOCUSED_QUESTIONS
     from blade_ai import try_parse_json_response
 
+    result = {}
+
+    # Step 1: Focused calls for high-value features
+    for (question,) in FOCUSED_QUESTIONS:
+        raw = extract_fn(
+            "gemma3:27B",
+            "Answer with ONLY valid JSON. No markdown.",
+            question,
+            images_b64=[image_b64],
+            timeout=30.0,
+        )
+        parsed = try_parse_json_response(raw)
+        if parsed and isinstance(parsed, dict):
+            result.update(parsed)
+
+    # Step 2: Batch call for remaining features
     raw = extract_fn(
         "gemma3:27B",
         "You are analyzing a knife photo. Answer each question precisely based on what you see.",
@@ -220,8 +240,13 @@ def _extract_user_features(image_b64: str, extract_fn: Any) -> dict:
         images_b64=[image_b64],
         timeout=60.0,
     )
-    parsed = try_parse_json_response(raw)
-    return parsed if isinstance(parsed, dict) else {}
+    batch = try_parse_json_response(raw)
+    if batch and isinstance(batch, dict):
+        for k, v in batch.items():
+            if k not in result:
+                result[k] = v
+
+    return result
 
 
 # ── Stage 2: Feature scoring ──
