@@ -383,6 +383,10 @@ function CandidateGrid({
   candidates: WizardCandidate[];
   onSelect: (candidate: WizardCandidate) => void;
 }) {
+  // Only highlight vision matches if they differentiate — if all are the same rating, don't highlight
+  const strongCount = candidates.filter(c => c.vision_match === 'STRONG').length;
+  const showVisionBadges = strongCount > 0 && strongCount < candidates.length;
+
   return (
     <div className="py-6 px-6">
       <h2 className="text-lg font-semibold text-ink text-center mb-1">
@@ -407,26 +411,26 @@ function CandidateGrid({
               key={c.model_id}
               onClick={() => onSelect(c)}
               className={`flex flex-col border-2 bg-card rounded-xl overflow-hidden hover:bg-gold/5 transition-colors text-left ${
-                c.vision_match === 'STRONG'
+                showVisionBadges && c.vision_match === 'STRONG'
                   ? 'border-green-500/60 ring-1 ring-green-500/20'
-                  : c.vision_match === 'POSSIBLE'
+                  : showVisionBadges && c.vision_match === 'POSSIBLE'
                     ? 'border-yellow-500/40'
                     : 'border-border hover:border-gold/50'
               }`}
             >
-              {c.vision_match === 'STRONG' && (
+              {showVisionBadges && c.vision_match === 'STRONG' && (
                 <div className="bg-green-900/30 text-green-300 text-xs font-semibold text-center py-1">
                   AI Best Match
                 </div>
               )}
-              {c.vision_match === 'POSSIBLE' && (
+              {showVisionBadges && c.vision_match === 'POSSIBLE' && (
                 <div className="bg-yellow-900/20 text-yellow-300 text-xs font-medium text-center py-1">
                   Possible Match
                 </div>
               )}
-              <div className="aspect-[4/3] bg-border/10 flex items-center justify-center overflow-hidden">
+              <div className="aspect-[4/3] bg-white flex items-center justify-center overflow-hidden">
                 {imgSrc ? (
-                  <img src={imgSrc} alt={c.name} className="w-full h-full object-cover" />
+                  <img src={imgSrc} alt={c.name} className="w-full h-full object-contain p-2" />
                 ) : (
                   <div className="text-muted/30 text-2xl">?</div>
                 )}
@@ -496,9 +500,9 @@ function CandidateDetail({
           )}
           <div className="flex flex-col gap-1">
             <span className="text-xs text-muted font-medium">Reference</span>
-            <div className="aspect-[4/3] bg-border/10 rounded-xl overflow-hidden">
+            <div className="aspect-[4/3] bg-white rounded-xl overflow-hidden">
               {imgSrc ? (
-                <img src={imgSrc} alt={candidate.name} className="w-full h-full object-contain" />
+                <img src={imgSrc} alt={candidate.name} className="w-full h-full object-contain p-2" />
               ) : (
                 <div className="w-full h-full flex items-center justify-center text-muted/30">No image</div>
               )}
