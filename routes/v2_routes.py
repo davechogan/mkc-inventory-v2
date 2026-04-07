@@ -1184,6 +1184,51 @@ def create_v2_router(
                 raise HTTPException(status_code=404, detail="Colorway not found for this model.")
         return {"message": "Colorway deleted."}
 
+    @router.patch("/api/v2/models/{model_id}/colorways/{colorway_id}")
+    def v2_update_colorway(model_id: int, colorway_id: int, payload: dict = Body(...)):
+        """Update colorway handle_color and/or blade_color."""
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT id FROM model_colorways WHERE id = ? AND knife_model_id = ?",
+                (colorway_id, model_id),
+            ).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Colorway not found for this model.")
+
+            updates = []
+            params = []
+            if "handle_color_id" in payload:
+                updates.append("handle_color_id = ?")
+                params.append(payload["handle_color_id"])
+            if "blade_color_id" in payload:
+                updates.append("blade_color_id = ?")
+                params.append(payload["blade_color_id"])
+
+            if not updates:
+                raise HTTPException(status_code=400, detail="No fields to update.")
+
+            updates.append("updated_at = CURRENT_TIMESTAMP")
+            params.append(colorway_id)
+            conn.execute(
+                f"UPDATE model_colorways SET {', '.join(updates)} WHERE id = ?",
+                params,
+            )
+
+            # Return updated colorway
+            updated = conn.execute("""
+                SELECT mc.id, hc.name as handle_color, bc.name as blade_color
+                FROM model_colorways mc
+                LEFT JOIN handle_colors hc ON hc.id = mc.handle_color_id
+                LEFT JOIN blade_colors bc ON bc.id = mc.blade_color_id
+                WHERE mc.id = ?
+            """, (colorway_id,)).fetchone()
+            return {
+                "id": updated["id"],
+                "handle_color": updated["handle_color"],
+                "blade_color": updated["blade_color"],
+                "message": "Updated.",
+            }
+
     @router.get("/api/v2/colorway-audit")
     def v2_colorway_audit():
         """Per-model colorway image completeness for the admin audit view."""
