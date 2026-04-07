@@ -2246,21 +2246,16 @@ def create_v2_router(
         }
 
     @router.post("/api/v2/identify/vision-debug")
-    async def v2_identify_vision_debug(image: UploadFile = File(None)):
-        """Debug endpoint: returns the exact images sent to the vision model as an HTML page."""
-        from fastapi.responses import HTMLResponse
-
-        if not image:
-            return HTMLResponse("<h2>Upload an image via multipart form</h2>", status_code=400)
-
+    async def v2_identify_vision_debug(
+        image: UploadFile = File(...),
+        run_vision: bool = Form(False),
+    ):
+        """Debug endpoint: returns the images sent to the vision model and optionally runs it."""
         image_bytes = await image.read()
         image_b64 = base64.b64encode(image_bytes).decode("ascii")
 
         # Background removal
         clean_b64 = blade_ai._remove_background(image_b64)
-
-        # Reference sheet
-        ref_sheet_b64 = blade_ai._load_reference_sheet_b64()
 
         # Top 5 candidate reference images (one per family, by score)
         with get_conn() as conn:
@@ -2285,36 +2280,59 @@ def create_v2_router(
             if fam in seen:
                 continue
             seen.add(fam)
+            ref_b64 = base64.b64encode(r["image_blob"]).decode("ascii")
+            sil_b64 = blade_ai._load_form_silhouette_b64(r["form_name"])
             candidates.append({
                 "name": r["official_name"],
                 "family": fam,
                 "form": r["form_name"],
-                "image_b64": base64.b64encode(r["image_blob"]).decode("ascii"),
+                "image_b64": ref_b64,
+                "silhouette_b64": sil_b64,
             })
             if len(candidates) >= 5:
                 break
 
-        # Build HTML
-        parts = ['<html><body style="background:#111;color:#eee;font-family:system-ui;padding:20px">']
-        parts.append("<h1>Vision Model Debug — Images Sent to LLM</h1>")
+        # Optionally run the vision model
+        vision_raw = None
+        vision_parsed = None
+        if run_vision and candidates:
+            vision_candidates = [
+                {
+                    "name": c["name"],
+                    "form": c["form"],
+                    "reference_image_b64": c["image_b64"],
+                }
+                for c in candidates
+            ]
+            vision_raw = blade_ai.ollama_chat(
+                ollama_vision_model,
+                blade_ai.VISION_COMPARE_SYSTEM,
+                "Image 1 is the user's knife photo.\n\nCandidates:\n"
+                + "\n".join(
+                    f"Candidate '{c['name']}' (blade form: {c['form']})"
+                    for c in candidates
+                ),
+                images_b64=[clean_b64] + [c["image_b64"] for c in candidates],
+            )
+            vision_parsed = blade_ai.try_parse_json_response(vision_raw)
 
-        parts.append("<h2>Image 1: User photo (original)</h2>")
-        parts.append(f'<img src="data:image/jpeg;base64,{image_b64}" style="max-height:400px;border:2px solid #444">')
-
-        parts.append("<h2>Image 1 (after background removal)</h2>")
-        parts.append(f'<img src="data:image/png;base64,{clean_b64}" style="max-height:400px;border:2px solid #c89">')
-
-        if ref_sheet_b64:
-            parts.append("<h2>Image 2: Blade Form Reference Sheet</h2>")
-            parts.append(f'<img src="data:image/png;base64,{ref_sheet_b64}" style="max-height:500px;border:2px solid #444">')
-
-        for i, c in enumerate(candidates):
-            img_num = 3 + i if ref_sheet_b64 else 2 + i
-            parts.append(f'<h2>Image {img_num}: {c["name"]} (form: {c["form"] or "unknown"})</h2>')
-            parts.append(f'<img src="data:image/jpeg;base64,{c["image_b64"]}" style="max-height:400px;border:2px solid #444">')
-
-        parts.append("</body></html>")
-        return HTMLResponse("".join(parts))
+        return {
+            "original_image": image_b64,
+            "clean_image": clean_b64,
+            "vision_model": ollama_vision_model,
+            "candidates": [
+                {
+                    "name": c["name"],
+                    "family": c["family"],
+                    "form": c["form"],
+                    "image_b64": c["image_b64"],
+                    "silhouette_b64": c["silhouette_b64"],
+                }
+                for c in candidates
+            ],
+            "vision_raw": vision_raw,
+            "vision_parsed": vision_parsed,
+        }
 
     @router.post("/api/v2/identify")
     def v2_identify_knives(payload: identifier_query_model):

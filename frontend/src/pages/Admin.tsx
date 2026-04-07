@@ -574,6 +574,157 @@ function QuickTag({ options }: { options: OptionsMap }) {
   );
 }
 
+// ── Vision Debug ─────────────────────────────────────────────────────────────
+
+interface VisionCandidate {
+  name: string;
+  family: string;
+  form: string | null;
+  image_b64: string;
+  silhouette_b64: string | null;
+}
+
+interface VisionDebugResponse {
+  original_image: string;
+  clean_image: string;
+  vision_model: string;
+  candidates: VisionCandidate[];
+  vision_raw: string | null;
+  vision_parsed: Record<string, unknown> | null;
+}
+
+function VisionDebug() {
+  const [file, setFile] = useState<File | null>(null);
+  const [, setPreview] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [runVision, setRunVision] = useState(false);
+  const [result, setResult] = useState<VisionDebugResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (f) {
+      setFile(f);
+      const reader = new FileReader();
+      reader.onload = () => setPreview(reader.result as string);
+      reader.readAsDataURL(f);
+      setResult(null);
+      setError(null);
+    }
+  };
+
+  const handleSubmit = async () => {
+    if (!file) return;
+    setLoading(true);
+    setError(null);
+    setResult(null);
+    try {
+      const fd = new FormData();
+      fd.append('image', file);
+      fd.append('run_vision', String(runVision));
+      const res = await fetch('/api/v2/identify/vision-debug', { method: 'POST', body: fd });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json() as VisionDebugResponse;
+      setResult(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-6">
+      <p className="text-muted text-sm">
+        Upload a knife photo to see exactly what the vision model receives and how it responds.
+      </p>
+
+      {/* Upload + controls */}
+      <div className="flex items-end gap-4 flex-wrap">
+        <div>
+          <label className="block text-muted text-xs mb-1.5">Photo</label>
+          <input type="file" accept="image/*" onChange={handleFileChange}
+            className="text-sm text-ink file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border file:border-border file:bg-card file:text-ink file:text-xs file:cursor-pointer" />
+        </div>
+        <label className="flex items-center gap-2 cursor-pointer select-none">
+          <input type="checkbox" checked={runVision} onChange={e => setRunVision(e.target.checked)}
+            className="w-4 h-4 rounded accent-gold" />
+          <span className="text-muted text-xs">Run vision model (slower)</span>
+        </label>
+        <button onClick={handleSubmit} disabled={!file || loading}
+          className="py-1.5 px-4 rounded-lg bg-gold text-black text-sm font-semibold hover:bg-gold-bright disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+          {loading ? 'Processing…' : 'Analyze'}
+        </button>
+      </div>
+
+      {error && (
+        <div className="px-4 py-3 rounded-lg bg-red-950/40 border border-red-800/50 text-red-300 text-sm">{error}</div>
+      )}
+
+      {result && (
+        <div className="flex flex-col gap-6">
+          {/* Model info */}
+          <div className="text-muted text-xs">Vision model: <span className="text-ink font-mono">{result.vision_model}</span></div>
+
+          {/* User images side by side */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <div className="text-muted text-[10px] uppercase tracking-wider mb-1.5">Original Upload</div>
+              <div className="rounded-xl overflow-hidden bg-border/20 flex items-center justify-center" style={{ minHeight: 200 }}>
+                <img src={`data:image/jpeg;base64,${result.original_image}`} alt="Original" className="max-w-full max-h-[400px] object-contain" />
+              </div>
+            </div>
+            <div>
+              <div className="text-muted text-[10px] uppercase tracking-wider mb-1.5">After Background Removal</div>
+              <div className="rounded-xl overflow-hidden bg-border/20 flex items-center justify-center" style={{ minHeight: 200 }}>
+                <img src={`data:image/png;base64,${result.clean_image}`} alt="Cleaned" className="max-w-full max-h-[400px] object-contain" />
+              </div>
+            </div>
+          </div>
+
+          {/* Candidates */}
+          <div>
+            <div className="text-muted text-xs uppercase tracking-wider mb-3">Candidate Reference Images Sent to Vision Model</div>
+            <div className="grid grid-cols-5 gap-3">
+              {result.candidates.map((c, i) => (
+                <div key={i} className="rounded-xl border border-border bg-card p-3">
+                  <div className="text-ink text-xs font-semibold truncate mb-1">{c.name}</div>
+                  <div className="text-muted text-[10px] mb-2">{c.family} · {c.form || '?'}</div>
+                  {c.silhouette_b64 && (
+                    <div className="mb-2">
+                      <div className="text-muted text-[10px] mb-0.5">Silhouette</div>
+                      <img src={`data:image/png;base64,${c.silhouette_b64}`} alt="Silhouette" className="w-full h-16 object-contain bg-white rounded" />
+                    </div>
+                  )}
+                  <div>
+                    <div className="text-muted text-[10px] mb-0.5">Reference Photo</div>
+                    <img src={`data:image/jpeg;base64,${c.image_b64}`} alt={c.name} className="w-full h-32 object-contain bg-border/20 rounded" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Vision response */}
+          {result.vision_raw && (
+            <div>
+              <div className="text-muted text-xs uppercase tracking-wider mb-2">Vision Model Raw Response</div>
+              <pre className="bg-card border border-border rounded-xl p-4 text-xs text-ink overflow-x-auto whitespace-pre-wrap">{result.vision_raw}</pre>
+            </div>
+          )}
+
+          {result.vision_parsed && (
+            <div>
+              <div className="text-muted text-xs uppercase tracking-wider mb-2">Parsed Response</div>
+              <pre className="bg-card border border-border rounded-xl p-4 text-xs text-gold overflow-x-auto whitespace-pre-wrap">{JSON.stringify(result.vision_parsed, null, 2)}</pre>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Admin page ────────────────────────────────────────────────────────────────
 
 export default function Admin() {
@@ -582,7 +733,7 @@ export default function Admin() {
   );
   const [options, setOptions] = useState<OptionsMap>({});
   const [loading, setLoading] = useState(true);
-  const [activeSection, setActiveSection] = useState<'options' | 'images' | 'access' | 'quicktag'>('options');
+  const [activeSection, setActiveSection] = useState<'options' | 'images' | 'access' | 'quicktag' | 'vision'>('options');
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -663,7 +814,7 @@ export default function Admin() {
       {/* Nav tabs */}
       <div className="border-b border-border px-6">
         <nav className="flex gap-6">
-          {([['options', 'Dropdown Options'], ['images', 'Image Audit'], ['access', 'Access Log'], ['quicktag', 'Quick Tag']] as const).map(([key, label]) => (
+          {([['options', 'Dropdown Options'], ['images', 'Image Audit'], ['access', 'Access Log'], ['quicktag', 'Quick Tag'], ['vision', 'Vision Debug']] as const).map(([key, label]) => (
             <button
               key={key}
               onClick={() => setActiveSection(key)}
@@ -715,6 +866,10 @@ export default function Admin() {
 
         {activeSection === 'quicktag' && (
           <QuickTag options={options} />
+        )}
+
+        {activeSection === 'vision' && (
+          <VisionDebug />
         )}
 
       </main>
