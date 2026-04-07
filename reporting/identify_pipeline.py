@@ -220,6 +220,7 @@ def _extract_user_features(image_b64: str, extract_fn: Any) -> dict:
     result = {}
 
     # Step 1: Focused calls for high-value features
+    _log.info(f"User feature extraction: {len(FOCUSED_QUESTIONS)} focused + 1 batch call, image_len={len(image_b64)}")
     for (question,) in FOCUSED_QUESTIONS:
         raw = extract_fn(
             "gemma3:27B",
@@ -229,6 +230,7 @@ def _extract_user_features(image_b64: str, extract_fn: Any) -> dict:
             timeout=30.0,
         )
         parsed = try_parse_json_response(raw)
+        _log.info(f"  Focused result: {parsed}")
         if parsed and isinstance(parsed, dict):
             result.update(parsed)
 
