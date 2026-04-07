@@ -580,6 +580,9 @@ interface VisionCandidate {
   name: string;
   family: string;
   form: string | null;
+  handle_type: string | null;
+  score: number;
+  reasons: string[];
   image_b64: string;
   silhouette_b64: string | null;
 }
@@ -588,16 +591,21 @@ interface VisionDebugResponse {
   original_image: string;
   clean_image: string;
   vision_model: string;
+  filters: Record<string, unknown>;
+  families_total: number;
+  families_eliminated: number;
   candidates: VisionCandidate[];
   vision_raw: string | null;
-  vision_parsed: Record<string, unknown> | null;
+  vision_parsed: unknown;
 }
 
 function VisionDebug() {
   const [file, setFile] = useState<File | null>(null);
-  const [, setPreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [runVision, setRunVision] = useState(false);
+  const [handleMaterial, setHandleMaterial] = useState('');
+  const [handleColor] = useState('');
+  const [isCulinary, setIsCulinary] = useState<string>('');
   const [result, setResult] = useState<VisionDebugResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -605,9 +613,6 @@ function VisionDebug() {
     const f = e.target.files?.[0];
     if (f) {
       setFile(f);
-      const reader = new FileReader();
-      reader.onload = () => setPreview(reader.result as string);
-      reader.readAsDataURL(f);
       setResult(null);
       setError(null);
     }
@@ -622,6 +627,10 @@ function VisionDebug() {
       const fd = new FormData();
       fd.append('image', file);
       fd.append('run_vision', String(runVision));
+      if (handleMaterial) fd.append('handle_material', handleMaterial);
+      if (handleColor) fd.append('handle_color', handleColor);
+      if (isCulinary === 'true') fd.append('is_culinary', 'true');
+      if (isCulinary === 'false') fd.append('is_culinary', 'false');
       const res = await fetch('/api/v2/identify/vision-debug', { method: 'POST', body: fd });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json() as VisionDebugResponse;
@@ -636,15 +645,36 @@ function VisionDebug() {
   return (
     <div className="flex flex-col gap-6">
       <p className="text-muted text-sm">
-        Upload a knife photo to see exactly what the vision model receives and how it responds.
+        Upload a knife photo to see exactly what the vision model receives. Add filters to test how they affect candidate selection.
       </p>
 
-      {/* Upload + controls */}
+      {/* Upload + filters */}
       <div className="flex items-end gap-4 flex-wrap">
         <div>
           <label className="block text-muted text-xs mb-1.5">Photo</label>
           <input type="file" accept="image/*" onChange={handleFileChange}
             className="text-sm text-ink file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border file:border-border file:bg-card file:text-ink file:text-xs file:cursor-pointer" />
+        </div>
+        <div>
+          <label className="block text-muted text-xs mb-1.5">Handle material</label>
+          <select value={handleMaterial} onChange={e => setHandleMaterial(e.target.value)}
+            className="px-2 py-1.5 bg-card border border-border rounded-lg text-xs text-ink">
+            <option value="">Any</option>
+            <option value="G-10">G-10</option>
+            <option value="Paracord">Paracord</option>
+            <option value="Burled Carbon Fiber">Burled Carbon Fiber</option>
+            <option value="Desert Ironwood">Desert Ironwood</option>
+            <option value="Desert Ironwood Burl">Desert Ironwood Burl</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-muted text-xs mb-1.5">Culinary?</label>
+          <select value={isCulinary} onChange={e => setIsCulinary(e.target.value)}
+            className="px-2 py-1.5 bg-card border border-border rounded-lg text-xs text-ink">
+            <option value="">Any</option>
+            <option value="true">Yes</option>
+            <option value="false">No</option>
+          </select>
         </div>
         <label className="flex items-center gap-2 cursor-pointer select-none">
           <input type="checkbox" checked={runVision} onChange={e => setRunVision(e.target.checked)}
@@ -663,8 +693,12 @@ function VisionDebug() {
 
       {result && (
         <div className="flex flex-col gap-6">
-          {/* Model info */}
-          <div className="text-muted text-xs">Vision model: <span className="text-ink font-mono">{result.vision_model}</span></div>
+          {/* Pipeline info */}
+          <div className="flex flex-wrap gap-4 text-xs">
+            <div className="text-muted">Vision model: <span className="text-ink font-mono">{result.vision_model}</span></div>
+            <div className="text-muted">Families: <span className="text-ink">{result.families_total - result.families_eliminated} remaining</span> / <span className="text-red-400">{result.families_eliminated} eliminated</span></div>
+            <div className="text-muted">Filters: <span className="text-ink font-mono">{JSON.stringify(result.filters)}</span></div>
+          </div>
 
           {/* User images side by side */}
           <div className="grid grid-cols-2 gap-4">
@@ -688,8 +722,12 @@ function VisionDebug() {
             <div className="grid grid-cols-5 gap-3">
               {result.candidates.map((c, i) => (
                 <div key={i} className="rounded-xl border border-border bg-card p-3">
-                  <div className="text-ink text-xs font-semibold truncate mb-1">{c.name}</div>
-                  <div className="text-muted text-[10px] mb-2">{c.family} · {c.form || '?'}</div>
+                  <div className="text-ink text-xs font-semibold truncate mb-0.5">{c.name}</div>
+                  <div className="text-muted text-[10px]">{c.family} · {c.form || '?'}</div>
+                  <div className="text-muted text-[10px] mb-1">{c.handle_type || '?'} · score: <span className="text-gold">{c.score}</span></div>
+                  {c.reasons.length > 0 && (
+                    <div className="text-[10px] text-gold/70 truncate mb-1">{c.reasons.join(', ')}</div>
+                  )}
                   {c.silhouette_b64 && (
                     <div className="mb-2">
                       <div className="text-muted text-[10px] mb-0.5">Silhouette</div>
@@ -713,7 +751,7 @@ function VisionDebug() {
             </div>
           )}
 
-          {result.vision_parsed && (
+          {result.vision_parsed != null && (
             <div>
               <div className="text-muted text-xs uppercase tracking-wider mb-2">Parsed Response</div>
               <pre className="bg-card border border-border rounded-xl p-4 text-xs text-gold overflow-x-auto whitespace-pre-wrap">{JSON.stringify(result.vision_parsed, null, 2)}</pre>

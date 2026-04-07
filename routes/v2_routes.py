@@ -2248,83 +2248,177 @@ def create_v2_router(
     @router.post("/api/v2/identify/vision-debug")
     async def v2_identify_vision_debug(
         image: UploadFile = File(...),
+        handle_material: Optional[str] = Form(None),
+        handle_color: Optional[str] = Form(None),
+        blade_color: Optional[str] = Form(None),
+        is_culinary: Optional[bool] = Form(None),
+        blade_forms: Optional[str] = Form(None),
+        blade_length_bin: Optional[int] = Form(None),
         run_vision: bool = Form(False),
     ):
-        """Debug endpoint: returns the images sent to the vision model and optionally runs it."""
+        """Debug endpoint: runs the same pipeline as identify/image and shows all inputs/outputs."""
         image_bytes = await image.read()
         image_b64 = base64.b64encode(image_bytes).decode("ascii")
+
+        # Parse blade forms
+        selected_forms: set[str] = set()
+        if blade_forms:
+            selected_forms = {f.strip() for f in blade_forms.split(",") if f.strip()}
 
         # Background removal
         clean_b64 = blade_ai._remove_background(image_b64)
 
-        # Top 5 candidate reference images (one per family, by score)
         with get_conn() as conn:
+            # ── Run the SAME pipeline as identify/image ──
             rows = conn.execute(
                 """
-                SELECT km.id, km.official_name, fam.name AS family_name, frm.name AS form_name,
-                       kmi.image_blob
+                SELECT km.id, km.official_name, km.blade_length, km.model_notes,
+                       bs.name AS blade_steel, bf.name AS blade_finish, ht.name AS handle_type,
+                       kt.name AS knife_type, fam.name AS family_name, frm.name AS form_name,
+                       ks.name AS series_name, c.name AS collaborator_name,
+                       km.family_id,
+                       (CASE WHEN kmi.image_blob IS NOT NULL AND length(kmi.image_blob) > 0 THEN 1 ELSE 0 END) AS has_identifier_image
                 FROM knife_models_v2 km
-                LEFT JOIN knife_families fam ON fam.id = km.family_id
+                LEFT JOIN knife_types kt ON kt.id = km.type_id
                 LEFT JOIN knife_forms frm ON frm.id = km.form_id
+                LEFT JOIN knife_families fam ON fam.id = km.family_id
+                LEFT JOIN knife_series ks ON ks.id = km.series_id
+                LEFT JOIN collaborators c ON c.id = km.collaborator_id
+                LEFT JOIN blade_steels bs ON bs.id = km.steel_id
+                LEFT JOIN blade_finishes bf ON bf.id = km.blade_finish_id
+                LEFT JOIN handle_types ht ON ht.id = km.handle_type_id
                 LEFT JOIN knife_model_images kmi ON kmi.knife_model_id = km.id
-                WHERE kmi.image_blob IS NOT NULL AND length(kmi.image_blob) > 0
                 ORDER BY fam.name, km.official_name
                 """
             ).fetchall()
 
-        # Pick one per family (first 5 families)
-        seen: set[str] = set()
-        candidates = []
-        for r in rows:
-            fam = r["family_name"] or r["official_name"]
-            if fam in seen:
-                continue
-            seen.add(fam)
-            ref_b64 = base64.b64encode(r["image_blob"]).decode("ascii")
-            sil_b64 = blade_ai._load_form_silhouette_b64(r["form_name"])
-            candidates.append({
-                "name": r["official_name"],
-                "family": fam,
-                "form": r["form_name"],
-                "image_b64": ref_b64,
-                "silhouette_b64": sil_b64,
-            })
-            if len(candidates) >= 5:
-                break
+            # Group by family
+            family_models: dict[str, list] = {}
+            for row in rows:
+                fam = row["family_name"] or "(none)"
+                if fam not in family_models:
+                    family_models[fam] = []
+                family_models[fam].append(row)
 
-        # Optionally run the vision model
+            # Stage 2: Family elimination (same logic as identify/image)
+            eliminated_families: set[str] = set()
+            for fam, fam_rows in family_models.items():
+                if is_culinary is not None:
+                    fam_types = {r["knife_type"] for r in fam_rows}
+                    if is_culinary and "Culinary" not in fam_types:
+                        eliminated_families.add(fam)
+                        continue
+                    if not is_culinary and fam_types == {"Culinary"}:
+                        eliminated_families.add(fam)
+                        continue
+                if selected_forms:
+                    fam_forms = {r["form_name"] for r in fam_rows if r["form_name"]}
+                    if fam_forms and not fam_forms.intersection(selected_forms):
+                        eliminated_families.add(fam)
+                        continue
+                if handle_material:
+                    fam_handles = {r["handle_type"] for r in fam_rows if r["handle_type"]}
+                    if fam_handles and handle_material not in fam_handles:
+                        eliminated_families.add(fam)
+                        continue
+
+            # Stage 3: Score remaining models (simplified for debug — just enough to rank)
+            results = []
+            for fam, fam_rows in family_models.items():
+                if fam in eliminated_families:
+                    continue
+                for row in fam_rows:
+                    score = 0
+                    reasons = []
+                    if handle_material and row["handle_type"]:
+                        if handle_material == row["handle_type"]:
+                            score += 20
+                            reasons.append(f"handle: {handle_material}")
+                        else:
+                            score -= 30
+                    if selected_forms and row["form_name"]:
+                        if row["form_name"] in selected_forms:
+                            score += 20
+                            reasons.append(f"form: {row['form_name']}")
+                        else:
+                            score -= 10
+                    results.append({
+                        "id": row["id"],
+                        "name": row["official_name"],
+                        "family": row["family_name"],
+                        "form": row["form_name"],
+                        "handle_type": row["handle_type"],
+                        "score": score,
+                        "reasons": reasons,
+                        "has_image": bool(row["has_identifier_image"]),
+                    })
+
+            results.sort(key=lambda x: (-x["score"], x["name"].lower()))
+
+            # Stage 4: Pick top 5 candidates (one per family) — same as real pipeline
+            seen_families: set[str] = set()
+            candidates = []
+            for r in results:
+                fam = r["family"] or r["name"]
+                if fam in seen_families:
+                    continue
+                seen_families.add(fam)
+                ref_row = conn.execute(
+                    "SELECT image_blob FROM knife_model_images WHERE knife_model_id = ? AND image_blob IS NOT NULL",
+                    (r["id"],),
+                ).fetchone()
+                if ref_row:
+                    ref_b64 = base64.b64encode(ref_row["image_blob"]).decode("ascii")
+                    sil_b64 = blade_ai._load_form_silhouette_b64(r["form"])
+                    candidates.append({
+                        "name": r["name"],
+                        "family": fam,
+                        "form": r["form"],
+                        "handle_type": r["handle_type"],
+                        "score": r["score"],
+                        "reasons": r["reasons"],
+                        "image_b64": ref_b64,
+                        "silhouette_b64": sil_b64,
+                    })
+                if len(candidates) >= 5:
+                    break
+
+        # Optionally run vision
         vision_raw = None
         vision_parsed = None
         if run_vision and candidates:
-            vision_candidates = [
-                {
-                    "name": c["name"],
-                    "form": c["form"],
-                    "reference_image_b64": c["image_b64"],
-                }
+            vision_cands = [
+                {"name": c["name"], "form": c["form"], "reference_image_b64": c["image_b64"]}
                 for c in candidates
             ]
-            vision_raw = blade_ai.ollama_chat(
-                ollama_vision_model,
-                blade_ai.VISION_COMPARE_SYSTEM,
-                "Image 1 is the user's knife photo.\n\nCandidates:\n"
-                + "\n".join(
-                    f"Candidate '{c['name']}' (blade form: {c['form']})"
-                    for c in candidates
-                ),
-                images_b64=[clean_b64] + [c["image_b64"] for c in candidates],
+            vision_results = blade_ai.vision_compare_candidates(
+                ollama_vision_model, image_b64, vision_cands,
             )
-            vision_parsed = blade_ai.try_parse_json_response(vision_raw)
+            vision_raw = str(vision_results)
+            vision_parsed = vision_results
 
         return {
             "original_image": image_b64,
             "clean_image": clean_b64,
             "vision_model": ollama_vision_model,
+            "filters": {
+                "handle_material": handle_material,
+                "handle_color": handle_color,
+                "blade_color": blade_color,
+                "is_culinary": is_culinary,
+                "blade_forms": list(selected_forms) if selected_forms else None,
+                "blade_length_bin": blade_length_bin,
+            },
+            "families_total": len(family_models),
+            "families_eliminated": len(eliminated_families),
             "candidates": [
                 {
                     "name": c["name"],
                     "family": c["family"],
                     "form": c["form"],
+                    "handle_type": c["handle_type"],
+                    "score": c["score"],
+                    "reasons": c["reasons"],
                     "image_b64": c["image_b64"],
                     "silhouette_b64": c["silhouette_b64"],
                 }
