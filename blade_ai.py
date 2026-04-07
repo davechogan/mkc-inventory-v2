@@ -296,12 +296,17 @@ def ollama_chat(
         ],
         "stream": False,
     }
+    import logging
+    _log = logging.getLogger("blade_ai")
+    _log.info(f"ollama_chat: model={model}, images={len(images_b64) if images_b64 else 0}, prompt_len={len(user_text)}")
     with httpx.Client(timeout=timeout) as client:
         r = client.post(f"{OLLAMA_HOST}/api/chat", json=payload)
         r.raise_for_status()
         data = r.json()
     msg = data.get("message") or {}
-    return (msg.get("content") or data.get("response") or "").strip()
+    result = (msg.get("content") or data.get("response") or "").strip()
+    _log.info(f"ollama_chat: model={model}, response_len={len(result)}, response_preview={result[:200]}")
+    return result
 
 
 def _extract_blade_subcontour(full_contour: Any) -> Any:
