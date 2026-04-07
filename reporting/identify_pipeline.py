@@ -256,12 +256,12 @@ def _gate_by_colorway(
             params.append(inputs.blade_color)
 
         sql = f"""
-            SELECT COUNT(*) FROM model_colorways mc
+            SELECT COUNT(*) AS cnt FROM model_colorways mc
             LEFT JOIN handle_colors hc ON hc.id = mc.handle_color_id
             LEFT JOIN blade_colors bc ON bc.id = mc.blade_color_id
             WHERE {' AND '.join(conditions)}
         """
-        count = conn.execute(sql, params).fetchone()[0]
+        count = conn.execute(sql, params).fetchone()["cnt"]
 
         if count == 0:
             eliminated.add(fam)
