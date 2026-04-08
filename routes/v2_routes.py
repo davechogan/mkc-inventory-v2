@@ -353,6 +353,7 @@ def create_v2_router(
                        kt.name AS knife_type, fam.name AS family_name, frm.name AS form_name,
                        ks.name AS series_name, c.name AS collaborator_name,
                        bs.name AS blade_steel, bf.name AS blade_finish, ht.name AS handle_type,
+                       bc.name AS blade_color,
                        km.blade_length, km.msrp,
                        km.official_product_url, km.model_notes,
                        (SELECT COUNT(*) FROM inventory_items_v2 WHERE knife_model_id = km.id) AS in_inventory_count,
@@ -372,6 +373,7 @@ def create_v2_router(
                 LEFT JOIN blade_steels bs ON bs.id = km.steel_id
                 LEFT JOIN blade_finishes bf ON bf.id = km.blade_finish_id
                 LEFT JOIN handle_types ht ON ht.id = km.handle_type_id
+                LEFT JOIN blade_colors bc ON bc.id = km.blade_color_id
                 WHERE {where_sql}
                 ORDER BY fam.name COLLATE NOCASE, km.sortable_name COLLATE NOCASE
                 """,

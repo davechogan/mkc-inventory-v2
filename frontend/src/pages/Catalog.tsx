@@ -15,6 +15,7 @@ interface CatalogModel {
   collaborator_name: string | null;
   blade_steel: string | null;
   blade_finish: string | null;
+  blade_color: string | null;
   handle_type: string | null;
   blade_length: number | null;
   msrp: number | null;
@@ -791,6 +792,7 @@ export default function Catalog() {
     { key: 'handle_type', label: 'Handle', default: true },
     { key: 'blade_steel', label: 'Steel', default: true },
     { key: 'blade_finish', label: 'Finish', default: true },
+    { key: 'blade_color', label: 'Blade Color', default: false },
     { key: 'blade_length', label: 'Length', default: true },
     { key: 'series_name', label: 'Series', default: false },
     { key: 'collaborator_name', label: 'Collab', default: false },
