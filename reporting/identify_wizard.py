@@ -779,6 +779,26 @@ def _format_question(q: WizardQuestion, suggestion: Optional[Any] = None) -> dic
     }
 
 
+_DIRECT_MATCH_SYSTEM = """You are matching a user's knife photo against candidate reference photos.
+
+Image 1 is the user's knife. The remaining images are reference photos of candidate models, one per candidate.
+
+For each candidate, compare the user's photo directly against the candidate's reference photo. Focus on:
+1. Overall shape and proportions — does the knife/tool look the same?
+2. Blade shape — similar profile, similar size relative to handle?
+3. Handle shape and style — similar proportions and features?
+
+Do NOT focus on color or finish — the user may have a different colorway of the same model.
+
+Rate each:
+  STRONG — clearly the same model (shape and proportions match)
+  POSSIBLE — similar but not certain
+  UNLIKELY — clearly different shape or proportions
+
+Return VALID JSON ONLY (no markdown):
+{"comparisons": [{"model": "<exact model name>", "match": "STRONG|POSSIBLE|UNLIKELY", "reason": "<one sentence>"}]}"""
+
+
 def _rank_candidates_with_vision(
     session: WizardSession,
     candidates: list[dict],
@@ -786,15 +806,19 @@ def _rank_candidates_with_vision(
     vision_model: str,
     vision_fn: Any,
 ) -> list[dict]:
-    """Run vision comparison on final candidates and add match ranking."""
+    """Run direct image comparison on final candidates."""
     if not session.image_b64 or not vision_fn or not candidates:
         return candidates
 
     try:
-        from blade_ai import vision_compare_candidates, _remove_background
+        from blade_ai import ollama_chat, _remove_background
 
-        # Build candidate list for vision comparison (max 5)
-        vision_cands = []
+        # Build image list: user photo + one reference per candidate
+        clean_image = session.clean_image_b64 or session.image_b64
+        images = [clean_image]
+        candidate_lines = []
+        img_num = 2
+
         for c in candidates[:5]:
             cw_id = c.get("best_colorway_id")
             if not cw_id:
@@ -805,21 +829,24 @@ def _rank_candidates_with_vision(
             ).fetchone()
             if not row:
                 continue
-            vision_cands.append({
-                "name": c["name"],
-                "form": c.get("form", ""),
-                "reference_image_b64": base64.b64encode(row["image_blob"]).decode("ascii"),
-            })
+            images.append(base64.b64encode(row["image_blob"]).decode("ascii"))
+            candidate_lines.append(f"Candidate '{c['name']}': Image {img_num}")
+            img_num += 1
 
-        if not vision_cands:
+        if not candidate_lines:
             return candidates
 
-        _log.info(f"Vision ranking {len(vision_cands)} final candidates")
-        results = vision_compare_candidates(
-            vision_model,
-            session.clean_image_b64 or session.image_b64,
-            vision_cands,
+        user_text = (
+            "Image 1 is the user's knife/tool.\n\n"
+            "Candidates:\n" + "\n".join(candidate_lines)
         )
+
+        _log.info(f"Vision ranking {len(candidate_lines)} final candidates")
+        raw = ollama_chat(vision_model, _DIRECT_MATCH_SYSTEM, user_text, images_b64=images)
+
+        from blade_ai import try_parse_json_response
+        parsed = try_parse_json_response(raw)
+        results = parsed.get("comparisons", []) if isinstance(parsed, dict) else []
 
         # Build lookup
         vision_map = {vr.get("model", ""): vr for vr in (results or [])}
