@@ -1,14 +1,14 @@
-"""Interactive knife identification wizard — adaptive decision-tree approach.
+"""Interactive knife identification wizard — pure decision-tree approach.
 
 Server-driven wizard that narrows 87 models to a handful through step-by-step
-questions. The vision model suggests answers; the human confirms.
+questions answered by the user. No AI vision — humans are better at visual
+comparison than current vision models.
 
 See: artifacts/plans/knife_vision_identification_design.md
 """
 
 from __future__ import annotations
 
-import base64
 import json
 import logging
 import math
@@ -20,7 +20,7 @@ from typing import Any, Callable, Optional
 
 _log = logging.getLogger(__name__)
 
-# Blade length bins (same as existing pipeline)
+# Blade length bins
 LENGTH_BINS: dict[int, tuple[float, float]] = {
     1: (0.0, 3.0),
     2: (3.0, 4.5),
@@ -28,19 +28,10 @@ LENGTH_BINS: dict[int, tuple[float, float]] = {
     4: (7.0, 20.0),
 }
 
-LENGTH_BIN_LABELS: dict[int, str] = {
-    1: 'Under 3"',
-    2: '3" to 4.5"',
-    3: '4.5" to 7"',
-    4: '7" and above',
-}
-
 # Session expiry (seconds)
 SESSION_TTL = 1800  # 30 minutes
 
 # When to stop asking questions and show candidates
-MAX_CANDIDATES_DONE = 8
-MAX_FAMILIES_DONE = 5
 MAX_QUESTIONS = 8
 
 # ── Session storage ──
@@ -52,15 +43,10 @@ _sessions: dict[str, WizardSession] = {}
 class WizardSession:
     session_id: str
     created_at: float
-    image_b64: Optional[str]
-    clean_image_b64: Optional[str]
     all_models: list[dict]
     candidate_ids: set[int]
     answers: dict[str, Any] = field(default_factory=dict)
     history: list[tuple[str, Any, set[int]]] = field(default_factory=list)
-    vision_cache: dict[str, Any] = field(default_factory=dict)
-    auto_gates: list[dict] = field(default_factory=list)
-    _conn: Optional[sqlite3.Connection] = field(default=None, repr=False)
 
 
 def _cleanup_expired():
@@ -76,7 +62,7 @@ def get_session(session_id: str) -> Optional[WizardSession]:
     return _sessions.get(session_id)
 
 
-# ── Model loading (copied from identify_pipeline, self-contained) ──
+# ── Model loading ──
 
 def _load_models(conn: sqlite3.Connection) -> list[dict]:
     rows = conn.execute("""
@@ -107,7 +93,6 @@ def _load_models(conn: sqlite3.Connection) -> list[dict]:
     models = []
     for r in rows:
         m = dict(r)
-        # Pre-parse the profile JSON
         if m.get("observable_profile_json"):
             try:
                 m["_profile"] = json.loads(m["observable_profile_json"])
@@ -159,30 +144,7 @@ def _find_best_colorway_id(
     return None
 
 
-# ── Question definitions ──
-
-@dataclass
-class WizardQuestion:
-    key: str
-    display_text: str
-    question_type: str  # "boolean", "single_choice", "multi_choice"
-    vision_prompt: Optional[str]
-    vision_reliability: float  # 0.0–1.0 from empirical testing
-    options: Optional[list[dict]] = None  # for choice types
-    visual_aid: Optional[str] = None  # "blade_form_silhouettes", etc.
-    auto_gate: bool = False  # True = apply without user confirmation if 100% reliable
-
-
-def _get_profile(models: list[dict], model_id: int) -> dict:
-    """Get the parsed vision profile for a model."""
-    for m in models:
-        if m["id"] == model_id:
-            return m.get("_profile", {})
-    return {}
-
-
 # ── Filter functions ──
-# Each takes (candidate_ids, answer, all_models, conn) and returns new candidate_ids
 
 def _filter_hatchet(candidate_ids: set[int], answer: bool, models: list[dict],
                     conn: Optional[sqlite3.Connection] = None) -> set[int]:
@@ -211,12 +173,10 @@ def _filter_blade_wider(candidate_ids: set[int], answer: bool, models: list[dict
 def _filter_paracord(candidate_ids: set[int], answer: bool, models: list[dict],
                      conn: Optional[sqlite3.Connection] = None) -> set[int]:
     if answer:
-        # Keep only models with paracord handle type or profile
         return {m["id"] for m in models if m["id"] in candidate_ids
                 and (m.get("handle_type") == "Paracord"
                      or m.get("_profile", {}).get("handle_type_visual") == "paracord")}
     else:
-        # User does NOT have paracord — eliminate every paracord model
         return {m["id"] for m in models if m["id"] in candidate_ids
                 and m.get("handle_type") != "Paracord"
                 and m.get("_profile", {}).get("handle_type_visual") != "paracord"}
@@ -224,10 +184,10 @@ def _filter_paracord(candidate_ids: set[int], answer: bool, models: list[dict],
 
 def _filter_kitchen(candidate_ids: set[int], answer: bool, models: list[dict],
                     conn: Optional[sqlite3.Connection] = None) -> set[int]:
-    if answer:  # user says kitchen
+    if answer:
         return {m["id"] for m in models if m["id"] in candidate_ids
                 and m.get("knife_type") == "Culinary"}
-    else:  # user says field
+    else:
         return {m["id"] for m in models if m["id"] in candidate_ids
                 and m.get("knife_type") != "Culinary"}
 
@@ -244,22 +204,9 @@ def _filter_finger_ring(candidate_ids: set[int], answer: bool, models: list[dict
 
 def _filter_blade_color(candidate_ids: set[int], answer: str, models: list[dict],
                         conn: Optional[sqlite3.Connection] = None) -> set[int]:
-    """Filter by blade color using colorway data + model profiles.
-
-    Loose: NULL blade_color in colorways means 'don't exclude'.
-    Only distinctive colors (Red, Coyote) do hard elimination.
-    """
-    if not conn or not answer:
+    if not answer:
         return candidate_ids
 
-    color_map = {
-        "Silver": "steel", "Black": "black", "Red": "red",
-        "Coyote": "coyote", "Distressed Gray": "distressed gray",
-        "Damascus Wood Grain": "damascus wood grain",
-    }
-    db_color = color_map.get(answer, answer.lower())
-
-    # Map user's color choice to model-level blade_color names and profile values
     _answer_to_db: dict[str, set[str]] = {
         "Silver": {"steel"},
         "Black": {"black"},
@@ -279,14 +226,10 @@ def _filter_blade_color(candidate_ids: set[int], answer: str, models: list[dict]
     for m in models:
         if m["id"] not in candidate_ids:
             continue
-
-        # 1. Check model-level blade_color (most reliable — just backfilled)
         model_bc = (m.get("blade_color") or "").lower()
         if model_bc and model_bc in db_matches:
             keep.add(m["id"])
             continue
-
-        # 2. For tactical models without model-level color, check colorways
         if not model_bc and conn:
             row = conn.execute(
                 "SELECT COUNT(*) AS cnt FROM model_colorways mc "
@@ -297,28 +240,21 @@ def _filter_blade_color(candidate_ids: set[int], answer: str, models: list[dict]
             if row and row["cnt"] > 0:
                 keep.add(m["id"])
                 continue
-
-        # 3. Fallback to vision profile
         profile_color = m.get("_profile", {}).get("blade_color_primary", "")
         if profile_color in profile_matches:
             keep.add(m["id"])
-
     return keep
 
 
 def _filter_handle_color(candidate_ids: set[int], answer: str, models: list[dict],
                          conn: Optional[sqlite3.Connection] = None) -> set[int]:
-    """Filter by handle color using colorways. Loose match — substring matching."""
     if not conn or not answer:
         return candidate_ids
-
     keep = set()
     answer_lower = answer.lower()
-
     for m in models:
         if m["id"] not in candidate_ids:
             continue
-        # Check if any colorway has a matching handle color
         rows = conn.execute(
             "SELECT hc.name FROM model_colorways mc "
             "LEFT JOIN handle_colors hc ON hc.id = mc.handle_color_id "
@@ -327,63 +263,41 @@ def _filter_handle_color(candidate_ids: set[int], answer: str, models: list[dict
         ).fetchall()
         for r in rows:
             hc_name = (r["name"] or "").lower()
-            # Loose match: "red" matches "red/black", "black/red", etc.
             if answer_lower in hc_name or hc_name in answer_lower:
                 keep.add(m["id"])
                 break
-            # Also match "orange" to "blaze orange", "orange/black"
             if answer_lower.split("/")[0] in hc_name or answer_lower.split("/")[-1] in hc_name:
                 keep.add(m["id"])
                 break
-        else:
-            # No matching colorway — eliminate.
-            # If the model has colorways and none match, it's not this color.
-            pass
-
     return keep
 
 
 def _filter_handle_material(candidate_ids: set[int], answer: str, models: list[dict],
                             conn: Optional[sqlite3.Connection] = None) -> set[int]:
-    """Filter by handle material.
-
-    Groups related materials (all Carbon Fiber variants together, all Ironwood together).
-    Then filters at model level for distinctive groups, family level for common ones.
-    """
     answer_lower = answer.lower()
-
-    # Material groups — user picks a group, matches all variants
     _MATERIAL_GROUPS: dict[str, set[str]] = {
         "carbon fiber": {"carbon fiber", "burled carbon fiber", "black burl carbon fiber",
                          "marbled carbon fiber"},
         "wood": {"desert ironwood", "desert ironwood burl"},
     }
-
-    # Expand answer to a set of matching types
     match_set = _MATERIAL_GROUPS.get(answer_lower, {answer_lower})
-
-    # Also check if any group contains the answer
     for group_key, group_vals in _MATERIAL_GROUPS.items():
         if answer_lower in group_vals:
             match_set = group_vals
             break
 
     def _model_matches(m: dict) -> bool:
-        ht = (m.get("handle_type") or "").lower()
-        return ht in match_set
+        return (m.get("handle_type") or "").lower() in match_set
 
-    # If the match set is distinctive (not G-10, not Paracord), filter at model level
     common_materials = {"g-10", "paracord"}
     if not (match_set & common_materials):
         return {m["id"] for m in models if m["id"] in candidate_ids and _model_matches(m)}
     else:
-        # Common materials — filter at family level
         by_family: dict[str, list[dict]] = {}
         for m in models:
             if m["id"] in candidate_ids:
                 fam = m.get("family_name") or m["official_name"]
                 by_family.setdefault(fam, []).append(m)
-
         keep = set()
         for fam, members in by_family.items():
             if any(_model_matches(m) for m in members):
@@ -393,7 +307,6 @@ def _filter_handle_material(candidate_ids: set[int], answer: str, models: list[d
 
 def _filter_blade_length(candidate_ids: set[int], answer: int, models: list[dict],
                          conn: Optional[sqlite3.Connection] = None) -> set[int]:
-    """Filter by blade length bin with 0.5" margin of error at boundaries."""
     bin_range = LENGTH_BINS.get(answer)
     if not bin_range:
         return candidate_ids
@@ -408,7 +321,6 @@ def _filter_blade_length(candidate_ids: set[int], answer: int, models: list[dict
 
 def _filter_blade_form(candidate_ids: set[int], answer: list[str], models: list[dict],
                        conn: Optional[sqlite3.Connection] = None) -> set[int]:
-    """Filter by blade form. Multi-select — keep models matching any selected form."""
     if not answer:
         return candidate_ids
     forms_lower = {f.lower() for f in answer}
@@ -422,10 +334,8 @@ def _splitting_power_boolean(key: str, candidate_ids: set[int], models: list[dic
                              profile_field: Optional[str] = None,
                              catalog_field: Optional[str] = None,
                              catalog_value: Optional[str] = None) -> float:
-    """Compute splitting power for a boolean question using Gini impurity reduction."""
     if len(candidate_ids) <= 1:
         return 0.0
-
     yes_count = 0
     no_count = 0
     for m in models:
@@ -440,37 +350,27 @@ def _splitting_power_boolean(key: str, candidate_ids: set[int], models: list[dic
             yes_count += 1
         else:
             no_count += 1
-
     total = yes_count + no_count
     if total == 0 or yes_count == 0 or no_count == 0:
         return 0.0
-
-    # Information gain — best when close to 50/50 split
     p_yes = yes_count / total
     p_no = no_count / total
-    entropy = -(p_yes * math.log2(p_yes) + p_no * math.log2(p_no))
-    return entropy
+    return -(p_yes * math.log2(p_yes) + p_no * math.log2(p_no))
 
 
 def _splitting_power_categorical(key: str, candidate_ids: set[int],
-                                 models: list[dict],
-                                 catalog_field: str) -> float:
-    """Compute splitting power for a categorical question."""
+                                 models: list[dict], catalog_field: str) -> float:
     if len(candidate_ids) <= 1:
         return 0.0
-
     counts: dict[str, int] = {}
     for m in models:
         if m["id"] not in candidate_ids:
             continue
         val = m.get(catalog_field) or "unknown"
         counts[val] = counts.get(val, 0) + 1
-
     total = sum(counts.values())
     if total == 0 or len(counts) <= 1:
         return 0.0
-
-    # Entropy
     entropy = 0.0
     for cnt in counts.values():
         p = cnt / total
@@ -479,54 +379,37 @@ def _splitting_power_categorical(key: str, candidate_ids: set[int],
     return entropy
 
 
-# ── Question registry ──
+# ── Question definitions ──
+
+@dataclass
+class WizardQuestion:
+    key: str
+    display_text: str
+    question_type: str  # "boolean", "single_choice", "multi_choice"
+    options: Optional[list[dict]] = None
+    visual_aid: Optional[str] = None
+
 
 QUESTIONS: list[WizardQuestion] = [
     WizardQuestion(
         key="is_hatchet",
         display_text="Is this a hatchet or axe?",
         question_type="boolean",
-        vision_prompt=(
-            "Look at this knife or tool. Is it a hatchet or axe shape — "
-            "meaning it has a wide chopping head mounted on a handle below? "
-            'Answer ONLY "yes" or "no".'
-        ),
-        vision_reliability=1.0,
-        auto_gate=True,
     ),
     WizardQuestion(
         key="blade_wider_than_handle",
-        display_text="Is the blade wider/taller than the handle?",
+        display_text="Is the blade wider/taller than the handle (like a cleaver)?",
         question_type="boolean",
-        vision_prompt=(
-            "Look at this knife. Is the blade clearly wider (taller) than the handle? "
-            "A cleaver has a blade much taller than its handle. Most hunting knives do not. "
-            'Answer ONLY "yes" or "no".'
-        ),
-        vision_reliability=1.0,
-        auto_gate=True,
     ),
     WizardQuestion(
         key="paracord_handle",
         display_text="Is the handle wrapped in paracord or cord?",
         question_type="boolean",
-        vision_prompt=(
-            "Look at the handle of this knife. Is the handle wrapped in paracord or cord? "
-            "Paracord handles have a visible woven/wrapped texture. Solid handles (G-10, "
-            'wood, micarta) are smooth or textured but not wrapped. Answer ONLY "yes" or "no".'
-        ),
-        vision_reliability=1.0,
     ),
     WizardQuestion(
         key="kitchen_or_field",
         display_text="Is this a kitchen/culinary knife or a field/hunting knife?",
         question_type="single_choice",
-        vision_prompt=(
-            "Is this a kitchen/culinary knife (chef knife, paring knife, butcher knife, "
-            "santoku, cleaver — designed for food preparation) or a field/hunting/tactical "
-            'knife? Answer ONLY "kitchen" or "field".'
-        ),
-        vision_reliability=0.8,
         options=[
             {"value": True, "label": "Kitchen / Culinary"},
             {"value": False, "label": "Field / Hunting / Tactical"},
@@ -536,20 +419,11 @@ QUESTIONS: list[WizardQuestion] = [
         key="finger_ring",
         display_text="Is there a finger ring at the front of the handle?",
         question_type="boolean",
-        vision_prompt=(
-            "Look at this knife where the blade meets the handle. "
-            "Is there a finger ring or circular loop guard at the front of the handle "
-            "(a ring you could put your finger through)? "
-            'Answer ONLY "yes" or "no".'
-        ),
-        vision_reliability=0.94,
     ),
     WizardQuestion(
         key="blade_color",
         display_text="What color is the blade?",
         question_type="single_choice",
-        vision_prompt=None,  # User picks — no vision suggestion
-        vision_reliability=0.0,
         options=[
             {"value": "Silver", "label": "Silver / Satin / Stonewashed", "color": "#C0C0C0"},
             {"value": "Black", "label": "Black / Dark (PVD, Cerakote)", "color": "#2a2a2a"},
@@ -561,8 +435,6 @@ QUESTIONS: list[WizardQuestion] = [
         key="handle_color",
         display_text="What is the primary handle color?",
         question_type="single_choice",
-        vision_prompt=None,  # User picks
-        vision_reliability=0.0,
         options=None,  # Populated from DB at runtime
         visual_aid="color_swatches",
     ),
@@ -570,8 +442,6 @@ QUESTIONS: list[WizardQuestion] = [
         key="handle_material",
         display_text="What is the handle material?",
         question_type="single_choice",
-        vision_prompt=None,
-        vision_reliability=0.0,
         options=[
             {"value": "G-10", "label": "G-10 (solid, textured scales)"},
             {"value": "Paracord", "label": "Paracord (cord-wrapped)"},
@@ -583,8 +453,6 @@ QUESTIONS: list[WizardQuestion] = [
         key="blade_length_bin",
         display_text="Approximately how long is the blade?",
         question_type="single_choice",
-        vision_prompt=None,
-        vision_reliability=0.0,
         options=[
             {"value": 1, "label": 'Under 3"'},
             {"value": 2, "label": '3" to 4.5"'},
@@ -596,14 +464,11 @@ QUESTIONS: list[WizardQuestion] = [
         key="blade_form",
         display_text="Which blade shape(s) match your knife?",
         question_type="multi_choice",
-        vision_prompt=None,  # Vision suggests from silhouettes
-        vision_reliability=0.0,
         options=None,  # Populated from DB at runtime
         visual_aid="blade_form_silhouettes",
     ),
 ]
 
-# Map question key to filter function
 _FILTER_FNS: dict[str, Callable] = {
     "is_hatchet": _filter_hatchet,
     "blade_wider_than_handle": _filter_blade_wider,
@@ -620,35 +485,23 @@ _FILTER_FNS: dict[str, Callable] = {
 
 def _compute_splitting_power(q: WizardQuestion, candidate_ids: set[int],
                              models: list[dict]) -> float:
-    """Compute how well a question splits the current candidate set."""
     if q.key == "is_hatchet":
-        return _splitting_power_boolean(q.key, candidate_ids, models,
-                                        profile_field="is_hatchet")
+        return _splitting_power_boolean(q.key, candidate_ids, models, profile_field="is_hatchet")
     elif q.key == "blade_wider_than_handle":
-        return _splitting_power_boolean(q.key, candidate_ids, models,
-                                        profile_field="blade_wider_than_handle")
+        return _splitting_power_boolean(q.key, candidate_ids, models, profile_field="blade_wider_than_handle")
     elif q.key == "paracord_handle":
-        return _splitting_power_boolean(q.key, candidate_ids, models,
-                                        catalog_field="handle_type",
-                                        catalog_value="Paracord")
+        return _splitting_power_boolean(q.key, candidate_ids, models, catalog_field="handle_type", catalog_value="Paracord")
     elif q.key == "kitchen_or_field":
-        return _splitting_power_boolean(q.key, candidate_ids, models,
-                                        catalog_field="knife_type",
-                                        catalog_value="Culinary")
+        return _splitting_power_boolean(q.key, candidate_ids, models, catalog_field="knife_type", catalog_value="Culinary")
     elif q.key == "finger_ring":
-        return _splitting_power_boolean(q.key, candidate_ids, models,
-                                        profile_field="finger_ring_presence")
+        return _splitting_power_boolean(q.key, candidate_ids, models, profile_field="finger_ring_presence")
     elif q.key == "blade_form":
-        return _splitting_power_categorical(q.key, candidate_ids, models,
-                                           catalog_field="form_name")
+        return _splitting_power_categorical(q.key, candidate_ids, models, catalog_field="form_name")
     elif q.key == "blade_length_bin":
-        return _splitting_power_categorical(q.key, candidate_ids, models,
-                                           catalog_field="blade_length")
+        return _splitting_power_categorical(q.key, candidate_ids, models, catalog_field="blade_length")
     elif q.key == "handle_material":
-        return _splitting_power_categorical(q.key, candidate_ids, models,
-                                           catalog_field="handle_type")
+        return _splitting_power_categorical(q.key, candidate_ids, models, catalog_field="handle_type")
     elif q.key == "handle_color":
-        # Can't easily compute from catalog — treat as moderate priority
         return 0.5 if len(candidate_ids) > 1 else 0.0
     elif q.key == "blade_color":
         return 0.5 if len(candidate_ids) > 1 else 0.0
@@ -656,58 +509,22 @@ def _compute_splitting_power(q: WizardQuestion, candidate_ids: set[int],
 
 
 def _pick_next_question(session: WizardSession) -> Optional[WizardQuestion]:
-    """Choose the next question that best splits the current candidate set."""
     answered_keys = set(session.answers.keys())
-
     best_q = None
     best_power = -1.0
-
     for q in QUESTIONS:
         if q.key in answered_keys:
             continue
-        if q.auto_gate and session.image_b64:
-            continue  # Auto-gates already applied at session start (image present)
-
         power = _compute_splitting_power(q, session.candidate_ids, session.all_models)
         if power > best_power:
             best_power = power
             best_q = q
-
     if best_q and best_power > 0.01:
         return best_q
     return None
 
 
-def _get_vision_suggestion(
-    session: WizardSession, question: WizardQuestion,
-    vision_model: str, vision_fn: Any,
-) -> Optional[Any]:
-    """Get the vision model's suggestion for a question."""
-    if not question.vision_prompt or not session.image_b64 or not vision_fn:
-        return None
-
-    # Check cache
-    if question.key in session.vision_cache:
-        return session.vision_cache[question.key]
-
-    raw = vision_fn(vision_model, "", question.vision_prompt,
-                    images_b64=[session.clean_image_b64 or session.image_b64])
-
-    suggestion = None
-    raw_lower = raw.lower().strip()[:30] if raw else ""
-
-    if question.question_type == "boolean":
-        suggestion = "yes" in raw_lower[:15]
-    elif question.key == "kitchen_or_field":
-        suggestion = "kitchen" in raw_lower[:20]
-
-    session.vision_cache[question.key] = suggestion
-    _log.info(f"Vision suggestion for {question.key}: {suggestion} (raw: {raw_lower})")
-    return suggestion
-
-
 def _remaining_families(session: WizardSession) -> set[str]:
-    """Get the set of remaining family names."""
     fams = set()
     for m in session.all_models:
         if m["id"] in session.candidate_ids:
@@ -716,172 +533,48 @@ def _remaining_families(session: WizardSession) -> set[str]:
 
 
 def _is_done(session: WizardSession) -> bool:
-    """Check if the wizard should stop and show candidates.
-
-    We stop when:
-    - Only 1 candidate remains (perfect match)
-    - Max questions answered (fatigue limit)
-    - No remaining question can split the candidates further
-
-    We do NOT stop just because candidates ≤ 8 — if a question can still
-    meaningfully narrow the set, keep asking. The user experience of
-    answering one more question to go from 4 → 1 is better than showing 4.
-    """
     n_candidates = len(session.candidate_ids)
-    # Count only user-answered questions, not auto-gates
-    auto_gate_keys = {g["question"] for g in session.auto_gates}
-    n_user_answered = sum(1 for k in session.answers if k not in auto_gate_keys)
+    n_answered = len(session.answers)
 
     if n_candidates <= 1:
         return True
-    # Small enough to show — user picks visually faster than answering more questions
     if n_candidates <= 3:
         return True
-    if n_user_answered >= MAX_QUESTIONS:
+    if n_answered >= MAX_QUESTIONS:
         return True
 
-    # Check if any unanswered question can split the remaining candidates
     answered_keys = set(session.answers.keys())
     for q in QUESTIONS:
         if q.key in answered_keys:
             continue
-        if q.auto_gate and session.image_b64:
-            continue
         power = _compute_splitting_power(q, session.candidate_ids, session.all_models)
         if power > 0.01:
-            return False  # At least one useful question remains
-
-    return True  # No useful questions left
+            return False
+    return True
 
 
 def _populate_dynamic_options(conn: sqlite3.Connection):
-    """Load dynamic option lists from the DB into question definitions."""
     for q in QUESTIONS:
         if q.key == "handle_color" and q.options is None:
             rows = conn.execute("SELECT id, name FROM handle_colors ORDER BY name").fetchall()
             q.options = [{"value": r["name"], "label": r["name"]} for r in rows]
-        # handle_material has hardcoded grouped options — don't overwrite
         elif q.key == "blade_form" and q.options is None:
             rows = conn.execute("SELECT id, name FROM knife_forms ORDER BY name").fetchall()
             q.options = [{"value": r["name"], "label": r["name"]} for r in rows]
 
 
-def _format_question(q: WizardQuestion, suggestion: Optional[Any] = None) -> dict:
-    """Format a question for the API response."""
+def _format_question(q: WizardQuestion) -> dict:
     return {
         "key": q.key,
         "display_text": q.display_text,
         "type": q.question_type,
         "options": q.options,
         "visual_aid": q.visual_aid,
-        "vision_suggestion": suggestion,
-        "vision_reliability": q.vision_reliability,
     }
 
 
-_DIRECT_MATCH_SYSTEM = """You are matching a user's knife/tool photo against candidate reference photos.
-
-Image 1 is the user's knife/tool. The remaining images are labeled reference photos.
-
-Look at Image 1 carefully. Then look at each candidate reference photo. Which candidate's reference photo shows the SAME knife/tool as Image 1? Focus on overall shape and proportions, not color.
-
-Return VALID JSON ONLY (no markdown):
-{"best_match": "<exact candidate name>", "reason": "<one sentence explaining why>"}"""
-
-
-def _rank_candidates_with_vision(
-    session: WizardSession,
-    candidates: list[dict],
-    conn: sqlite3.Connection,
-    vision_model: str,
-    vision_fn: Any,
-) -> list[dict]:
-    """Run direct image comparison on final candidates."""
-    if not session.image_b64 or not vision_fn or not candidates:
-        return candidates
-
-    try:
-        from blade_ai import ollama_chat, _remove_background
-
-        # Build image list: user photo + one reference per candidate
-        clean_image = session.clean_image_b64 or session.image_b64
-        import random
-
-        # Randomize candidate order to combat positional bias
-        vision_entries = []  # (candidate_dict, image_b64)
-        for c in candidates[:5]:
-            cw_id = c.get("best_colorway_id")
-            if not cw_id:
-                continue
-            row = conn.execute(
-                "SELECT image_blob FROM model_colorways WHERE id = ? "
-                "AND image_blob IS NOT NULL", (cw_id,)
-            ).fetchone()
-            if not row:
-                continue
-            vision_entries.append((c, base64.b64encode(row["image_blob"]).decode("ascii")))
-
-        if not vision_entries:
-            return candidates
-
-        random.shuffle(vision_entries)
-
-        images = [clean_image]
-        candidate_lines = []
-        img_num = 2
-        for c, img_b64 in vision_entries:
-            images.append(img_b64)
-            candidate_lines.append(f"'{c['name']}' is Image {img_num}")
-            img_num += 1
-
-        user_text = (
-            "Image 1 is the user's knife/tool.\n\n"
-            + "\n".join(candidate_lines)
-            + "\n\nWhich candidate is the same knife/tool as Image 1?"
-        )
-
-        _log.info(f"Vision ranking {len(candidate_lines)} final candidates")
-        raw = ollama_chat(vision_model, _DIRECT_MATCH_SYSTEM, user_text, images_b64=images)
-
-        from blade_ai import try_parse_json_response
-        parsed = try_parse_json_response(raw)
-
-        # Parse the best_match response
-        best_match_name = None
-        reason = ""
-        if isinstance(parsed, dict):
-            best_match_name = parsed.get("best_match", "")
-            reason = parsed.get("reason", "")
-
-        _log.info(f"Vision best match: {best_match_name} — {reason}")
-
-        # Mark the best match as STRONG, others as UNLIKELY
-        for c in candidates:
-            if best_match_name and best_match_name.lower() in c["name"].lower():
-                c["vision_match"] = "STRONG"
-                c["vision_reason"] = reason
-            elif best_match_name:
-                c["vision_match"] = "UNLIKELY"
-                c["vision_reason"] = ""
-
-    except Exception as e:
-        _log.warning(f"Vision ranking failed: {e}")
-
-    # Sort: STRONG first, then others
-    rank_order = {"STRONG": 0, "POSSIBLE": 1, "UNLIKELY": 2}
-    candidates.sort(key=lambda c: (
-        rank_order.get(c.get("vision_match", ""), 3),
-        c.get("family") or "",
-        c["name"],
-    ))
-    return candidates
-
-
 def _format_candidates(session: WizardSession, conn: sqlite3.Connection,
-                       handle_color: Optional[str] = None,
-                       vision_model: str = "",
-                       vision_fn: Any = None) -> list[dict]:
-    """Format remaining candidates for the final display."""
+                       handle_color: Optional[str] = None) -> list[dict]:
     candidates = []
     for m in session.all_models:
         if m["id"] not in session.candidate_ids:
@@ -900,31 +593,14 @@ def _format_candidates(session: WizardSession, conn: sqlite3.Connection,
             "best_colorway_id": cw_id,
             "has_image": bool(m.get("has_image")),
         })
-
-    # Run vision ranking if we have an image
-    if session.image_b64 and vision_fn and vision_model:
-        candidates = _rank_candidates_with_vision(
-            session, candidates, conn, vision_model, vision_fn,
-        )
-    else:
-        candidates.sort(key=lambda c: (c.get("family") or "", c["name"]))
-
+    candidates.sort(key=lambda c: (c.get("family") or "", c["name"]))
     return candidates
 
 
 # ── Public API ──
 
-def start_session(
-    conn: sqlite3.Connection,
-    image_b64: Optional[str],
-    vision_model: str = "",
-    vision_fn: Any = None,
-) -> dict:
-    """Start a new wizard session.
-
-    Loads models, optionally processes image, runs auto-gates (hatchet, cleaver),
-    and returns the first question.
-    """
+def start_session(conn: sqlite3.Connection, **kwargs) -> dict:
+    """Start a new wizard session. Loads models and returns the first question."""
     _cleanup_expired()
     _populate_dynamic_options(conn)
 
@@ -932,107 +608,51 @@ def start_session(
     models = _load_models(conn)
     all_ids = {m["id"] for m in models}
 
-    # Background removal
-    clean_image = None
-    if image_b64:
-        try:
-            from blade_ai import _remove_background
-            clean_image = _remove_background(image_b64)
-        except Exception:
-            clean_image = image_b64
-
     session = WizardSession(
         session_id=session_id,
         created_at=time.time(),
-        image_b64=image_b64,
-        clean_image_b64=clean_image,
         all_models=models,
         candidate_ids=set(all_ids),
-        _conn=conn,
     )
 
     _log.info(f"Wizard session {session_id}: {len(models)} models loaded")
-
-    # Run auto-gates if we have an image and vision model
-    if image_b64 and vision_fn:
-        for q in QUESTIONS:
-            if not q.auto_gate or not q.vision_prompt:
-                continue
-            suggestion = _get_vision_suggestion(session, q, vision_model, vision_fn)
-            if suggestion is not None:
-                filter_fn = _FILTER_FNS.get(q.key)
-                if filter_fn:
-                    new_ids = filter_fn(session.candidate_ids, suggestion, models, conn)
-                    # Safety: if this gate would eliminate everything, skip it
-                    # and let the user answer manually
-                    if not new_ids:
-                        _log.info(f"Auto-gate {q.key}={suggestion}: SKIPPED (would eliminate all {len(session.candidate_ids)} remaining)")
-                        continue
-                    eliminated = len(session.candidate_ids) - len(new_ids)
-                    session.candidate_ids = new_ids
-                    session.answers[q.key] = suggestion
-                    session.auto_gates.append({
-                        "question": q.key,
-                        "display_text": q.display_text,
-                        "vision_answer": suggestion,
-                        "eliminated": eliminated,
-                    })
-                    _log.info(f"Auto-gate {q.key}={suggestion}: eliminated {eliminated}")
-
     _sessions[session_id] = session
 
-    # Determine first question
     if _is_done(session):
         return {
             "session_id": session_id,
             "total_models": len(models),
             "remaining_models": len(session.candidate_ids),
             "remaining_families": len(_remaining_families(session)),
-            "auto_gates": session.auto_gates,
             "done": True,
-            "candidates": _format_candidates(session, conn,
-                                              vision_model=vision_model, vision_fn=vision_fn),
+            "candidates": _format_candidates(session, conn),
         }
 
     next_q = _pick_next_question(session)
-    suggestion = None
-    if next_q and next_q.vision_prompt and vision_fn and image_b64:
-        suggestion = _get_vision_suggestion(session, next_q, vision_model, vision_fn)
-
     return {
         "session_id": session_id,
         "total_models": len(models),
         "remaining_models": len(session.candidate_ids),
         "remaining_families": len(_remaining_families(session)),
-        "auto_gates": session.auto_gates,
         "done": False,
-        "next_question": _format_question(next_q, suggestion) if next_q else None,
+        "next_question": _format_question(next_q) if next_q else None,
     }
 
 
-def answer_question(
-    conn: sqlite3.Connection,
-    session_id: str,
-    question_key: str,
-    answer: Any,
-    vision_model: str = "",
-    vision_fn: Any = None,
-) -> dict:
+def answer_question(conn: sqlite3.Connection, session_id: str,
+                    question_key: str, answer: Any, **kwargs) -> dict:
     """Process a user's answer and return the next question or final candidates."""
     session = get_session(session_id)
     if not session:
         return {"error": "Session not found or expired"}
 
-    # Save history for undo
     session.history.append((question_key, answer, set(session.candidate_ids)))
 
-    # Skip if answer is None (user said "I don't know")
     eliminated = 0
     if answer is None:
         session.answers[question_key] = None
-        _log.info(f"Answer {question_key}=SKIP (I don't know)")
+        _log.info(f"Answer {question_key}=SKIP")
     else:
-        # Apply filter
         filter_fn = _FILTER_FNS.get(question_key)
         if filter_fn:
             prev_count = len(session.candidate_ids)
@@ -1045,7 +665,6 @@ def answer_question(
                       f"{len(session.candidate_ids)} remaining")
         else:
             session.answers[question_key] = answer
-            _log.warning(f"No filter function for question {question_key}")
 
     remaining_fams = _remaining_families(session)
     handle_color = session.answers.get("handle_color")
@@ -1056,11 +675,9 @@ def answer_question(
             "remaining_families": len(remaining_fams),
             "eliminated_this_step": eliminated,
             "done": True,
-            "candidates": _format_candidates(session, conn, handle_color,
-                                              vision_model=vision_model, vision_fn=vision_fn),
+            "candidates": _format_candidates(session, conn, handle_color),
         }
 
-    # Pick next question
     next_q = _pick_next_question(session)
     if not next_q:
         return {
@@ -1068,41 +685,30 @@ def answer_question(
             "remaining_families": len(remaining_fams),
             "eliminated_this_step": eliminated,
             "done": True,
-            "candidates": _format_candidates(session, conn, handle_color,
-                                              vision_model=vision_model, vision_fn=vision_fn),
+            "candidates": _format_candidates(session, conn, handle_color),
         }
-
-    # Get vision suggestion for next question
-    suggestion = None
-    if next_q.vision_prompt and vision_fn and session.image_b64:
-        suggestion = _get_vision_suggestion(session, next_q, vision_model, vision_fn)
 
     return {
         "remaining_models": len(session.candidate_ids),
         "remaining_families": len(remaining_fams),
         "eliminated_this_step": eliminated,
         "done": False,
-        "next_question": _format_question(next_q, suggestion),
+        "next_question": _format_question(next_q),
     }
 
 
 def go_back(conn: sqlite3.Connection, session_id: str) -> dict:
-    """Undo the last answer and return the question to re-answer."""
     session = get_session(session_id)
     if not session:
         return {"error": "Session not found or expired"}
-
     if not session.history:
         return {"error": "No previous step to go back to"}
 
     question_key, prev_answer, prev_candidates = session.history.pop()
     session.candidate_ids = prev_candidates
     session.answers.pop(question_key, None)
-    session.vision_cache.pop(question_key, None)
 
-    # Find the question to re-present
     q = next((q for q in QUESTIONS if q.key == question_key), None)
-
     return {
         "remaining_models": len(session.candidate_ids),
         "remaining_families": len(_remaining_families(session)),
@@ -1112,11 +718,9 @@ def go_back(conn: sqlite3.Connection, session_id: str) -> dict:
 
 
 def get_session_state(session_id: str) -> dict:
-    """Return current session state for debugging."""
     session = get_session(session_id)
     if not session:
         return {"error": "Session not found or expired"}
-
     return {
         "session_id": session.session_id,
         "created_at": session.created_at,
@@ -1124,7 +728,5 @@ def get_session_state(session_id: str) -> dict:
         "remaining_models": len(session.candidate_ids),
         "remaining_families": len(_remaining_families(session)),
         "answers": session.answers,
-        "auto_gates": session.auto_gates,
         "history_depth": len(session.history),
-        "has_image": session.image_b64 is not None,
     }

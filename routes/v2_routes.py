@@ -2141,22 +2141,12 @@ def create_v2_router(
     # ── Wizard endpoints ──
 
     @router.post("/api/v2/identify/wizard/start")
-    async def v2_wizard_start(image: Optional[UploadFile] = File(None)):
+    async def v2_wizard_start():
         """Start an interactive identification wizard session."""
         from reporting.identify_wizard import start_session
 
-        image_b64: str | None = None
-        if image:
-            image_bytes = await image.read()
-            image_b64 = base64.b64encode(image_bytes).decode("ascii")
-
         with get_conn() as conn:
-            return start_session(
-                conn=conn,
-                image_b64=image_b64,
-                vision_model=ollama_vision_model,
-                vision_fn=blade_ai.ollama_chat if image_b64 else None,
-            )
+            return start_session(conn=conn)
 
     @router.post("/api/v2/identify/wizard/answer")
     async def v2_wizard_answer(payload: dict):
@@ -2176,8 +2166,6 @@ def create_v2_router(
                 session_id=session_id,
                 question_key=question_key,
                 answer=answer,
-                vision_model=ollama_vision_model,
-                vision_fn=blade_ai.ollama_chat,
             )
         if "error" in result:
             raise HTTPException(404, result["error"])
