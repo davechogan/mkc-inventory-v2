@@ -516,7 +516,6 @@ QUESTIONS: list[WizardQuestion] = [
             'wood, micarta) are smooth or textured but not wrapped. Answer ONLY "yes" or "no".'
         ),
         vision_reliability=1.0,
-        auto_gate=True,
     ),
     WizardQuestion(
         key="kitchen_or_field",
