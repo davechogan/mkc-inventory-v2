@@ -924,10 +924,14 @@ def start_session(
                 continue
             suggestion = _get_vision_suggestion(session, q, vision_model, vision_fn)
             if suggestion is not None:
-                # Auto-gates: apply the vision answer directly
                 filter_fn = _FILTER_FNS.get(q.key)
                 if filter_fn:
                     new_ids = filter_fn(session.candidate_ids, suggestion, models, conn)
+                    # Safety: if this gate would eliminate everything, skip it
+                    # and let the user answer manually
+                    if not new_ids:
+                        _log.info(f"Auto-gate {q.key}={suggestion}: SKIPPED (would eliminate all {len(session.candidate_ids)} remaining)")
+                        continue
                     eliminated = len(session.candidate_ids) - len(new_ids)
                     session.candidate_ids = new_ids
                     session.answers[q.key] = suggestion
