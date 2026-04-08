@@ -734,6 +734,9 @@ def _is_done(session: WizardSession) -> bool:
 
     if n_candidates <= 1:
         return True
+    # Small enough to show — user picks visually faster than answering more questions
+    if n_candidates <= 3:
+        return True
     if n_user_answered >= MAX_QUESTIONS:
         return True
 
