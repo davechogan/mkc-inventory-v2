@@ -779,24 +779,14 @@ def _format_question(q: WizardQuestion, suggestion: Optional[Any] = None) -> dic
     }
 
 
-_DIRECT_MATCH_SYSTEM = """You are matching a user's knife photo against candidate reference photos.
+_DIRECT_MATCH_SYSTEM = """You are matching a user's knife/tool photo against candidate reference photos.
 
-Image 1 is the user's knife. The remaining images are reference photos of candidate models, one per candidate.
+Image 1 is the user's knife/tool. The remaining images are labeled reference photos.
 
-For each candidate, compare the user's photo directly against the candidate's reference photo. Focus on:
-1. Overall shape and proportions — does the knife/tool look the same?
-2. Blade shape — similar profile, similar size relative to handle?
-3. Handle shape and style — similar proportions and features?
-
-Do NOT focus on color or finish — the user may have a different colorway of the same model.
-
-Rate each:
-  STRONG — clearly the same model (shape and proportions match)
-  POSSIBLE — similar but not certain
-  UNLIKELY — clearly different shape or proportions
+Look at Image 1 carefully. Then look at each candidate reference photo. Which candidate's reference photo shows the SAME knife/tool as Image 1? Focus on overall shape and proportions, not color.
 
 Return VALID JSON ONLY (no markdown):
-{"comparisons": [{"model": "<exact model name>", "match": "STRONG|POSSIBLE|UNLIKELY", "reason": "<one sentence>"}]}"""
+{"best_match": "<exact candidate name>", "reason": "<one sentence explaining why>"}"""
 
 
 def _rank_candidates_with_vision(
@@ -815,10 +805,10 @@ def _rank_candidates_with_vision(
 
         # Build image list: user photo + one reference per candidate
         clean_image = session.clean_image_b64 or session.image_b64
-        images = [clean_image]
-        candidate_lines = []
-        img_num = 2
+        import random
 
+        # Randomize candidate order to combat positional bias
+        vision_entries = []  # (candidate_dict, image_b64)
         for c in candidates[:5]:
             cw_id = c.get("best_colorway_id")
             if not cw_id:
@@ -829,16 +819,25 @@ def _rank_candidates_with_vision(
             ).fetchone()
             if not row:
                 continue
-            images.append(base64.b64encode(row["image_blob"]).decode("ascii"))
-            candidate_lines.append(f"Candidate '{c['name']}': Image {img_num}")
-            img_num += 1
+            vision_entries.append((c, base64.b64encode(row["image_blob"]).decode("ascii")))
 
-        if not candidate_lines:
+        if not vision_entries:
             return candidates
+
+        random.shuffle(vision_entries)
+
+        images = [clean_image]
+        candidate_lines = []
+        img_num = 2
+        for c, img_b64 in vision_entries:
+            images.append(img_b64)
+            candidate_lines.append(f"'{c['name']}' is Image {img_num}")
+            img_num += 1
 
         user_text = (
             "Image 1 is the user's knife/tool.\n\n"
-            "Candidates:\n" + "\n".join(candidate_lines)
+            + "\n".join(candidate_lines)
+            + "\n\nWhich candidate is the same knife/tool as Image 1?"
         )
 
         _log.info(f"Vision ranking {len(candidate_lines)} final candidates")
@@ -846,21 +845,29 @@ def _rank_candidates_with_vision(
 
         from blade_ai import try_parse_json_response
         parsed = try_parse_json_response(raw)
-        results = parsed.get("comparisons", []) if isinstance(parsed, dict) else []
 
-        # Build lookup
-        vision_map = {vr.get("model", ""): vr for vr in (results or [])}
+        # Parse the best_match response
+        best_match_name = None
+        reason = ""
+        if isinstance(parsed, dict):
+            best_match_name = parsed.get("best_match", "")
+            reason = parsed.get("reason", "")
 
+        _log.info(f"Vision best match: {best_match_name} — {reason}")
+
+        # Mark the best match as STRONG, others as UNLIKELY
         for c in candidates:
-            vr = vision_map.get(c["name"])
-            if vr:
-                c["vision_match"] = (vr.get("match") or "").upper()
-                c["vision_reason"] = vr.get("reason", "")
+            if best_match_name and best_match_name.lower() in c["name"].lower():
+                c["vision_match"] = "STRONG"
+                c["vision_reason"] = reason
+            elif best_match_name:
+                c["vision_match"] = "UNLIKELY"
+                c["vision_reason"] = ""
 
     except Exception as e:
         _log.warning(f"Vision ranking failed: {e}")
 
-    # Sort: STRONG first, then POSSIBLE, then others
+    # Sort: STRONG first, then others
     rank_order = {"STRONG": 0, "POSSIBLE": 1, "UNLIKELY": 2}
     candidates.sort(key=lambda c: (
         rank_order.get(c.get("vision_match", ""), 3),
