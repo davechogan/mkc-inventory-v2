@@ -44,6 +44,8 @@ jobs:
           python -m py_compile routes/static_pages_routes.py
           python -m py_compile routes/admin_routes.py
           python -m py_compile migrations/migrate_v2.py
+          python -m py_compile private_photos.py
+          python -m py_compile routes/private_photos_routes.py
 
       - name: Run tests
         env:

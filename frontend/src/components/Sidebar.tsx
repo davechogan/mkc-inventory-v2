@@ -65,6 +65,16 @@ function IconMenu() {
   );
 }
 
+function IconImage() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <circle cx="8.5" cy="8.5" r="1.5" />
+      <polyline points="21 15 16 10 5 21" />
+    </svg>
+  );
+}
+
 function IconSettings() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -100,6 +110,7 @@ export function Sidebar() {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [memberships, setMemberships] = useState<TenantMembership[]>([]);
   const [activeTenant, setActiveTenantState] = useState<string | null>(null);
+  const [showPhotos, setShowPhotos] = useState(false);
 
   useEffect(() => {
     import('../tenantContext').then(({ getActiveTenantId, setActiveTenantId }) => {
@@ -123,6 +134,16 @@ export function Sidebar() {
         })
         .catch(() => {});
     });
+    fetch('/api/private-photos/access')
+      .then(r => {
+        const ct = r.headers.get('content-type') || '';
+        if (!ct.includes('application/json')) return null;
+        return r.json();
+      })
+      .then(d => {
+        if (d && (d.can_upload || d.can_view)) setShowPhotos(true);
+      })
+      .catch(() => {});
   }, []);
 
   const currentPath = window.location.pathname;
@@ -133,6 +154,14 @@ export function Sidebar() {
     { label: 'Catalog', href: '/master', icon: <IconBook />, active: currentPath === '/master' },
     { label: 'Reporting', href: '/reporting', icon: <IconBarChart />, active: currentPath === '/reporting' },
   ];
+  if (showPhotos) {
+    navItems.push({
+      label: 'Photos',
+      href: '/photos',
+      icon: <IconImage />,
+      active: currentPath === '/photos',
+    });
+  }
 
   const toggle = () => {
     const next = !collapsed;

@@ -51,8 +51,21 @@ export default function AuthGate() {
           // In prod (behind Cloudflare), this shouldn't happen, but show landing if it does.
           setState(isProd ? 'unauthenticated' : 'ready');
         } else if (d.needs_onboarding) {
-          setEmail(d.user?.email ?? '');
-          setState('needs_onboarding');
+          // Photo-only accounts should not be asked to create a knife collection.
+          fetch('/api/private-photos/access')
+            .then(r => r.json())
+            .then(access => {
+              if (access?.can_upload || access?.can_view) {
+                window.location.replace('/photos');
+                return;
+              }
+              setEmail(d.user?.email ?? '');
+              setState('needs_onboarding');
+            })
+            .catch(() => {
+              setEmail(d.user?.email ?? '');
+              setState('needs_onboarding');
+            });
         } else {
           // Set active tenant if not already set
           const saved = getActiveTenantId();

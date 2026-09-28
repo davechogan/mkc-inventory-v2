@@ -23,6 +23,7 @@ const Identify = lazy(() => import('./pages/Identify'));
 const Catalog = lazy(() => import('./pages/Catalog'));
 const Reporting = lazy(() => import('./pages/Reporting'));
 const Admin = lazy(() => import('./pages/Admin'));
+const Photos = lazy(() => import('./pages/Photos'));
 
 const rootEl = document.getElementById('root');
 if (!rootEl) throw new Error('Root element not found');
@@ -38,6 +39,8 @@ if (path === '/identify') {
   Page = Reporting;
 } else if (path === '/master/admin') {
   Page = Admin;
+} else if (path === '/photos') {
+  Page = Photos;
 } else if (path === '/collection') {
   Page = AuthGate;
 } else {

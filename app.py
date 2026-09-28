@@ -1411,6 +1411,10 @@ v2_router, run_v2_identify = create_v2_router(
 )
 app.include_router(v2_router)
 
+from routes.private_photos_routes import create_private_photos_router
+
+app.include_router(create_private_photos_router(get_conn=get_conn))
+
 app.include_router(
     create_normalized_router(
         get_conn=get_conn,

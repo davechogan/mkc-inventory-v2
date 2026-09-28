@@ -10,3 +10,5 @@ sentence-transformers>=2.2.0,<4.0
 # Background removal for cleaner knife identification vision comparisons
 rembg[cpu]>=2.0,<3.0
 Pillow>=10.0,<12.0
+# iPhone Photos uploads are often HEIC; decoded only to build private JPEGs
+pillow-heif>=0.18,<2.0

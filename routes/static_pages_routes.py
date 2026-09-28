@@ -46,4 +46,16 @@ def create_static_pages_router(*, static_dir: Path) -> APIRouter:
         react_build = static_dir / "dist" / "index.html"
         return FileResponse(react_build if react_build.exists() else static_dir / "index.html")
 
+    @router.get("/photos")
+    def photos_page():
+        """Private photo share. The HTML shell is not the pictures; those stay behind the API."""
+        react_build = static_dir / "dist" / "index.html"
+        return FileResponse(
+            react_build if react_build.exists() else static_dir / "index.html",
+            headers={
+                "Cache-Control": "private, no-store",
+                "X-Robots-Tag": "noindex, nofollow",
+            },
+        )
+
     return router

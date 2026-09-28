@@ -122,6 +122,22 @@ def ensure_v2_exclusive_schema(conn: sqlite3.Connection) -> None:
             UNIQUE(tenant_id, user_id),
             UNIQUE(tenant_id, invited_email)
         );
+
+        -- Private photo share. Files live on disk under data/private_photos/,
+        -- never under /static. Access is email allowlists, not this table.
+        CREATE TABLE IF NOT EXISTS private_photos (
+            id                  TEXT PRIMARY KEY,
+            original_name       TEXT,
+            original_suffix     TEXT NOT NULL,
+            byte_size           INTEGER NOT NULL,
+            width               INTEGER,
+            height              INTEGER,
+            taken_at            TEXT,
+            uploaded_by_email   TEXT NOT NULL,
+            created_at          TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_private_photos_uploader
+            ON private_photos (uploaded_by_email, created_at);
         """
     )
 

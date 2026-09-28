@@ -31,6 +31,8 @@ fi
 "$PY" -m py_compile routes/legacy_catalog_routes.py
 "$PY" -m py_compile routes/ai_routes.py
 "$PY" -m py_compile routes/static_pages_routes.py
+"$PY" -m py_compile routes/private_photos_routes.py
+"$PY" -m py_compile private_photos.py
 "$PY" -m py_compile routes/admin_routes.py
 "$PY" -m py_compile sqlite_schema.py
 "$PY" -m py_compile tools/reporting_eval_harness.py

@@ -7,6 +7,8 @@ __pycache__/
 
 # Local runtime artifacts
 data/*.log
+# Private photo share — originals and derivatives, not web-served
+data/private_photos/
 data/*.db
 data/mkc_inventory.db.backup.*
 data/data._untracked_bak_*/
