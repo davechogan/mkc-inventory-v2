@@ -11,12 +11,13 @@ import logging
 from typing import Callable
 
 from fastapi import APIRouter, Body, File, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 
-from auth import get_current_user
+from auth import LOCAL_USER_COOKIE, get_current_user, is_local_access, is_local_session
 from private_photos import (
     MAX_FILES_PER_REQUEST,
     MAX_UPLOAD_BYTES,
+    allowlisted_photo_email,
     delete_own_photo,
     delete_photo,
     delete_photos,
@@ -26,7 +27,8 @@ from private_photos import (
     ingest_photo,
     list_photos,
     photo_access_for_email,
-    zip_display_jpegs,
+    playback_file,
+    zip_selected_files,
 )
 
 logger = logging.getLogger("mkc_app.private_photos")
@@ -63,15 +65,67 @@ def create_private_photos_router(*, get_conn: Callable) -> APIRouter:
             "can_upload": access.can_upload,
             "can_view": access.can_view,
             "can_admin": access.can_admin,
+            "local_login": email is None and is_local_access(request),
+            "local_session": is_local_session(request),
         }
+
+    @router.post("/local-login")
+    def local_login(request: Request, payload: dict = Body(...)):
+        """Sign in on the LAN by email. The address must be on a photo allowlist.
+
+        The public site returns 404. Cloudflare identity is never replaced by this.
+        """
+        if not is_local_access(request):
+            raise HTTPException(status_code=404, detail="Not found.")
+        raw = payload.get("email") if isinstance(payload, dict) else None
+        if not isinstance(raw, str):
+            raise HTTPException(status_code=400, detail="Enter an email address.")
+        email = allowlisted_photo_email(raw)
+        if email is None:
+            raise HTTPException(status_code=403, detail="That email does not have access.")
+        access = photo_access_for_email(email)
+        response = JSONResponse(
+            {
+                "authenticated": True,
+                "can_upload": access.can_upload,
+                "can_view": access.can_view,
+                "can_admin": access.can_admin,
+                "local_login": False,
+                "local_session": True,
+            }
+        )
+        response.set_cookie(
+            LOCAL_USER_COOKIE,
+            email,
+            httponly=True,
+            samesite="lax",
+            path="/",
+            max_age=60 * 60 * 12,
+        )
+        return response
+
+    @router.post("/local-logout")
+    def local_logout(request: Request):
+        """Clear the local email session. Unavailable on the public site."""
+        if not is_local_access(request):
+            raise HTTPException(status_code=404, detail="Not found.")
+        response = Response(status_code=204)
+        response.delete_cookie(LOCAL_USER_COOKIE, path="/")
+        return response
 
     @router.get("")
     def photos_list(request: Request, scope: str = "auto"):
         """``all`` requires view. ``mine`` requires upload and returns only that email."""
         email = _require_email(request)
         access = photo_access_for_email(email)
-        if scope not in {"auto", "all", "mine"}:
+        if scope not in {"auto", "all", "mine", "received"}:
             raise HTTPException(status_code=400, detail="Unknown scope.")
+        if scope == "received":
+            if not access.can_view:
+                raise HTTPException(status_code=403, detail="You cannot view these files.")
+            with get_conn() as conn:
+                photos = list_photos(conn, exclude_email=email)
+            return {"photos": photos}
         want_all = scope == "all" or (scope == "auto" and access.can_view)
         if want_all:
             if not access.can_view:
@@ -146,7 +200,7 @@ def create_private_photos_router(*, get_conn: Callable) -> APIRouter:
             raise HTTPException(status_code=403, detail="You cannot download these photos.")
         try:
             with get_conn() as conn:
-                data = zip_display_jpegs(conn, _bulk_ids(payload))
+                data = zip_selected_files(conn, _bulk_ids(payload))
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return Response(
@@ -189,7 +243,19 @@ def create_private_photos_router(*, get_conn: Callable) -> APIRouter:
             row = get_photo(conn, photo_id)
         if row is None:
             raise HTTPException(status_code=404, detail="Photo not found.")
-        return _jpeg_file(photo_id, "display", download_name=download_filename(row))
+        return _playback_response(row, download_name=download_filename(row))
+
+    @router.get("/{photo_id}/media")
+    def photo_media(photo_id: str, request: Request):
+        """Video or voice file for playback. View permission, same as the gallery."""
+        email = _require_email(request)
+        if not photo_access_for_email(email).can_view:
+            raise HTTPException(status_code=403, detail="You cannot view these files.")
+        with get_conn() as conn:
+            row = get_photo(conn, photo_id)
+        if row is None or (row["media_kind"] or "photo") == "photo":
+            raise HTTPException(status_code=404, detail="File not found.")
+        return _playback_response(row)
 
     @router.delete("/{photo_id}")
     def photo_delete(photo_id: str, request: Request):
@@ -226,6 +292,20 @@ def _bulk_ids(payload: dict) -> list[str]:
     if not isinstance(ids, list):
         raise HTTPException(status_code=400, detail="Choose at least one photo.")
     return ids
+
+
+def _playback_response(row, download_name: str | None = None) -> FileResponse:
+    played = playback_file(row)
+    if played is None:
+        raise HTTPException(status_code=404, detail="File not found.")
+    path, content_type = played
+    return FileResponse(
+        path,
+        media_type=content_type,
+        filename=download_name or path.name,
+        content_disposition_type="attachment" if download_name else "inline",
+        headers=_PRIVATE_HEADERS,
+    )
 
 
 def _jpeg_file(photo_id: str, kind: str, download_name: str | None = None) -> FileResponse:

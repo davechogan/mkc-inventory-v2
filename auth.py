@@ -22,6 +22,10 @@ logger = logging.getLogger("mkc_auth")
 # Cloudflare Access headers
 CF_EMAIL_HEADER = "Cf-Access-Authenticated-User-Email"
 CF_JWT_HEADER = "Cf-Access-Jwt-Assertion"
+# Set by the local email prompt. Ignored on the public hostname and whenever
+# Cloudflare has already authenticated the request.
+LOCAL_USER_COOKIE = "mkc_local_user"
+PUBLIC_APP_HOSTS = frozenset({"inventory.davechogan.com", "photos.davechogan.com"})
 
 # Tenant selection header (set by frontend)
 TENANT_HEADER = "X-Tenant-Id"
@@ -120,11 +124,31 @@ def _upsert_user(conn: sqlite3.Connection, email: str) -> UserInfo:
     return UserInfo(id=user_id, email=email, name=name, memberships=memberships, is_new=is_new)
 
 
+def is_local_access(request: Request) -> bool:
+    """True when this request did not come through Cloudflare Access.
+
+    Local sign-in is limited to that case. The public site keeps the
+    Cloudflare identity and does not honor the local cookie.
+    """
+    if request.headers.get(CF_JWT_HEADER):
+        return False
+    host = (request.headers.get("host") or "").split(":")[0].strip().lower()
+    return host not in PUBLIC_APP_HOSTS
+
+
+def is_local_session(request: Request) -> bool:
+    """True when the current identity came from the local email prompt."""
+    return bool(getattr(request.state, "local_session", False))
+
+
 class CloudflareAccessMiddleware(BaseHTTPMiddleware):
     """
     Middleware that reads Cloudflare Access identity headers and populates request.state.user.
 
-    If the header is absent (e.g. local dev without Cloudflare), request.state.user is None.
+    On local access, a cookie from the email prompt is used when Cloudflare
+    did not supply an identity. The cookie is accepted only for an email on
+    the photo allowlist. If the header is absent and there is no valid local
+    cookie, request.state.user is None.
     """
 
     def __init__(self, app, get_conn: Callable):
@@ -132,19 +156,27 @@ class CloudflareAccessMiddleware(BaseHTTPMiddleware):
         self.get_conn = get_conn
 
     async def dispatch(self, request: Request, call_next) -> Response:
-        email = request.headers.get(CF_EMAIL_HEADER)
+        from private_photos import allowlisted_photo_email
+
+        request.state.local_session = False
+        email = (request.headers.get(CF_EMAIL_HEADER) or "").strip().lower()
+        if not email and is_local_access(request):
+            email = allowlisted_photo_email(request.cookies.get(LOCAL_USER_COOKIE)) or ""
+            request.state.local_session = bool(email)
 
         if email:
             try:
                 with self.get_conn() as conn:
-                    user = _upsert_user(conn, email.strip().lower())
+                    user = _upsert_user(conn, email)
                 request.state.user = user
                 logger.debug("Authenticated: %s (%d memberships)", user.email, len(user.memberships))
             except Exception:
                 logger.exception("Failed to upsert user for %s", email)
                 request.state.user = None
+                request.state.local_session = False
         else:
             request.state.user = None
+            request.state.local_session = False
 
         response = await call_next(request)
         return response

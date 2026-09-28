@@ -134,12 +134,17 @@ def ensure_v2_exclusive_schema(conn: sqlite3.Connection) -> None:
             height              INTEGER,
             taken_at            TEXT,
             uploaded_by_email   TEXT NOT NULL,
-            created_at          TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            created_at          TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            media_kind          TEXT NOT NULL DEFAULT 'photo'
         );
         CREATE INDEX IF NOT EXISTS idx_private_photos_uploader
             ON private_photos (uploaded_by_email, created_at);
         """
     )
+    if not column_exists(conn, "private_photos", "media_kind"):
+        conn.execute(
+            "ALTER TABLE private_photos ADD COLUMN media_kind TEXT NOT NULL DEFAULT 'photo'"
+        )
 
     # Migration: ensure the "default" tenant exists and existing users are members
     _ensure_default_tenant(conn)
