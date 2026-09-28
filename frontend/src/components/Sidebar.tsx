@@ -160,20 +160,24 @@ export function Sidebar() {
   const currentPath = window.location.pathname;
   const isPhotos = currentPath === '/photos';
 
-  const navItems: NavItem[] = [
+  const photosItem: NavItem = {
+    label: 'Photos',
+    href: '/photos',
+    icon: <IconImage />,
+    active: isPhotos,
+  };
+  // The photo page is a separate app. Inventory links stay off that screen.
+  const inventoryItems: NavItem[] = [
     { label: 'Collection', href: '/collection', icon: <IconGrid />, active: currentPath === '/collection' },
     { label: 'Identify', href: '/identify', icon: <IconSearch />, active: currentPath === '/identify' },
     { label: 'Catalog', href: '/master', icon: <IconBook />, active: currentPath === '/master' },
     { label: 'Reporting', href: '/reporting', icon: <IconBarChart />, active: currentPath === '/reporting' },
   ];
-  if (showPhotos) {
-    navItems.push({
-      label: 'Photos',
-      href: '/photos',
-      icon: <IconImage />,
-      active: currentPath === '/photos',
-    });
-  }
+  const navItems: NavItem[] = isPhotos
+    ? [photosItem]
+    : showPhotos
+      ? [...inventoryItems, photosItem]
+      : inventoryItems;
 
   const toggle = () => {
     const next = !collapsed;
@@ -263,7 +267,7 @@ export function Sidebar() {
     <nav className="flex-1 px-2 py-3 flex flex-col gap-1">
       {navItems.map((item) => navLink(item, onNavigate))}
       <div className="flex-1" />
-      {navLink(adminItem, onNavigate)}
+      {!isPhotos && navLink(adminItem, onNavigate)}
     </nav>
   );
 
