@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import zipfile
 
 import pytest
 from fastapi.testclient import TestClient
@@ -11,6 +12,7 @@ from PIL import Image
 UPLOADER = "she@example.com"
 OTHER_UPLOADER = "sister@example.com"
 VIEWER = "he@example.com"
+ADMIN = "admin@example.com"
 STRANGER = "stranger@example.com"
 
 
@@ -62,10 +64,10 @@ def test_access_flags_follow_each_allowlist(photos: TestClient):
     stranger = photos.get("/api/private-photos/access", headers=_as(STRANGER)).json()
     anonymous = photos.get("/api/private-photos/access").json()
 
-    assert uploader == {"authenticated": True, "can_upload": True, "can_view": False}
-    assert viewer == {"authenticated": True, "can_upload": False, "can_view": True}
-    assert stranger == {"authenticated": True, "can_upload": False, "can_view": False}
-    assert anonymous == {"authenticated": False, "can_upload": False, "can_view": False}
+    assert uploader == {"authenticated": True, "can_upload": True, "can_view": False, "can_admin": False}
+    assert viewer == {"authenticated": True, "can_upload": False, "can_view": True, "can_admin": False}
+    assert stranger == {"authenticated": True, "can_upload": False, "can_view": False, "can_admin": False}
+    assert anonymous == {"authenticated": False, "can_upload": False, "can_view": False, "can_admin": False}
 
 
 def test_uploader_can_send_jpeg_and_png_but_not_open_the_viewer(photos: TestClient, tmp_path):
@@ -191,3 +193,54 @@ def test_heic_from_iphone_is_stored_and_served_as_jpeg(photos: TestClient):
     served = photos.get(f"/api/private-photos/{photo_id}/image", headers=_as(VIEWER))
     assert served.status_code == 200
     assert served.content[:2] == b"\xff\xd8"
+
+
+def test_admin_can_download_and_delete_any_photo_viewers_cannot(photos: TestClient, monkeypatch):
+    monkeypatch.setenv("PRIVATE_PHOTOS_ADMIN_EMAILS", ADMIN)
+    created = _upload(photos, UPLOADER, "shared.jpg", _jpeg(), "image/jpeg")
+    photo_id = created.json()["uploaded"][0]["id"]
+
+    flags = photos.get("/api/private-photos/access", headers=_as(ADMIN)).json()
+    assert flags["can_admin"] is True
+    assert flags["can_view"] is True
+    assert flags["can_upload"] is False
+
+    downloaded = photos.get(f"/api/private-photos/{photo_id}/download", headers=_as(ADMIN))
+    assert downloaded.status_code == 200
+    assert downloaded.content[:2] == b"\xff\xd8"
+    disposition = downloaded.headers["content-disposition"]
+    assert disposition.startswith("attachment;")
+    assert photo_id[:8] in disposition
+
+    assert photos.get(f"/api/private-photos/{photo_id}/download", headers=_as(VIEWER)).status_code == 403
+    assert photos.get(f"/api/private-photos/{photo_id}/download", headers=_as(UPLOADER)).status_code == 403
+    assert photos.delete(f"/api/private-photos/{photo_id}", headers=_as(VIEWER)).status_code == 403
+
+    assert photos.delete(f"/api/private-photos/{photo_id}", headers=_as(ADMIN)).status_code == 204
+    assert photos.get("/api/private-photos", headers=_as(VIEWER)).json()["photos"] == []
+
+
+def test_admin_can_download_and_delete_a_selection(photos: TestClient, monkeypatch):
+    monkeypatch.setenv("PRIVATE_PHOTOS_ADMIN_EMAILS", ADMIN)
+    first = _upload(photos, UPLOADER, "one.jpg", _jpeg((1, 2, 3)), "image/jpeg").json()["uploaded"][0]["id"]
+    second = _upload(photos, UPLOADER, "two.jpg", _jpeg((4, 5, 6)), "image/jpeg").json()["uploaded"][0]["id"]
+    body = {"ids": [first, second]}
+
+    denied = photos.post("/api/private-photos/bulk-download", headers=_as(VIEWER), json=body)
+    assert denied.status_code == 403
+    assert photos.post("/api/private-photos/bulk-delete", headers=_as(UPLOADER), json=body).status_code == 403
+    assert photos.post("/api/private-photos/bulk-delete", headers=_as(ADMIN), json={"ids": []}).status_code == 400
+
+    downloaded = photos.post("/api/private-photos/bulk-download", headers=_as(ADMIN), json=body)
+    assert downloaded.status_code == 200
+    assert downloaded.headers["content-type"].startswith("application/zip")
+    with zipfile.ZipFile(io.BytesIO(downloaded.content)) as archive:
+        names = archive.namelist()
+        assert len(names) == 2
+        assert first[:8] in names[0] or first[:8] in names[1]
+        assert archive.read(names[0])[:2] == b"\xff\xd8"
+
+    removed = photos.post("/api/private-photos/bulk-delete", headers=_as(ADMIN), json=body)
+    assert removed.status_code == 200
+    assert removed.json()["deleted"] == 2
+    assert photos.get("/api/private-photos", headers=_as(VIEWER)).json()["photos"] == []

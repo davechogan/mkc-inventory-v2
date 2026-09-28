@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Callable
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Body, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 
 from auth import get_current_user
@@ -18,11 +18,15 @@ from private_photos import (
     MAX_FILES_PER_REQUEST,
     MAX_UPLOAD_BYTES,
     delete_own_photo,
+    delete_photo,
+    delete_photos,
     derivative_path,
+    download_filename,
     get_photo,
     ingest_photo,
     list_photos,
     photo_access_for_email,
+    zip_display_jpegs,
 )
 
 logger = logging.getLogger("mkc_app.private_photos")
@@ -58,6 +62,7 @@ def create_private_photos_router(*, get_conn: Callable) -> APIRouter:
             "authenticated": email is not None,
             "can_upload": access.can_upload,
             "can_view": access.can_view,
+            "can_admin": access.can_admin,
         }
 
     @router.get("")
@@ -120,6 +125,39 @@ def create_private_photos_router(*, get_conn: Callable) -> APIRouter:
             raise HTTPException(status_code=400, detail=errors[0]["detail"])
         return {"uploaded": uploaded, "errors": errors}
 
+    @router.post("/bulk-delete")
+    def photos_bulk_delete(request: Request, payload: dict = Body(...)):
+        """Remove every selected photo. Admin only."""
+        email = _require_email(request)
+        if not photo_access_for_email(email).can_admin:
+            raise HTTPException(status_code=403, detail="You cannot remove these photos.")
+        try:
+            with get_conn() as conn:
+                deleted = delete_photos(conn, _bulk_ids(payload))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"deleted": deleted}
+
+    @router.post("/bulk-download")
+    def photos_bulk_download(request: Request, payload: dict = Body(...)):
+        """Zip the selected viewer JPEGs. Admin only."""
+        email = _require_email(request)
+        if not photo_access_for_email(email).can_admin:
+            raise HTTPException(status_code=403, detail="You cannot download these photos.")
+        try:
+            with get_conn() as conn:
+                data = zip_display_jpegs(conn, _bulk_ids(payload))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return Response(
+            content=data,
+            media_type="application/zip",
+            headers={
+                **_PRIVATE_HEADERS,
+                "Content-Disposition": 'attachment; filename="private-photos.zip"',
+            },
+        )
+
     @router.get("/{photo_id}/thumb")
     def photo_thumb(photo_id: str, request: Request):
         """Thumbnail. Viewers may see any; uploaders may see only their own."""
@@ -141,14 +179,30 @@ def create_private_photos_router(*, get_conn: Callable) -> APIRouter:
             raise HTTPException(status_code=404, detail="Photo not found.")
         return _jpeg_file(photo_id, "display")
 
+    @router.get("/{photo_id}/download")
+    def photo_download(photo_id: str, request: Request):
+        """Attachment download of the viewer JPEG. Admin only."""
+        email = _require_email(request)
+        if not photo_access_for_email(email).can_admin:
+            raise HTTPException(status_code=403, detail="You cannot download these photos.")
+        with get_conn() as conn:
+            row = get_photo(conn, photo_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Photo not found.")
+        return _jpeg_file(photo_id, "display", download_name=download_filename(row))
+
     @router.delete("/{photo_id}")
     def photo_delete(photo_id: str, request: Request):
-        """Uploaders may remove a photo they sent. Viewers cannot delete."""
+        """Admins may remove any photo. Uploaders may remove only their own."""
         email = _require_email(request)
-        if not photo_access_for_email(email).can_upload:
+        access = photo_access_for_email(email)
+        if not access.can_admin and not access.can_upload:
             raise HTTPException(status_code=403, detail="You cannot remove these photos.")
         with get_conn() as conn:
-            removed = delete_own_photo(conn, photo_id, email)
+            if access.can_admin:
+                removed = delete_photo(conn, photo_id)
+            else:
+                removed = delete_own_photo(conn, photo_id, email)
         if not removed:
             raise HTTPException(status_code=404, detail="Photo not found.")
         return Response(status_code=204)
@@ -167,15 +221,22 @@ def _require_see_thumb(email: str, row) -> None:
     raise HTTPException(status_code=403, detail="You cannot view these photos.")
 
 
-def _jpeg_file(photo_id: str, kind: str) -> FileResponse:
+def _bulk_ids(payload: dict) -> list[str]:
+    ids = payload.get("ids") if isinstance(payload, dict) else None
+    if not isinstance(ids, list):
+        raise HTTPException(status_code=400, detail="Choose at least one photo.")
+    return ids
+
+
+def _jpeg_file(photo_id: str, kind: str, download_name: str | None = None) -> FileResponse:
     path = derivative_path(photo_id, kind)
     if path is None:
         raise HTTPException(status_code=404, detail="Photo not found.")
     return FileResponse(
         path,
         media_type="image/jpeg",
-        filename=f"{photo_id}.jpg",
-        content_disposition_type="inline",
+        filename=download_name or f"{photo_id}.jpg",
+        content_disposition_type="attachment" if download_name else "inline",
         headers=_PRIVATE_HEADERS,
     )
 

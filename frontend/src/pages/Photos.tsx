@@ -14,6 +14,7 @@ interface PhotoAccess {
   authenticated: boolean;
   can_upload: boolean;
   can_view: boolean;
+  can_admin: boolean;
 }
 
 interface PhotoItem {
@@ -38,6 +39,10 @@ function imageUrl(id: string): string {
   return `/api/private-photos/${id}/image`;
 }
 
+function downloadUrl(id: string): string {
+  return `/api/private-photos/${id}/download`;
+}
+
 function formatWhen(photo: PhotoItem): string {
   const raw = photo.taken_at || photo.created_at;
   const date = new Date(raw);
@@ -59,7 +64,7 @@ function fileLabel(file: File): string {
 }
 
 async function readAccess(): Promise<PhotoAccess> {
-  const denied: PhotoAccess = { authenticated: false, can_upload: false, can_view: false };
+  const denied: PhotoAccess = { authenticated: false, can_upload: false, can_view: false, can_admin: false };
   try {
     const response = await fetch('/api/private-photos/access');
     const type = response.headers.get('content-type') || '';
@@ -69,6 +74,7 @@ async function readAccess(): Promise<PhotoAccess> {
       authenticated: Boolean(data.authenticated),
       can_upload: Boolean(data.can_upload),
       can_view: Boolean(data.can_view),
+      can_admin: Boolean(data.can_admin),
     };
   } catch {
     return denied;
@@ -323,11 +329,13 @@ function SentList({ refreshKey }: { refreshKey: number }) {
   );
 }
 
-function Viewer({ refreshKey }: { refreshKey: number }) {
+function Viewer({ refreshKey, canAdmin }: { refreshKey: number; canAdmin: boolean }) {
   const [photos, setPhotos] = useState<PhotoItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [index, setIndex] = useState<number | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState<'download' | 'delete' | null>(null);
   const touchX = useRef<number | null>(null);
 
   useEffect(() => {
@@ -387,19 +395,131 @@ function Viewer({ refreshKey }: { refreshKey: number }) {
 
   const open = index != null ? photos[index] : null;
 
+  const removeOpen = async () => {
+    if (!open || index == null) return;
+    if (!window.confirm('Delete this photo? It will disappear for everyone.')) return;
+    const response = await fetch(`/api/private-photos/${open.id}`, { method: 'DELETE' });
+    if (!response.ok) {
+      setError('Could not delete that photo.');
+      return;
+    }
+    const next = photos.filter((item) => item.id !== open.id);
+    setPhotos(next);
+    setSelected((current) => {
+      const copy = new Set(current);
+      copy.delete(open.id);
+      return copy;
+    });
+    setIndex(next.length === 0 ? null : Math.min(index, next.length - 1));
+  };
+
+  const toggleSelected = (id: string) => {
+    setSelected((current) => {
+      const copy = new Set(current);
+      if (copy.has(id)) copy.delete(id);
+      else copy.add(id);
+      return copy;
+    });
+  };
+
+  const bulkDownload = async () => {
+    const ids = [...selected];
+    if (!ids.length || busy) return;
+    setBusy('download');
+    setError(null);
+    try {
+      const response = await fetch('/api/private-photos/bulk-download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      });
+      if (!response.ok) {
+        setError('Could not download those photos.');
+        return;
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'private-photos.zip';
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setError('Could not download those photos.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const bulkDelete = async () => {
+    const ids = [...selected];
+    if (!ids.length || busy) return;
+    const label = ids.length === 1 ? 'this photo' : `these ${ids.length} photos`;
+    if (!window.confirm(`Delete ${label}? They will disappear for everyone.`)) return;
+    setBusy('delete');
+    setError(null);
+    try {
+      const response = await fetch('/api/private-photos/bulk-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      });
+      if (!response.ok) {
+        setError('Could not delete those photos.');
+        return;
+      }
+      const removed = new Set(ids);
+      const next = photos.filter((item) => !removed.has(item.id));
+      setPhotos(next);
+      setSelected(new Set());
+      if (open && removed.has(open.id)) setIndex(null);
+    } catch {
+      setError('Could not delete those photos.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
     <section className="mt-2">
-      <p className="text-muted text-sm mb-4">{photos.length} {photos.length === 1 ? 'photo' : 'photos'}</p>
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <p className="text-muted text-sm">{photos.length} {photos.length === 1 ? 'photo' : 'photos'}</p>
+        {canAdmin && selected.size > 0 && (
+          <>
+            <span className="text-ink text-sm">{selected.size} selected</span>
+            <button type="button" onClick={() => setSelected(new Set(photos.map((item) => item.id)))} className="min-h-11 px-3 text-sm text-gold">Select all</button>
+            <button type="button" onClick={() => setSelected(new Set())} className="min-h-11 px-3 text-sm text-muted">Clear</button>
+            <button type="button" disabled={busy != null} onClick={() => void bulkDownload()} className="min-h-11 px-3 rounded-lg border border-border text-sm text-ink disabled:opacity-50">
+              {busy === 'download' ? 'Preparing…' : 'Download'}
+            </button>
+            <button type="button" disabled={busy != null} onClick={() => void bulkDelete()} className="min-h-11 px-3 rounded-lg border border-red-400/50 text-sm text-red-300 disabled:opacity-50">
+              {busy === 'delete' ? 'Deleting…' : 'Delete'}
+            </button>
+          </>
+        )}
+      </div>
+      {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
       {groups.map((group) => (
         <div key={group.label} className="mb-8">
           <h2 className="text-ink text-sm font-semibold mb-2">{group.label}</h2>
           <ul className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-1.5 md:gap-2">
             {group.items.map(({ photo, index: photoIndex }) => (
-              <li key={photo.id}>
+              <li key={photo.id} className="relative">
+                {canAdmin && (
+                  <label className="absolute top-1 left-1 z-10 min-w-11 min-h-11 flex items-start justify-start">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(photo.id)}
+                      onChange={() => toggleSelected(photo.id)}
+                      aria-label="Select photo"
+                      className="w-5 h-5 accent-gold"
+                    />
+                  </label>
+                )}
                 <button
                   type="button"
                   onClick={() => setIndex(photoIndex)}
-                  className="block w-full aspect-square rounded-md overflow-hidden bg-card focus:outline-none focus:ring-2 focus:ring-gold/70"
+                  className={`block w-full aspect-square rounded-md overflow-hidden bg-card focus:outline-none focus:ring-2 focus:ring-gold/70 ${selected.has(photo.id) ? 'ring-2 ring-gold' : ''}`}
                 >
                   <img src={thumbUrl(photo.id)} alt="" className="w-full h-full object-cover" />
                 </button>
@@ -420,7 +540,26 @@ function Viewer({ refreshKey }: { refreshKey: number }) {
               <div>{formatWhen(open)}</div>
               <div className="text-white/60 text-xs">{index + 1} / {photos.length}</div>
             </div>
-            <button type="button" onClick={close} className="min-w-11 min-h-11 text-2xl" aria-label="Close">×</button>
+            <div className="flex items-center gap-2">
+              {canAdmin && (
+                <>
+                  <a
+                    href={downloadUrl(open.id)}
+                    className="min-h-11 px-3 inline-flex items-center rounded-lg border border-white/30 text-sm"
+                  >
+                    Download
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => void removeOpen()}
+                    className="min-h-11 px-3 rounded-lg border border-red-400/50 text-red-300 text-sm"
+                  >
+                    Delete
+                  </button>
+                </>
+              )}
+              <button type="button" onClick={close} className="min-w-11 min-h-11 text-2xl" aria-label="Close">×</button>
+            </div>
           </div>
           <div
             className="flex-1 relative flex items-center justify-center min-h-0"
@@ -469,7 +608,7 @@ export default function Photos() {
   const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
-    document.title = 'Photos';
+    document.title = 'Private Photos';
     let robots = document.querySelector('meta[name="robots"]');
     if (!robots) {
       robots = document.createElement('meta');
@@ -499,7 +638,7 @@ export default function Photos() {
       <Sidebar />
       <main className={`${marginClass} transition-[margin] duration-200 min-h-screen`}>
         <div className="pl-14 pr-4 md:px-8 pt-5 pb-10 max-w-5xl">
-          <h1 className="text-ink text-xl font-bold mb-4">Photos</h1>
+          <h1 className="text-ink text-xl font-bold mb-4">Private Photos</h1>
           {access == null && <div className="h-40 skeleton rounded-2xl" />}
           {access && !access.authenticated && (
             <div className="bg-card border border-border rounded-2xl p-6">
@@ -516,7 +655,7 @@ export default function Photos() {
             <Uploader onUploaded={() => setRefreshKey((value) => value + 1)} />
           )}
           {access?.can_upload && !access.can_view && <SentList refreshKey={refreshKey} />}
-          {access?.can_view && <Viewer refreshKey={refreshKey} />}
+          {access?.can_view && <Viewer refreshKey={refreshKey} canAdmin={access.can_admin} />}
         </div>
       </main>
     </div>

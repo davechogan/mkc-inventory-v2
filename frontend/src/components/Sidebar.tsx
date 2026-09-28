@@ -57,6 +57,17 @@ function IconChevronRight() {
   );
 }
 
+function SecureMark({ size }: { size: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 64 64" aria-hidden="true">
+      <rect x="3" y="3" width="58" height="58" rx="16" fill="#14110c" stroke="#c8921a" strokeWidth="2" />
+      <rect x="16" y="28" width="32" height="22" rx="4" fill="none" stroke="#f0f2f4" strokeWidth="2" />
+      <circle cx="32" cy="39" r="4.5" fill="none" stroke="#c8921a" strokeWidth="2" />
+      <path d="M24 28v-5a8 8 0 0 1 16 0v5" fill="none" stroke="#c8921a" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function IconMenu() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -147,6 +158,7 @@ export function Sidebar() {
   }, []);
 
   const currentPath = window.location.pathname;
+  const isPhotos = currentPath === '/photos';
 
   const navItems: NavItem[] = [
     { label: 'Collection', href: '/collection', icon: <IconGrid />, active: currentPath === '/collection' },
@@ -297,10 +309,14 @@ export function Sidebar() {
             {/* Mobile header */}
             <div className="flex items-center justify-between px-4 pt-5 pb-4 border-b border-border flex-shrink-0">
               <div className="flex items-center gap-3">
-                <img src="/static/logo.png" alt="MKC" className="w-10 h-10 object-contain" />
+                {isPhotos ? (
+                  <SecureMark size={40} />
+                ) : (
+                  <img src="/static/logo.png" alt="MKC" className="w-10 h-10 object-contain" />
+                )}
                 <div>
-                  <div className="text-ink font-bold text-sm">MKC</div>
-                  <div className="text-muted text-[10px] uppercase tracking-widest">Collection</div>
+                  <div className="text-ink font-bold text-sm">{isPhotos ? 'Private Photos' : 'MKC'}</div>
+                  <div className="text-muted text-[10px] uppercase tracking-widest">{isPhotos ? 'Secure share' : 'Collection'}</div>
                 </div>
               </div>
               <button onClick={() => setMobileOpen(false)} className="text-muted hover:text-ink p-1">
@@ -309,7 +325,7 @@ export function Sidebar() {
                 </svg>
               </button>
             </div>
-            {tenantPicker(true)}
+            {!isPhotos && tenantPicker(true)}
             {navContent(() => setMobileOpen(false))}
             {userSection(true)}
           </aside>
@@ -325,25 +341,29 @@ export function Sidebar() {
       >
         {collapsed ? (
           <div className="flex flex-col items-center pt-4 pb-3 border-b border-border flex-shrink-0 gap-1.5">
-            <img src="/static/logo.png" alt="MKC" className="w-10 h-10 object-contain" />
-            <span className="text-gold text-xs font-bold tracking-widest">MKC</span>
+            {isPhotos ? <SecureMark size={40} /> : <img src="/static/logo.png" alt="MKC" className="w-10 h-10 object-contain" />}
+            <span className="text-gold text-xs font-bold tracking-widest">{isPhotos ? 'Photos' : 'MKC'}</span>
             <button onClick={toggle} title="Expand sidebar" className="text-muted hover:text-ink transition-colors p-1 rounded-md hover:bg-border/30">
               <IconChevronRight />
             </button>
           </div>
         ) : (
           <div className="relative flex flex-col items-center px-4 pt-6 pb-4 border-b border-border flex-shrink-0 gap-2">
-            <img src="/static/logo.png" alt="MKC Logo" className="w-24 h-24 object-contain" />
+            {isPhotos ? (
+              <SecureMark size={88} />
+            ) : (
+              <img src="/static/logo.png" alt="MKC Logo" className="w-24 h-24 object-contain" />
+            )}
             <div className="text-center">
-              <div className="text-ink font-bold text-sm leading-tight tracking-wide">Montana Knife Company</div>
-              <div className="text-muted text-xs tracking-widest uppercase mt-0.5">Collection</div>
+              <div className="text-ink font-bold text-sm leading-tight tracking-wide">{isPhotos ? 'Private Photos' : 'Montana Knife Company'}</div>
+              <div className="text-muted text-xs tracking-widest uppercase mt-0.5">{isPhotos ? 'Secure share' : 'Collection'}</div>
             </div>
             <button onClick={toggle} title="Collapse sidebar" className="absolute top-3 right-3 text-muted hover:text-ink transition-colors p-1 rounded-md hover:bg-border/30">
               <IconChevronLeft />
             </button>
           </div>
         )}
-        {tenantPicker(!collapsed)}
+        {!isPhotos && tenantPicker(!collapsed)}
         {navContent()}
         {userSection(!collapsed)}
       </aside>

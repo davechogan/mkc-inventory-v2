@@ -6,6 +6,7 @@ files. Upload and view are separate email allowlists:
 
 - ``PRIVATE_PHOTOS_UPLOAD_EMAILS`` — comma-separated, may upload and delete own
 - ``PRIVATE_PHOTOS_VIEW_EMAILS`` — comma-separated, may list and open the viewer
+- ``PRIVATE_PHOTOS_ADMIN_EMAILS`` — comma-separated, may view, download, and delete any photo
 
 The HTTP layer serves only re-encoded JPEGs. Originals stay on disk so an
 iPhone HEIC can be kept without being sent to the browser. Display and
@@ -20,6 +21,7 @@ import os
 import re
 import sqlite3
 import uuid
+import zipfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -39,6 +41,7 @@ except ImportError:  # pragma: no cover - production installs the extra
 
 MAX_UPLOAD_BYTES = 40 * 1024 * 1024
 MAX_FILES_PER_REQUEST = 8
+MAX_BULK_PHOTOS = 100
 DISPLAY_MAX_EDGE = 2560
 THUMB_MAX_EDGE = 720
 _ID_RE = re.compile(r"^[a-f0-9]{32}$")
@@ -59,10 +62,15 @@ _FORMAT_SUFFIX = {
 
 @dataclass(frozen=True)
 class PhotoAccess:
-    """What the signed-in email is allowed to do. Both flags may be true."""
+    """What the signed-in email is allowed to do. Flags may be combined.
+
+    Admin includes view, plus download and delete of any photo. It does not
+    include upload.
+    """
 
     can_upload: bool
     can_view: bool
+    can_admin: bool
 
 
 def _email_set(env_name: str) -> set[str]:
@@ -71,13 +79,15 @@ def _email_set(env_name: str) -> set[str]:
 
 
 def photo_access_for_email(email: Optional[str]) -> PhotoAccess:
-    """Resolve upload/view from the env allowlists. Unknown emails get neither."""
+    """Resolve upload, view, and admin from the env allowlists."""
     if not email:
-        return PhotoAccess(can_upload=False, can_view=False)
+        return PhotoAccess(can_upload=False, can_view=False, can_admin=False)
     normalized = email.strip().lower()
+    can_admin = normalized in _email_set("PRIVATE_PHOTOS_ADMIN_EMAILS")
     return PhotoAccess(
         can_upload=normalized in _email_set("PRIVATE_PHOTOS_UPLOAD_EMAILS"),
-        can_view=normalized in _email_set("PRIVATE_PHOTOS_VIEW_EMAILS"),
+        can_view=can_admin or normalized in _email_set("PRIVATE_PHOTOS_VIEW_EMAILS"),
+        can_admin=can_admin,
     )
 
 
@@ -271,12 +281,8 @@ def derivative_path(photo_id: str, kind: str) -> Optional[Path]:
     return path
 
 
-def delete_own_photo(conn: sqlite3.Connection, photo_id: str, email: str) -> bool:
-    """Delete a photo the email uploaded. Returns False when it is missing or not theirs."""
-    row = get_photo(conn, photo_id)
-    if row is None or row["uploaded_by_email"] != email.strip().lower():
-        return False
-    conn.execute("DELETE FROM private_photos WHERE id = ?", (photo_id,))
+def _unlink_stored(row: dict) -> None:
+    photo_id = row["id"]
     root = storage_root()
     suffix = row["original_suffix"] or ""
     if not re.fullmatch(r"\.[a-z0-9]{1,8}", suffix):
@@ -290,4 +296,69 @@ def delete_own_photo(conn: sqlite3.Connection, photo_id: str, email: str) -> boo
         resolved = path.resolve()
         if resolved.is_relative_to(root):
             resolved.unlink(missing_ok=True)
+
+
+def download_filename(row: dict) -> str:
+    """Stable JPEG name for a single download or a file inside a zip."""
+    taken = str(row["taken_at"] or row["created_at"] or "")[:10]
+    stamp = taken if len(taken) == 10 else "photo"
+    return f"{stamp}-{row['id'][:8]}.jpg"
+
+
+def _unique_ids(ids: list[str]) -> list[str]:
+    seen: set[str] = set()
+    unique: list[str] = []
+    for photo_id in ids:
+        if not isinstance(photo_id, str) or photo_id in seen or not is_photo_id(photo_id):
+            continue
+        seen.add(photo_id)
+        unique.append(photo_id)
+    if not unique:
+        raise ValueError("Choose at least one photo.")
+    if len(unique) > MAX_BULK_PHOTOS:
+        raise ValueError(f"Choose at most {MAX_BULK_PHOTOS} photos at a time.")
+    return unique
+
+
+def delete_photos(conn: sqlite3.Connection, ids: list[str]) -> int:
+    """Delete every existing photo in ``ids``. Returns how many were removed."""
+    removed = 0
+    for photo_id in _unique_ids(ids):
+        if delete_photo(conn, photo_id):
+            removed += 1
+    return removed
+
+
+def zip_display_jpegs(conn: sqlite3.Connection, ids: list[str]) -> bytes:
+    """Zip the viewer JPEGs for the requested ids. Missing ids are skipped."""
+    buf = io.BytesIO()
+    wrote = 0
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_STORED) as archive:
+        for photo_id in _unique_ids(ids):
+            row = get_photo(conn, photo_id)
+            path = derivative_path(photo_id, "display")
+            if row is None or path is None:
+                continue
+            archive.write(path, arcname=download_filename(row))
+            wrote += 1
+    if wrote == 0:
+        raise ValueError("Those photos could not be found.")
+    return buf.getvalue()
+
+
+def delete_photo(conn: sqlite3.Connection, photo_id: str) -> bool:
+    """Delete any photo by id. Returns False when it is missing."""
+    row = get_photo(conn, photo_id)
+    if row is None:
+        return False
+    conn.execute("DELETE FROM private_photos WHERE id = ?", (photo_id,))
+    _unlink_stored(row)
     return True
+
+
+def delete_own_photo(conn: sqlite3.Connection, photo_id: str, email: str) -> bool:
+    """Delete a photo the email uploaded. Returns False when it is missing or not theirs."""
+    row = get_photo(conn, photo_id)
+    if row is None or row["uploaded_by_email"] != email.strip().lower():
+        return False
+    return delete_photo(conn, photo_id)
