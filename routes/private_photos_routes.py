@@ -10,10 +10,11 @@ from __future__ import annotations
 import logging
 from typing import Callable
 
-from fastapi import APIRouter, Body, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Body, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 
 from auth import LOCAL_USER_COOKIE, get_current_user, is_local_access, is_local_session
+from private_chat import list_chat, mark_chat_read, post_chat_message
 from private_photos import (
     MAX_FILES_PER_REQUEST,
     MAX_UPLOAD_BYTES,
@@ -25,9 +26,14 @@ from private_photos import (
     download_filename,
     get_photo,
     ingest_photo,
+    list_deleted,
     list_photos,
+    notify_chat_message,
+    notify_uploads,
     photo_access_for_email,
     playback_file,
+    restore_photos,
+    set_photo_caption,
     zip_selected_files,
 )
 
@@ -55,6 +61,14 @@ def create_private_photos_router(*, get_conn: Callable) -> APIRouter:
             raise HTTPException(status_code=401, detail="Sign in required.")
         return email
 
+    def _require_chat(request: Request) -> str:
+        """Chat is for anyone who can upload or view. Strangers are refused."""
+        email = _require_email(request)
+        access = photo_access_for_email(email)
+        if not access.can_upload and not access.can_view:
+            raise HTTPException(status_code=403, detail="You cannot use this chat.")
+        return email
+
     @router.get("/access")
     def photo_access(request: Request):
         """Flags for the current user. Unauthenticated callers get both false."""
@@ -62,6 +76,7 @@ def create_private_photos_router(*, get_conn: Callable) -> APIRouter:
         access = photo_access_for_email(email)
         return {
             "authenticated": email is not None,
+            "email": email,
             "can_upload": access.can_upload,
             "can_view": access.can_view,
             "can_admin": access.can_admin,
@@ -87,6 +102,7 @@ def create_private_photos_router(*, get_conn: Callable) -> APIRouter:
         response = JSONResponse(
             {
                 "authenticated": True,
+                "email": email,
                 "can_upload": access.can_upload,
                 "can_view": access.can_view,
                 "can_admin": access.can_admin,
@@ -118,8 +134,14 @@ def create_private_photos_router(*, get_conn: Callable) -> APIRouter:
         """``all`` requires view. ``mine`` requires upload and returns only that email."""
         email = _require_email(request)
         access = photo_access_for_email(email)
-        if scope not in {"auto", "all", "mine", "received"}:
+        if scope not in {"auto", "all", "mine", "received", "deleted"}:
             raise HTTPException(status_code=400, detail="Unknown scope.")
+        if scope == "deleted":
+            if not access.can_admin:
+                raise HTTPException(status_code=403, detail="You cannot view deleted files.")
+            with get_conn() as conn:
+                photos = list_deleted(conn)
+            return {"photos": photos}
         if scope == "received":
             if not access.can_view:
                 raise HTTPException(status_code=403, detail="You cannot view these files.")
@@ -139,12 +161,46 @@ def create_private_photos_router(*, get_conn: Callable) -> APIRouter:
             photos = list_photos(conn, email=email)
         return {"photos": photos}
 
+    @router.get("/chat")
+    def chat_list(request: Request):
+        """The shared thread and how many messages from the other person are unread."""
+        email = _require_chat(request)
+        with get_conn() as conn:
+            return list_chat(conn, email=email)
+
+    @router.post("/chat")
+    def chat_post(request: Request, payload: dict = Body(...)):
+        """Save one text message, then tell the other person's phone if a key is set."""
+        email = _require_chat(request)
+        raw = payload.get("body") if isinstance(payload, dict) else None
+        if not isinstance(raw, str):
+            raise HTTPException(status_code=400, detail="Write a message first.")
+        try:
+            with get_conn() as conn:
+                message = post_chat_message(conn, email=email, body=raw)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        notify_chat_message(email, message["body"])
+        return message
+
+    @router.post("/chat/read")
+    def chat_read(request: Request):
+        """The open thread has been seen. Clears the unread dot for this person."""
+        email = _require_chat(request)
+        with get_conn() as conn:
+            unread = mark_chat_read(conn, email)
+        return {"unread": unread}
+
     @router.post("")
     async def photos_upload(
         request: Request,
         files: list[UploadFile] = File(...),
+        captions: list[str] | None = Form(default=None),
     ):
-        """Accept one or more photos. HEIC from iPhone Photos is converted for viewing."""
+        """Accept one or more photos. HEIC from iPhone Photos is converted for viewing.
+
+        ``captions`` lines up with ``files``. Missing entries mean no caption.
+        """
         email = _require_email(request)
         if not photo_access_for_email(email).can_upload:
             raise HTTPException(status_code=403, detail="You cannot upload photos.")
@@ -155,16 +211,22 @@ def create_private_photos_router(*, get_conn: Callable) -> APIRouter:
                 status_code=400,
                 detail=f"Send at most {MAX_FILES_PER_REQUEST} photos at a time.",
             )
+        caption_lines = list(captions or [])
+        if len(caption_lines) > len(files):
+            raise HTTPException(status_code=400, detail="Each file can have one caption.")
 
         uploaded: list[dict] = []
         errors: list[dict] = []
         with get_conn() as conn:
-            for upload in files:
+            for index, upload in enumerate(files):
                 name = upload.filename or "photo"
+                caption = caption_lines[index] if index < len(caption_lines) else None
                 try:
                     data = await _read_limited(upload, MAX_UPLOAD_BYTES)
                     uploaded.append(
-                        ingest_photo(conn, email=email, filename=name, data=data)
+                        ingest_photo(
+                            conn, email=email, filename=name, data=data, caption=caption,
+                        )
                     )
                 except HTTPException as exc:
                     errors.append({"filename": name, "detail": str(exc.detail)})
@@ -177,6 +239,7 @@ def create_private_photos_router(*, get_conn: Callable) -> APIRouter:
                     await upload.close()
         if not uploaded and errors:
             raise HTTPException(status_code=400, detail=errors[0]["detail"])
+        notify_uploads(email, uploaded)
         return {"uploaded": uploaded, "errors": errors}
 
     @router.post("/bulk-delete")
@@ -187,10 +250,44 @@ def create_private_photos_router(*, get_conn: Callable) -> APIRouter:
             raise HTTPException(status_code=403, detail="You cannot remove these photos.")
         try:
             with get_conn() as conn:
-                deleted = delete_photos(conn, _bulk_ids(payload))
+                deleted = delete_photos(conn, _bulk_ids(payload), deleted_by=email)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"deleted": deleted}
+
+    @router.post("/restore")
+    def photos_restore(request: Request, payload: dict = Body(...)):
+        """Put selected deleted files back in the galleries. Admin only. The window is 30 days."""
+        email = _require_email(request)
+        if not photo_access_for_email(email).can_admin:
+            raise HTTPException(status_code=403, detail="You cannot restore these files.")
+        try:
+            with get_conn() as conn:
+                restored = restore_photos(conn, _bulk_ids(payload))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"restored": restored}
+
+    @router.patch("/{photo_id}/caption")
+    def photo_caption(photo_id: str, request: Request, payload: dict = Body(...)):
+        """Set or clear the caption. The uploader and an admin may change it."""
+        email = _require_email(request)
+        access = photo_access_for_email(email)
+        raw = payload.get("caption") if isinstance(payload, dict) else None
+        if not isinstance(raw, str):
+            raise HTTPException(status_code=400, detail="Caption must be text.")
+        try:
+            with get_conn() as conn:
+                updated = set_photo_caption(
+                    conn, photo_id, raw, email=email, is_admin=access.can_admin,
+                )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        if updated is None:
+            raise HTTPException(status_code=404, detail="Photo not found.")
+        return updated
 
     @router.post("/bulk-download")
     def photos_bulk_download(request: Request, payload: dict = Body(...)):
@@ -218,6 +315,7 @@ def create_private_photos_router(*, get_conn: Callable) -> APIRouter:
         email = _require_email(request)
         with get_conn() as conn:
             row = get_photo(conn, photo_id)
+        _require_visible(email, row)
         _require_see_thumb(email, row)
         return _jpeg_file(photo_id, "thumbs")
 
@@ -229,8 +327,7 @@ def create_private_photos_router(*, get_conn: Callable) -> APIRouter:
             raise HTTPException(status_code=403, detail="You cannot view these photos.")
         with get_conn() as conn:
             row = get_photo(conn, photo_id)
-        if row is None:
-            raise HTTPException(status_code=404, detail="Photo not found.")
+        _require_visible(email, row)
         return _jpeg_file(photo_id, "display")
 
     @router.get("/{photo_id}/download")
@@ -241,8 +338,7 @@ def create_private_photos_router(*, get_conn: Callable) -> APIRouter:
             raise HTTPException(status_code=403, detail="You cannot download these photos.")
         with get_conn() as conn:
             row = get_photo(conn, photo_id)
-        if row is None:
-            raise HTTPException(status_code=404, detail="Photo not found.")
+        _require_visible(email, row)
         return _playback_response(row, download_name=download_filename(row))
 
     @router.get("/{photo_id}/media")
@@ -253,7 +349,8 @@ def create_private_photos_router(*, get_conn: Callable) -> APIRouter:
             raise HTTPException(status_code=403, detail="You cannot view these files.")
         with get_conn() as conn:
             row = get_photo(conn, photo_id)
-        if row is None or (row["media_kind"] or "photo") == "photo":
+        _require_visible(email, row)
+        if (row["media_kind"] or "photo") == "photo":
             raise HTTPException(status_code=404, detail="File not found.")
         return _playback_response(row)
 
@@ -266,7 +363,7 @@ def create_private_photos_router(*, get_conn: Callable) -> APIRouter:
             raise HTTPException(status_code=403, detail="You cannot remove these photos.")
         with get_conn() as conn:
             if access.can_admin:
-                removed = delete_photo(conn, photo_id)
+                removed = delete_photo(conn, photo_id, deleted_by=email)
             else:
                 removed = delete_own_photo(conn, photo_id, email)
         if not removed:
@@ -274,6 +371,12 @@ def create_private_photos_router(*, get_conn: Callable) -> APIRouter:
         return Response(status_code=204)
 
     return router
+
+
+def _require_visible(email: str, row) -> None:
+    """Deleted files stay available to an admin for the retention window only."""
+    if row is None or (row["deleted_at"] and not photo_access_for_email(email).can_admin):
+        raise HTTPException(status_code=404, detail="Photo not found.")
 
 
 def _require_see_thumb(email: str, row) -> None:

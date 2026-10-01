@@ -6,7 +6,9 @@ files. Upload and view are separate email allowlists:
 
 - ``PRIVATE_PHOTOS_UPLOAD_EMAILS`` — comma-separated, may upload and delete own
 - ``PRIVATE_PHOTOS_VIEW_EMAILS`` — comma-separated, may list and open the viewer
-- ``PRIVATE_PHOTOS_ADMIN_EMAILS`` — comma-separated, may view, download, and delete any photo
+- ``PRIVATE_PHOTOS_ADMIN_EMAILS`` — comma-separated, may view, download, delete, and restore any photo
+
+A delete hides the file for ``RETENTION_DAYS`` days. The original, display JPEG, and thumbnail stay on disk. An admin can restore it during that window. After the window, the row and the files are removed.
 
 The HTTP layer serves only re-encoded JPEGs. Originals stay on disk so an
 iPhone HEIC can be kept without being sent to the browser. Display and
@@ -20,16 +22,39 @@ import logging
 import os
 import re
 import sqlite3
+import urllib.parse
+import urllib.request
 import uuid
 import zipfile
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 logger = logging.getLogger("mkc_app.private_photos")
+
+# Accidental deletes stay recoverable for this long, then the files are removed.
+RETENTION_DAYS = 30
+# One short caption per file, shown in the gallery and the full-size view.
+CAPTION_MAX_LENGTH = 500
+
+_PUSHOVER_URL = "https://api.pushover.net/1/messages.json"
+_SENDER_NAMES = {
+    "natalyashapran1@gmail.com": "Natalya",
+    "davechogan@gmail.com": "Dave",
+}
+# Whose Pushover user key lives in which env var. A blank value means no phone notice.
+_PUSHOVER_KEY_ENV = {
+    "davechogan@gmail.com": "PUSHOVER_USER_KEY",
+    "natalyashapran1@gmail.com": "PUSHOVER_NATALYA_USER_KEY",
+}
+_KIND_WORDS = {
+    "photo": ("photo", "photos"),
+    "video": ("video", "videos"),
+    "audio": ("voice recording", "voice recordings"),
+}
 
 try:
     import pillow_heif
@@ -144,6 +169,100 @@ def photo_access_for_email(email: Optional[str]) -> PhotoAccess:
         can_view=can_admin or can_upload or normalized in _email_set("PRIVATE_PHOTOS_VIEW_EMAILS"),
         can_admin=can_admin,
     )
+
+
+def _sender_name(email: str) -> str:
+    normalized = email.strip().lower()
+    return _SENDER_NAMES.get(normalized, normalized)
+
+
+def _upload_phrase(uploaded: list[dict]) -> str:
+    counts = {"photo": 0, "video": 0, "audio": 0}
+    for item in uploaded:
+        kind = item.get("media_kind") or "photo"
+        if kind not in counts:
+            kind = "photo"
+        counts[kind] += 1
+    parts: list[str] = []
+    for kind in ("photo", "video", "audio"):
+        count = counts[kind]
+        if not count:
+            continue
+        singular, plural = _KIND_WORDS[kind]
+        parts.append(f"{count} {singular if count == 1 else plural}")
+    if not parts:
+        return "a file"
+    if len(parts) == 1:
+        return parts[0]
+    if len(parts) == 2:
+        return f"{parts[0]} and {parts[1]}"
+    return ", ".join(parts[:-1]) + ", and " + parts[-1]
+
+
+def display_name(email: str) -> str:
+    """Short name for a known person. Anyone else is shown as their email."""
+    return _sender_name(email)
+
+
+def pushover_user_key(email: str) -> str:
+    """That person's Pushover user key, or empty when it has not been set."""
+    env_name = _PUSHOVER_KEY_ENV.get(email.strip().lower())
+    if not env_name:
+        return ""
+    return (os.environ.get(env_name) or "").strip()
+
+
+def _deliver_pushover(*, user_key: str, message: str, url: str, url_title: str) -> None:
+    """Post one Pushover notice. Missing config or a network error is ignored."""
+    token = (os.environ.get("PUSHOVER_API_TOKEN") or "").strip()
+    if not token or not user_key or not message:
+        return
+    body = urllib.parse.urlencode(
+        {
+            "token": token,
+            "user": user_key,
+            "title": "Private Photos",
+            "message": message,
+            "url": url,
+            "url_title": url_title,
+        }
+    ).encode()
+    try:
+        request = urllib.request.Request(_PUSHOVER_URL, data=body, method="POST")
+        with urllib.request.urlopen(request, timeout=8) as response:
+            response.read()
+    except Exception:
+        logger.warning("Pushover notification failed")
+
+
+def notify_uploads(email: str, uploaded: list[dict]) -> None:
+    """Tell Dave's phone about a successful upload. Missing config or a Pushover error does not fail the upload."""
+    if not uploaded:
+        return
+    _deliver_pushover(
+        user_key=(os.environ.get("PUSHOVER_USER_KEY") or "").strip(),
+        message=f"{_sender_name(email)} sent {_upload_phrase(uploaded)}.",
+        url="https://inventory.davechogan.com/photos",
+        url_title="Open photos",
+    )
+
+
+def notify_chat_message(sender_email: str, body: str) -> None:
+    """Tell the other person's phone. The sender is not notified, and a blank key is skipped."""
+    sender = sender_email.strip().lower()
+    preview = " ".join(body.split())
+    if len(preview) > 140:
+        preview = preview[:137].rstrip() + "..."
+    message = f"{_sender_name(sender)}: {preview}"
+    for email in _PUSHOVER_KEY_ENV:
+        if email == sender:
+            continue
+        _deliver_pushover(
+            user_key=pushover_user_key(email),
+            message=message,
+            url="https://inventory.davechogan.com/photos?chat=1",
+            url_title="Open chat",
+        )
 
 
 def storage_root() -> Path:
@@ -274,13 +393,14 @@ def _insert_row(
     taken: Optional[str],
     email: str,
     media_kind: str,
+    caption: Optional[str],
 ) -> None:
     conn.execute(
         """
         INSERT INTO private_photos (
             id, original_name, original_suffix, byte_size, width, height,
-            taken_at, uploaded_by_email, media_kind
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            taken_at, uploaded_by_email, media_kind, caption
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             photo_id,
@@ -292,8 +412,21 @@ def _insert_row(
             taken,
             email.strip().lower(),
             media_kind,
+            caption,
         ),
     )
+
+
+def normalize_caption(value: Optional[str]) -> Optional[str]:
+    """Blank captions are stored as missing. Extra whitespace is collapsed."""
+    if value is None:
+        return None
+    text = " ".join(value.split())
+    if not text:
+        return None
+    if len(text) > CAPTION_MAX_LENGTH:
+        raise ValueError(f"Caption must be {CAPTION_MAX_LENGTH} characters or fewer.")
+    return text
 
 
 def ingest_photo(
@@ -302,10 +435,12 @@ def ingest_photo(
     email: str,
     filename: Optional[str],
     data: bytes,
+    caption: Optional[str] = None,
 ) -> dict:
     """Store one upload and return its public metadata. Raises ValueError on bad input."""
     if not data:
         raise ValueError("That file is empty.")
+    stored_caption = normalize_caption(caption)
     kind, suffix = _classify(filename, data)
     if len(data) > _MEDIA_LIMITS[kind]:
         raise ValueError(f"That file is too large (max {_MEDIA_LIMIT_LABELS[kind]}).")
@@ -333,6 +468,7 @@ def ingest_photo(
             _insert_row(
                 conn, photo_id=photo_id, filename=filename, suffix=suffix, data=data,
                 width=width, height=height, taken=taken, email=email, media_kind="photo",
+                caption=stored_caption,
             )
         else:
             original_path = root / "originals" / f"{photo_id}{suffix}"
@@ -341,6 +477,7 @@ def ingest_photo(
             _insert_row(
                 conn, photo_id=photo_id, filename=filename, suffix=suffix, data=data,
                 width=None, height=None, taken=None, email=email, media_kind=kind,
+                caption=stored_caption,
             )
     except Exception:
         for path in written:
@@ -363,7 +500,36 @@ def _public_row(row: sqlite3.Row | dict) -> dict:
         "created_at": created,
         "uploaded_by_email": row["uploaded_by_email"],
         "media_kind": row["media_kind"] or "photo",
+        "deleted_at": _iso_utc(row["deleted_at"]),
+        "caption": row["caption"] or None,
     }
+
+
+def set_photo_caption(
+    conn: sqlite3.Connection,
+    photo_id: str,
+    caption: Optional[str],
+    *,
+    email: str,
+    is_admin: bool,
+) -> Optional[dict]:
+    """Set or clear a caption. The uploader and an admin may change it.
+
+    Returns None when the file is missing or deleted. Raises PermissionError
+    when the caller cannot change it, and ValueError when the text is too long.
+    """
+    row = get_photo(conn, photo_id)
+    if row is None or row["deleted_at"]:
+        return None
+    owner = row["uploaded_by_email"] == email.strip().lower()
+    if not is_admin and not owner:
+        raise PermissionError("You cannot caption this file.")
+    conn.execute(
+        "UPDATE private_photos SET caption = ? WHERE id = ?",
+        (normalize_caption(caption), photo_id),
+    )
+    updated = get_photo(conn, photo_id)
+    return _public_row(updated) if updated is not None else None
 
 
 def list_photos(
@@ -379,11 +545,12 @@ def list_photos(
     """
     if email and exclude_email:
         raise ValueError("Choose one gallery.")
+    purge_expired(conn)
     if email:
         rows = conn.execute(
             """
             SELECT * FROM private_photos
-            WHERE uploaded_by_email = ?
+            WHERE uploaded_by_email = ? AND deleted_at IS NULL
             ORDER BY COALESCE(taken_at, created_at) DESC, created_at DESC
             """,
             (email.strip().lower(),),
@@ -392,7 +559,7 @@ def list_photos(
         rows = conn.execute(
             """
             SELECT * FROM private_photos
-            WHERE uploaded_by_email != ?
+            WHERE uploaded_by_email != ? AND deleted_at IS NULL
             ORDER BY COALESCE(taken_at, created_at) DESC, created_at DESC
             """,
             (exclude_email.strip().lower(),),
@@ -401,6 +568,7 @@ def list_photos(
         rows = conn.execute(
             """
             SELECT * FROM private_photos
+            WHERE deleted_at IS NULL
             ORDER BY COALESCE(taken_at, created_at) DESC, created_at DESC
             """
         ).fetchall()
@@ -425,6 +593,50 @@ def derivative_path(photo_id: str, kind: str) -> Optional[Path]:
     if not path.is_relative_to(root) or not path.is_file():
         return None
     return path
+
+
+def _utc_stamp(moment: Optional[datetime] = None) -> str:
+    """UTC timestamp in the same form SQLite ``CURRENT_TIMESTAMP`` writes."""
+    when = moment or datetime.now(timezone.utc)
+    return when.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _iso_utc(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    text = value.strip().replace(" ", "T")
+    if text.endswith("Z") or "+" in text[10:]:
+        return text
+    return f"{text}Z"
+
+
+def purge_expired(conn: sqlite3.Connection) -> int:
+    """Remove files whose delete window has ended. Safe to call on every read."""
+    cutoff = _utc_stamp(datetime.now(timezone.utc) - timedelta(days=RETENTION_DAYS))
+    rows = conn.execute(
+        """
+        SELECT * FROM private_photos
+        WHERE deleted_at IS NOT NULL AND deleted_at <= ?
+        """,
+        (cutoff,),
+    ).fetchall()
+    for row in rows:
+        _unlink_stored(row)
+        conn.execute("DELETE FROM private_photos WHERE id = ?", (row["id"],))
+    return len(rows)
+
+
+def list_deleted(conn: sqlite3.Connection) -> list[dict]:
+    """Newest deletion first. Expired rows are removed before the list is built."""
+    purge_expired(conn)
+    rows = conn.execute(
+        """
+        SELECT * FROM private_photos
+        WHERE deleted_at IS NOT NULL
+        ORDER BY deleted_at DESC
+        """
+    ).fetchall()
+    return [_public_row(row) for row in rows]
 
 
 def _unlink_stored(row: dict) -> None:
@@ -499,13 +711,31 @@ def _unique_ids(ids: list[str]) -> list[str]:
     return unique
 
 
-def delete_photos(conn: sqlite3.Connection, ids: list[str]) -> int:
-    """Delete every existing photo in ``ids``. Returns how many were removed."""
+def delete_photos(conn: sqlite3.Connection, ids: list[str], *, deleted_by: str) -> int:
+    """Hide every active photo in ``ids``. Returns how many were newly hidden."""
     removed = 0
     for photo_id in _unique_ids(ids):
-        if delete_photo(conn, photo_id):
+        if delete_photo(conn, photo_id, deleted_by=deleted_by):
             removed += 1
     return removed
+
+
+def restore_photos(conn: sqlite3.Connection, ids: list[str]) -> int:
+    """Put deleted photos back in the galleries. Expired ones are purged instead."""
+    purge_expired(conn)
+    restored = 0
+    for photo_id in _unique_ids(ids):
+        before = conn.total_changes
+        conn.execute(
+            """
+            UPDATE private_photos
+            SET deleted_at = NULL, deleted_by_email = NULL
+            WHERE id = ? AND deleted_at IS NOT NULL
+            """,
+            (photo_id,),
+        )
+        restored += conn.total_changes - before
+    return restored
 
 
 def zip_selected_files(conn: sqlite3.Connection, ids: list[str]) -> bytes:
@@ -526,19 +756,28 @@ def zip_selected_files(conn: sqlite3.Connection, ids: list[str]) -> bytes:
     return buf.getvalue()
 
 
-def delete_photo(conn: sqlite3.Connection, photo_id: str) -> bool:
-    """Delete any photo by id. Returns False when it is missing."""
+def delete_photo(conn: sqlite3.Connection, photo_id: str, *, deleted_by: str) -> bool:
+    """Hide a photo for the retention window. Returns False when it is missing or already hidden.
+
+    The original and the JPEG derivatives stay on disk until ``purge_expired``.
+    """
     row = get_photo(conn, photo_id)
-    if row is None:
+    if row is None or row["deleted_at"]:
         return False
-    conn.execute("DELETE FROM private_photos WHERE id = ?", (photo_id,))
-    _unlink_stored(row)
+    conn.execute(
+        """
+        UPDATE private_photos
+        SET deleted_at = ?, deleted_by_email = ?
+        WHERE id = ? AND deleted_at IS NULL
+        """,
+        (_utc_stamp(), deleted_by.strip().lower(), photo_id),
+    )
     return True
 
 
 def delete_own_photo(conn: sqlite3.Connection, photo_id: str, email: str) -> bool:
-    """Delete a photo the email uploaded. Returns False when it is missing or not theirs."""
+    """Hide a photo the email uploaded. Returns False when it is missing or not theirs."""
     row = get_photo(conn, photo_id)
     if row is None or row["uploaded_by_email"] != email.strip().lower():
         return False
-    return delete_photo(conn, photo_id)
+    return delete_photo(conn, photo_id, deleted_by=email)

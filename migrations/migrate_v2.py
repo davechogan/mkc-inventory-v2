@@ -135,7 +135,10 @@ def ensure_v2_exclusive_schema(conn: sqlite3.Connection) -> None:
             taken_at            TEXT,
             uploaded_by_email   TEXT NOT NULL,
             created_at          TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            media_kind          TEXT NOT NULL DEFAULT 'photo'
+            media_kind          TEXT NOT NULL DEFAULT 'photo',
+            deleted_at          TEXT,
+            deleted_by_email    TEXT,
+            caption             TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_private_photos_uploader
             ON private_photos (uploaded_by_email, created_at);
@@ -145,6 +148,33 @@ def ensure_v2_exclusive_schema(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE private_photos ADD COLUMN media_kind TEXT NOT NULL DEFAULT 'photo'"
         )
+    # Soft delete. Files stay on disk until deleted_at is older than the retention window.
+    if not column_exists(conn, "private_photos", "deleted_at"):
+        conn.execute("ALTER TABLE private_photos ADD COLUMN deleted_at TEXT")
+    if not column_exists(conn, "private_photos", "deleted_by_email"):
+        conn.execute("ALTER TABLE private_photos ADD COLUMN deleted_by_email TEXT")
+    if not column_exists(conn, "private_photos", "caption"):
+        conn.execute("ALTER TABLE private_photos ADD COLUMN caption TEXT")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_private_photos_deleted ON private_photos (deleted_at)"
+    )
+    # One private thread for the people on the photo allowlists.
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS private_chat_messages (
+            id              TEXT PRIMARY KEY,
+            sender_email    TEXT NOT NULL,
+            body            TEXT NOT NULL,
+            created_at      TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_private_chat_messages_created
+            ON private_chat_messages (created_at);
+        CREATE TABLE IF NOT EXISTS private_chat_reads (
+            email           TEXT PRIMARY KEY,
+            last_read_at    TEXT NOT NULL
+        );
+        """
+    )
 
     # Migration: ensure the "default" tenant exists and existing users are members
     _ensure_default_tenant(conn)

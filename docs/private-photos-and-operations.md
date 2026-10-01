@@ -12,7 +12,7 @@ Two permissions are separate:
 |---|---|---|---|
 | Upload | `PRIVATE_PHOTOS_UPLOAD_EMAILS` | `natalyashapran1@gmail.com,davechogan@gmail.com` | Choose from Photos, preview, send, and a Sent list with Remove |
 | View | `PRIVATE_PHOTOS_VIEW_EMAILS` | `davechogan@gmail.com` | Gallery grouped by month, full-screen viewer, swipe and arrow keys |
-| Admin | `PRIVATE_PHOTOS_ADMIN_EMAILS` | `davechogan@gmail.com` | View, plus Download and Delete on the open photo, and bulk select on the gallery. Delete removes the photos for everyone. Admin does not grant upload by itself. |
+| Admin | `PRIVATE_PHOTOS_ADMIN_EMAILS` | `davechogan@gmail.com` | View, plus Download and Delete on the open photo, bulk select, and a Deleted tab. Delete hides a file for 30 days. Restore puts it back. After 30 days the original, display JPEG, and thumbnail are removed. Admin does not grant upload by itself. |
 
 Someone with both permissions sees the uploader and the gallery. Someone with neither sees “This page is private.” A signed-out visitor is asked to sign in.
 
@@ -22,53 +22,55 @@ The page is `https://inventory.davechogan.com/photos`. On an iPhone, **Choose fr
 
 Code:
 
-- `private_photos.py` — allowlists, disk storage, JPEG derivatives
+- `private_photos.py` — allowlists, disk storage, JPEG derivatives, Pushover
+- `private_chat.py` — the one text thread
 - `routes/private_photos_routes.py` — HTTP API
-- `frontend/src/pages/Photos.tsx` — upload and viewer UI
-- `migrations/migrate_v2.py` — `private_photos` table
+- `frontend/src/pages/Photos.tsx` — upload, viewer, and chat UI
+- `migrations/migrate_v2.py` — `private_photos`, `private_chat_messages`, `private_chat_reads`
 
 API, all under `/api/private-photos`:
 
 - `GET /access` — whether the signed-in email can upload or view
 - `GET /?scope=all` — viewer gallery
 - `GET /?scope=mine` — photos that email uploaded
-- `POST /` — upload (field name `files`)
+- `GET /chat` — the thread, newest 200 messages, and the unread count
+- `POST /chat` — send `{"body": "..."}` (2000 characters). Notifies the other phone when that user key is set.
+- `POST /chat/read` — mark the thread read for the signed-in person
+- `POST /` — upload (field name `files`, optional `captions` in the same order)
+- `PATCH /{id}/caption` — uploader or admin sets `{"caption": "..."}`; blank clears it
 - `GET /{id}/thumb` — thumbnail
 - `GET /{id}/image` — viewer image (view permission only)
 - `GET /{id}/download` — admin downloads the viewer JPEG
 - `POST /bulk-download` — admin downloads the selected viewer JPEGs as `private-photos.zip` (`{"ids": [...]}`, at most 100)
-- `POST /bulk-delete` — admin removes the selected photos
-- `DELETE /{id}` — admin removes any photo; an uploader removes only their own
+- `GET /?scope=deleted` — admin lists files hidden in the last 30 days
+- `POST /bulk-delete` — admin hides the selected photos for 30 days
+- `POST /restore` — admin puts the selected hidden photos back (`{"ids": [...]}`)
+- `DELETE /{id}` — admin hides any photo; an uploader hides only their own. Files stay on disk for 30 days.
 
 ## How the Mac Studio process runs
 
-launchd owns the app. The agent is `com.mkc.inventory`, loaded from:
+launchd owns the app. After a reboot the job that starts is the system daemon `com.dhogan.inventoryApp`, loaded from:
 
 ```text
-/Users/dhogan/Library/LaunchAgents/com.mkc.inventory.plist
+/Library/LaunchDaemons/com.dhogan.inventoryApp.plist
 ```
 
-It listens on port 8008, logs to `/tmp/mkc_app.log`, and KeepAlive is on. Killing the process makes launchd start it again. That is why `./scripts/run.sh` on the Mac Studio reports “Port 8008 still in use after 5 seconds.”
+That file is the one to edit. An older user agent, `~/Library/LaunchAgents/com.mkc.inventory.plist`, is not what comes up at boot. Photo permissions and Pushover keys have to be in the daemon plist or the photos page loads as “This page is private.”
 
-`./scripts/run.sh` is for a machine where launchd is not supervising the app. On the Mac Studio, start and stop through launchctl.
+It listens on port 8008, logs to `/Users/dhogan/Library/Logs/inventoryApp.log`, and KeepAlive is on. Killing the process makes launchd start it again. That is why `./scripts/run.sh` on the Mac Studio reports “Port 8008 still in use after 5 seconds.”
+
+`./scripts/run.sh` is for a machine where launchd is not supervising the app. On the Mac Studio, start and stop through launchctl. These commands need sudo because the job is a system daemon.
 
 ### Restart (also how config changes take effect)
 
 SSH to the Studio, or use a Terminal window there:
 
 ```bash
-launchctl bootout "gui/$(id -u)/com.mkc.inventory"
-launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.mkc.inventory.plist
+sudo launchctl bootout system/com.dhogan.inventoryApp
+sudo launchctl bootstrap system /Library/LaunchDaemons/com.dhogan.inventoryApp.plist
 ```
 
 `kickstart` reuses the already loaded job and will not see plist edits. `bootout` then `bootstrap` reads the file again.
-
-If `bootstrap` prints `Bootstrap failed: 5: Input/output error`, the service was unloaded and the first load lost a race. Run bootstrap once more:
-
-```bash
-launchctl enable "gui/$(id -u)/com.mkc.inventory"
-launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.mkc.inventory.plist
-```
 
 Confirm:
 
@@ -82,20 +84,20 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8008/photos
 ### Stop
 
 ```bash
-launchctl bootout "gui/$(id -u)/com.mkc.inventory"
+sudo launchctl bootout system/com.dhogan.inventoryApp
 ```
 
-The agent stays disabled until bootstrap. Rebooting the Mac Studio will load it again because the plist is in `~/Library/LaunchAgents` and `RunAtLoad` is true.
+The daemon stays unloaded until bootstrap. Rebooting the Mac Studio starts it again because the plist is in `/Library/LaunchDaemons` and `RunAtLoad` is true.
 
 ### See that the email lists are actually loaded
 
 ```bash
-launchctl print "gui/$(id -u)/com.mkc.inventory" | grep PRIVATE_PHOTOS
+sudo launchctl print system/com.dhogan.inventoryApp | grep PRIVATE_PHOTOS
 ```
 
 ## Configure who can upload and view
 
-Edit the LaunchAgent plist on the Mac Studio, not `invapp_v2/scripts/com.mkc.inventory.plist`. A code deploy overwrites the copy inside the app folder.
+Edit `/Library/LaunchDaemons/com.dhogan.inventoryApp.plist` on the Mac Studio. A code deploy does not replace that file. Do not edit `invapp_v2/scripts/com.mkc.inventory.plist` or expect the older user agent to apply after a reboot.
 
 Inside `EnvironmentVariables`:
 
@@ -106,9 +108,17 @@ Inside `EnvironmentVariables`:
 <string>davechogan@gmail.com</string>
 <key>PRIVATE_PHOTOS_ADMIN_EMAILS</key>
 <string>davechogan@gmail.com</string>
+<key>PUSHOVER_USER_KEY</key>
+<string>the user key from the Pushover dashboard</string>
+<key>PUSHOVER_NATALYA_USER_KEY</key>
+<string></string>
+<key>PUSHOVER_API_TOKEN</key>
+<string>the application token from pushover.net/apps</string>
 ```
 
 Values are comma-separated and matched to the Cloudflare login email, lowercased. After editing, restart with `bootout` and `bootstrap` above.
+
+When `PUSHOVER_USER_KEY` and `PUSHOVER_API_TOKEN` are set, each successful upload sends one notice to Dave's phone: who sent it, and how many photos, videos, and voice recordings. The message links to the photos page. `PUSHOVER_NATALYA_USER_KEY` is her Pushover user key for chat notices. Leave it empty until that key exists. A chat message notifies the other person only, and a blank key skips that phone. If a key is missing, or Pushover does not answer, the upload or the chat message still succeeds. Do not put those keys in the git repo.
 
 A photo-only account that has no knife collection is sent to `/photos` instead of the “create a collection” screen.
 
