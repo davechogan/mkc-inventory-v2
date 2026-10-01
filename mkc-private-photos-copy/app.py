@@ -73,10 +73,10 @@ app.add_middleware(CloudflareAccessMiddleware)
 from routes.photos_routes import create_photos_router
 app.include_router(create_photos_router(get_conn=get_conn))
 
-# Static files
-if STATIC_DIR.exists() and (STATIC_DIR / "dist").exists():
-    app.mount("/static", StaticFiles(directory=str(STATIC_DIR / "dist")), name="static")
-    logger.info("Mounted static files from %s", STATIC_DIR / "dist")
+# Static files - mount assets directory so Vite-built JS/CSS are served at /assets/*
+if STATIC_DIR.exists() and (STATIC_DIR / "dist" / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=str(STATIC_DIR / "dist" / "assets")), name="assets")
+    logger.info("Mounted static assets from %s", STATIC_DIR / "dist" / "assets")
 
 # Root page - serves Photos SPA
 @app.get("/")
