@@ -22,7 +22,7 @@ interface PhotoAccess {
   local_session: boolean;
 }
 
-/** Dave's controls and messages are slate. Natalya's are blush. Inventory gold stays elsewhere. */
+/** Dave's messages are blue and Nataliia's are blush for both people. Page controls use the signed-in person's color. */
 const PERSON_ACCENT: Record<string, string> = {
   'davechogan@gmail.com': '#9bb4c8',
   'natalyashapran1@gmail.com': '#e7b5a8',

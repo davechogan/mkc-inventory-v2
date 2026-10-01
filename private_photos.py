@@ -42,7 +42,7 @@ CAPTION_MAX_LENGTH = 500
 
 _PUSHOVER_URL = "https://api.pushover.net/1/messages.json"
 _SENDER_NAMES = {
-    "natalyashapran1@gmail.com": "Natalya",
+    "natalyashapran1@gmail.com": "Nataliia",
     "davechogan@gmail.com": "Dave",
 }
 # Whose Pushover user key lives in which env var. A blank value means no phone notice.

@@ -376,7 +376,7 @@ def test_pushover_message_names_natalya_and_counts_each_kind(monkeypatch):
         [{"media_kind": "photo"}, {"media_kind": "photo"}, {"media_kind": "video"}, {"media_kind": "audio"}],
     )
     assert captured
-    assert "Natalya sent 2 photos, 1 video, and 1 voice recording." in captured[0]
+    assert "Nataliia sent 2 photos, 1 video, and 1 voice recording." in captured[0]
     private_photos.notify_uploads("stranger@example.com", [])
     assert len(captured) == 1
 
@@ -695,7 +695,7 @@ def test_chat_notifies_only_the_other_phone_and_skips_a_blank_key(photos: TestCl
     assert sent.status_code == 200, sent.text
     assert len(calls) == 1
     assert "user=dave-key" in calls[0]
-    assert "Natalya: On my way" in calls[0]
+    assert "Nataliia: On my way" in calls[0]
     assert "url=https://inventory.davechogan.com/photos?chat=1" in calls[0]
     assert "Open chat" in calls[0]
 
@@ -730,6 +730,14 @@ def test_chat_notifies_only_the_other_phone_and_skips_a_blank_key(photos: TestCl
         json={"body": "Still here"},
     )
     assert still.status_code == 200, still.text
-    thread = photos.get("/api/private-photos/chat", headers=_as("davechogan@gmail.com")).json()
-    assert thread["title"] == "Natalya"
-    assert [row["body"] for row in thread["messages"]][-1] == "Still here"
+    dave_thread = photos.get("/api/private-photos/chat", headers=_as("davechogan@gmail.com")).json()
+    nataliia_thread = photos.get("/api/private-photos/chat", headers=_as("natalyashapran1@gmail.com")).json()
+    assert dave_thread["title"] == "Nataliia"
+    assert nataliia_thread["title"] == "Dave"
+    assert [row["body"] for row in dave_thread["messages"]][-1] == "Still here"
+    # Both people see the same sender on each message, which is what the bubble color uses.
+    dave_senders = [(row["sender_email"], row["sender_name"]) for row in dave_thread["messages"]]
+    nataliia_senders = [(row["sender_email"], row["sender_name"]) for row in nataliia_thread["messages"]]
+    assert dave_senders == nataliia_senders
+    assert ("natalyashapran1@gmail.com", "Nataliia") in dave_senders
+    assert ("davechogan@gmail.com", "Dave") in dave_senders
